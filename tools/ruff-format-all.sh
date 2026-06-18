@@ -23,8 +23,9 @@ py312=(
 )
 
 # Format imports: https://github.com/astral-sh/ruff/issues/8232
-uv run --frozen --group format-scripts --isolated ruff check --select I --fix --target-version py312 "${py312[@]:?}"
-uv run --frozen --group format-scripts ruff check --select I --fix --exclude "${py312[@]:?}" "${excludes[@]:?}"
+# uv run --frozen --group format-scripts --isolated ruff check --select I --fix --target-version py312 "${py312[@]:?}"
+# uv run --frozen --group format-scripts ruff check --select I --fix --exclude "${py312[@]:?}" "${excludes[@]:?}"
+uv run --frozen --group format-scripts ruff check --select I --fix "${excludes[@]:?}"
 
 # Format Python scripts.
 uv run --frozen --group format-scripts ruff format "${excludes[@]:?}"

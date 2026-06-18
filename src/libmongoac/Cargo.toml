@@ -1,0 +1,39 @@
+[package]
+name = "mongoac"
+edition = "2024"
+rust-version = "1.85"
+
+[dependencies]
+async-ffi = "0.5.0"
+mongodb = {
+  version = "3.7.0",
+  features = [
+    # BSON.
+    "bson-3",
+
+    # Connection.
+    "dns-resolver", # Default.
+    "rustls-tls", # Default.
+
+    # Authentication.
+    "aws-auth",
+    "azure-oidc",
+    "gcp-oidc",
+
+    # Compression.
+    "snappy-compression",
+    "zlib-compression",
+    "zstd-compression",
+  ],
+}
+tokio = "1.52.0"
+serde = {
+  version = "1",
+  features = ["derive"],
+}
+num_enum = "0.7"
+strum = { version = "0.28", features = ["derive"] }
+parking_lot = "0.12"
+
+[build-dependencies]
+cbindgen = "0.29"
