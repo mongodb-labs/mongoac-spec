@@ -15,7 +15,7 @@ This project is the initial design specification for the new MongoDB Async C Dri
 |---|---|---|
 | **Async C Driver** | mongoac | This library (providing an async C API). |
 | **C Driver** | mongoc | The existing synchronous C library. |
-| **BSON Library** | bson | The existing C BSON library. |
+| **BSON Library** | bson2 | The existing C BSON library (v2). |
 | **mongo-c-driver** | N/A | The repository providing bson, mongoc, and mongoac. |
 | **Rust Driver** | Rust API | The `mongodb` crate. |
 | **Rust FFI** | mongoac | This library (translating the Rust API into a C FFI). |
@@ -78,21 +78,20 @@ CMake defines two `INTERFACE` targets:
 CMake invokes `cargo rustc` via `add_custom_command`, passing `--target-dir` inside the CMake binary directory.
 The custom target directory is essential to support both single-config and multi-config CMake generators.
 
-CMake and pkg-config package config files are generated using the same CMake generation pattern as in the C++ Driver
-  (`mongoacConfig.cmake.in`, `mongoac.pc.in`), but result in the same installation directory structure as the C Driver.
-This is to avoid unnecessarily coupling mongo-c-driver specific CMake configuration patterns to mongoac.
-
-
-The mongoac library links with bson2 at **link-time only** — bson C symbols are not embedded in the output.
-The shared library records `NEEDED libbson2.so.2` for runtime resolution; the static library leaves `bson_*`
-symbols unresolved. CMake interface targets (`mongoac::shared`, `mongoac::static`) transitively link
-`bson::shared` or `bson::static` so CMake consumers resolve the dependency automatically.
-
 The environment variables `MONGOAC_BSON_SHARED_LIBRARY_FILENAME` and `MONGOAC_BSON_STATIC_LIBRARY_FILENAME` direct
-  `build.rs` to link with the appropriate bson library, as detected and configured by the parent CMake build
-  configuration.
+  `build.rs` to use the correct linkage with the appropriate bson library, as detected and configured by the parent
+  CMake build configuration (for consistency with how mongoc links with bson, or how mongocxx links with bsoncxx).
 `build.rs` then emits `cargo:rustc-link-lib=bson2` (shared) or `cargo:rustc-link-lib=static=bson2` (static)
-accordingly.
+  accordingly.
+
+The mongoac library links with bson2 at **link-time only**.
+No bson2 library symbols are embedded in either the mongoac shared or static libraries: all symbols remain unresolved.
+However, the shared library correctly records the bson2 link dependency (e.g. via ELF `NEEDED`) to inform linkers where
+  and how to find the bson2 library.
+
+To avoid unnecessarily coupling mongo-c-driver specific CMake configuration patterns to mongoac, CMake and pkg-config
+  package config files are generated using the same CMake generation pattern as in the C++ Driver
+  (`mongoacConfig.cmake.in`, `mongoac.pc.in`), but result in the same installation directory structure as the C Driver.
 
 > [!NOTE]
 > Unlike mongoc, mongoac does **not** require `ENABLE_STATIC` to build tests.
