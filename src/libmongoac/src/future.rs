@@ -1,7 +1,9 @@
 use crate::client_session::ClientSessionT;
 use crate::cursor::CursorT;
 use crate::runtime::RuntimeT;
-use crate::{safe_as_mut, safe_as_ref_with_error, safe_drop, safe_optional_error_as_mut};
+use crate::{
+    safe_as_mut, safe_as_ref_with_error, safe_drop, safe_error, safe_optional_error_as_mut,
+};
 
 use crate::error::{ErrorCodeT, ErrorT};
 use crate::private::bson::{BsonT, bson_t};
@@ -237,23 +239,8 @@ pub extern "C" fn mongoac_future_get_bson(future: *mut FutureT, error: *mut Erro
     let error = safe_optional_error_as_mut!(error);
     let future = safe_as_ref_with_error!(future, error);
 
-    match future.value().get_bson() {
-        Ok(doc) => match BsonT::try_from(doc) {
-            Ok(doc) => doc.into(),
-            Err(err) => {
-                if let Some(e) = error {
-                    *e = err.into();
-                }
-                Default::default()
-            }
-        },
-        Err(err) => {
-            if let Some(e) = error {
-                *e = err.into();
-            }
-            Default::default()
-        }
-    }
+    let doc = safe_error!(future.value().get_bson(), error);
+    safe_error!(BsonT::try_from(doc), error).into()
 }
 
 #[unsafe(no_mangle)]
@@ -261,15 +248,8 @@ pub extern "C" fn mongoac_future_get_void(future: *mut FutureT, error: *mut Erro
     let error = safe_optional_error_as_mut!(error);
     let future = safe_as_ref_with_error!(future, error);
 
-    match future.value().get_void() {
-        Ok(()) => true,
-        Err(err) => {
-            if let Some(e) = error {
-                *e = err.into();
-            }
-            false
-        }
-    }
+    safe_error!(future.value().get_void(), error);
+    true
 }
 
 #[unsafe(no_mangle)]
