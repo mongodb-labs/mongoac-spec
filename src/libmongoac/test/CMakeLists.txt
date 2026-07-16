@@ -17,7 +17,11 @@ else ()
 endif ()
 
 add_executable (test-libmongoac)
-target_link_libraries (test-libmongoac PRIVATE "${mongoac_target}" "${bson_target}" Catch2::Catch2WithMain)
+target_link_libraries (test-libmongoac PRIVATE "${mongoac_target}" "$<LINK_ONLY:${bson_target}>" Catch2::Catch2WithMain)
+target_include_directories (test-libmongoac
+  # Suppress compiler warnings emitted by bson headers.
+  SYSTEM PRIVATE "$<TARGET_PROPERTY:${bson_target},INTERFACE_INCLUDE_DIRECTORIES>"
+)
 
 file (GLOB_RECURSE test_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
 target_sources (test-libmongoac PRIVATE ${test_sources})
