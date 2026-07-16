@@ -1,5 +1,5 @@
 use crate::{
-    safe_as_mut, safe_as_mut_with_error, safe_drop, safe_optional_const_bson,
+    safe_as_mut, safe_as_mut_with_error, safe_drop, safe_error, safe_optional_const_bson,
     safe_optional_error_as_mut,
 };
 
@@ -112,9 +112,5 @@ pub extern "C" fn mongoac_client_options_set_server_api(
     let options = safe_as_mut_with_error!(options, error);
     let api = safe_optional_const_bson!(api);
 
-    if let Err(err) = options.set_server_api(api) {
-        if let Some(e) = error {
-            *e = ErrorT::from_bson(&err);
-        }
-    }
+    safe_error!(options.set_server_api(api), error);
 }

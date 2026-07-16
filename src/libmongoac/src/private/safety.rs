@@ -189,3 +189,18 @@ macro_rules! safe_optional_const_bson {
         }
     }};
 }
+
+#[macro_export]
+macro_rules! safe_error {
+    ($expr:expr, $error:expr) => {
+        match $expr {
+            Ok(val) => val,
+            Err(err) => {
+                if let Some(e) = $error {
+                    *e = ::std::convert::Into::into(err);
+                }
+                return ::std::default::Default::default();
+            }
+        }
+    };
+}

@@ -1,10 +1,10 @@
-use crate::error::{ErrorCodeT, ErrorT};
+use crate::error::ErrorT;
 use crate::future::FutureT;
 use crate::private::bson::bson_t;
 use crate::runtime::RuntimeT;
 use crate::{
-    safe_as_ref_with_error, safe_cstr_from_ptr_with_error, safe_drop, safe_optional_const_bson,
-    safe_optional_error_as_mut, spawn,
+    safe_as_ref_with_error, safe_cstr_from_ptr_with_error, safe_drop, safe_error,
+    safe_optional_const_bson, safe_optional_error_as_mut, spawn,
 };
 
 use crate::client::ClientT;
@@ -74,39 +74,15 @@ pub extern "C" fn mongoac_client_get_database(
     error: *mut ErrorT,
 ) -> *mut DatabaseT {
     let error = safe_optional_error_as_mut!(error);
-    let client = match unsafe { client.as_ref() } {
-        Some(c) => c,
-        None => {
-            if let Some(e) = error {
-                *e = ErrorT::from_mongoac(ErrorCodeT::InvalidArgument, "client is null");
-            }
-            return Default::default();
-        }
-    };
+    let client = safe_as_ref_with_error!(client, error);
     let name = safe_cstr_from_ptr_with_error!(name, error);
     let options = safe_optional_const_bson!(options);
     let opts_doc: Option<Document> = match options {
-        Some(ref bson) => match Document::try_from(bson) {
-            Ok(doc) => Some(doc),
-            Err(err) => {
-                if let Some(e) = error {
-                    *e = ErrorT::from_bson(&err);
-                }
-                return Default::default();
-            }
-        },
+        Some(ref bson) => Some(safe_error!(Document::try_from(bson), error)),
         None => None,
     };
 
-    let db = match DatabaseT::new(client, name, opts_doc) {
-        Ok(db) => db,
-        Err(err) => {
-            if let Some(e) = error {
-                *e = ErrorT::from_bson(&err);
-            }
-            return Default::default();
-        }
-    };
+    let db = safe_error!(DatabaseT::new(client, name, opts_doc), error);
     Box::into_raw(Box::new(db))
 }
 
@@ -127,23 +103,11 @@ pub extern "C" fn mongoac_database_create_collection_async(
     let name = safe_cstr_from_ptr_with_error!(name, error);
     let options = safe_optional_const_bson!(options);
     let create_opts: Option<mongodb::options::CreateCollectionOptions> = match options {
-        Some(ref bson) => match Document::try_from(bson) {
-            Ok(doc) => match mongodb::bson::deserialize_from_document(doc) {
-                Ok(opts) => Some(opts),
-                Err(err) => {
-                    if let Some(e) = error {
-                        *e = ErrorT::from_bson(&err);
-                    }
-                    return Default::default();
-                }
-            },
-            Err(err) => {
-                if let Some(e) = error {
-                    *e = ErrorT::from_bson(&err);
-                }
-                return Default::default();
-            }
-        },
+        Some(ref bson) => {
+            let doc = safe_error!(Document::try_from(bson), error);
+            let opts = safe_error!(mongodb::bson::deserialize_from_document(doc), error);
+            Some(opts)
+        }
         None => None,
     };
 

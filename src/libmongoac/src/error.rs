@@ -90,17 +90,23 @@ impl ErrorT {
     pub fn clear(&mut self) {
         *self = Self::None;
     }
+}
 
-    pub(crate) fn from_bson(err: &mongodb::bson::error::Error) -> Self {
+impl From<mongodb::bson::error::Error> for ErrorT {
+    fn from(err: mongodb::bson::error::Error) -> Self {
         let msg = CString::new(err.to_string()).ok();
-        Self::Bson(err.clone(), msg)
+        Self::Bson(err, msg)
     }
+}
 
-    pub fn from_mongodb(err: &mongodb::error::Error) -> Self {
+impl From<mongodb::error::Error> for ErrorT {
+    fn from(err: mongodb::error::Error) -> Self {
         let msg = CString::new(err.to_string()).ok();
-        Self::Rust(err.clone(), msg)
+        Self::Rust(err, msg)
     }
+}
 
+impl ErrorT {
     pub fn category(&self) -> ErrorCategoryT {
         match self {
             Self::None => ErrorCategoryT::None,

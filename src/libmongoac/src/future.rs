@@ -79,7 +79,7 @@ impl<T: Send + 'static> FutureValueType<T> {
 
         match self.result.as_ref() {
             Some(Ok(val)) => Ok(val),
-            Some(Err(err)) => Err(ErrorT::from_mongodb(err)),
+            Some(Err(err)) => Err(err.clone().into()),
             None => Err(ErrorT::from_mongoac(
                 ErrorCodeT::RuntimeError,
                 "future is not ready",
@@ -147,45 +147,50 @@ impl FutureValue {
     pub(crate) fn get_int32(&self) -> Result<&i32, ErrorT> {
         match self {
             Self::Int32(fvt) => fvt.result(),
-            _ => Err(ErrorT::from_mongodb(&mongodb::error::Error::custom(
+            _ => Err(mongodb::error::Error::custom(
                 "called mismatched int32 getter on non-int32 future",
-            ))),
+            )
+            .into()),
         }
     }
 
     pub(crate) fn get_bson(&self) -> Result<&mongodb::bson::Document, ErrorT> {
         match self {
             Self::Bson(fvt) => fvt.result(),
-            _ => Err(ErrorT::from_mongodb(&mongodb::error::Error::custom(
+            _ => Err(mongodb::error::Error::custom(
                 "called mismatched bson getter on non-bson future",
-            ))),
+            )
+            .into()),
         }
     }
 
     pub(crate) fn get_client_session(&self) -> Result<&ClientSessionT, ErrorT> {
         match self {
             Self::ClientSession(fvt) => fvt.result(),
-            _ => Err(ErrorT::from_mongodb(&mongodb::error::Error::custom(
+            _ => Err(mongodb::error::Error::custom(
                 "called mismatched client session getter on non-client session future",
-            ))),
+            )
+            .into()),
         }
     }
 
     pub(crate) fn get_void(&self) -> Result<&(), ErrorT> {
         match self {
             Self::Void(fvt) => fvt.result(),
-            _ => Err(ErrorT::from_mongodb(&mongodb::error::Error::custom(
+            _ => Err(mongodb::error::Error::custom(
                 "called mismatched void getter on non-void future",
-            ))),
+            )
+            .into()),
         }
     }
 
     pub(crate) fn get_cursor(&self) -> Result<&CursorT, ErrorT> {
         match self {
             Self::Cursor(fvt) => fvt.result(),
-            _ => Err(ErrorT::from_mongodb(&mongodb::error::Error::custom(
+            _ => Err(mongodb::error::Error::custom(
                 "called mismatched cursor getter on non-cursor future",
-            ))),
+            )
+            .into()),
         }
     }
 }
@@ -220,7 +225,7 @@ pub extern "C" fn mongoac_future_get_int32(future: *mut FutureT, error: *mut Err
         Ok(val) => *val,
         Err(err) => {
             if let Some(e) = error {
-                *e = err;
+                *e = err.into();
             }
             Default::default()
         }
@@ -237,14 +242,14 @@ pub extern "C" fn mongoac_future_get_bson(future: *mut FutureT, error: *mut Erro
             Ok(doc) => doc.into(),
             Err(err) => {
                 if let Some(e) = error {
-                    *e = ErrorT::from_bson(&err);
+                    *e = err.into();
                 }
                 Default::default()
             }
         },
         Err(err) => {
             if let Some(e) = error {
-                *e = err;
+                *e = err.into();
             }
             Default::default()
         }
@@ -260,7 +265,7 @@ pub extern "C" fn mongoac_future_get_void(future: *mut FutureT, error: *mut Erro
         Ok(()) => true,
         Err(err) => {
             if let Some(e) = error {
-                *e = err;
+                *e = err.into();
             }
             false
         }

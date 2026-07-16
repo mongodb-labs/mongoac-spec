@@ -3,7 +3,8 @@ use crate::future::{FutureT, FutureValue, FutureValueType};
 use crate::private::bson::{BsonT, bson_t};
 use crate::runtime::RuntimeT;
 use crate::{
-    safe_as_mut_with_error, safe_as_ref_with_error, safe_drop, safe_optional_error_as_mut,
+    safe_as_mut_with_error, safe_as_ref_with_error, safe_drop, safe_error,
+    safe_optional_error_as_mut,
 };
 
 use mongodb::ClientSession;
@@ -108,16 +109,7 @@ pub extern "C" fn mongoac_cursor_next(cursor: *mut CursorT, error: *mut ErrorT) 
     let error = safe_optional_error_as_mut!(error);
     let cursor = safe_as_mut_with_error!(cursor, error);
 
-    match cursor.next_sync() {
-        Ok(true) => true,
-        Ok(false) => false,
-        Err(err) => {
-            if let Some(e) = error {
-                *e = ErrorT::from_mongodb(&err);
-            }
-            false
-        }
-    }
+    safe_error!(cursor.next_sync(), error)
 }
 
 #[unsafe(no_mangle)]
@@ -140,15 +132,7 @@ pub extern "C" fn mongoac_cursor_get_document(
     let error = safe_optional_error_as_mut!(error);
     let cursor = safe_as_ref_with_error!(cursor, error);
 
-    match cursor.get_document_bson() {
-        Ok(bson) => bson.into(),
-        Err(err) => {
-            if let Some(e) = error {
-                *e = ErrorT::from_bson(&err);
-            }
-            std::ptr::null_mut()
-        }
-    }
+    safe_error!(cursor.get_document_bson(), error).into()
 }
 
 #[unsafe(no_mangle)]
@@ -158,14 +142,6 @@ pub extern "C" fn mongoac_future_get_cursor(
 ) -> *mut CursorT {
     let error = safe_optional_error_as_mut!(error);
     let future = safe_as_ref_with_error!(future, error);
-
-    match future.value().get_cursor() {
-        Ok(cursor) => Box::into_raw(Box::new(cursor.clone())),
-        Err(err) => {
-            if let Some(e) = error {
-                *e = err;
-            }
-            std::ptr::null_mut()
-        }
-    }
+    let cursor = safe_error!(future.value().get_cursor(), error);
+    Box::into_raw(Box::new(cursor.clone()))
 }
