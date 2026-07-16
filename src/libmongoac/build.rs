@@ -159,8 +159,8 @@ fn generate_crate_header(path: &Path, src_root: &Path, include_dir: &Path) {
         .and_then(|s| s.to_str())
         .expect("invalid UTF-8");
 
-    const SKIP_MODULES: &[&str] = &["lib", "mod", "version"];
-    if SKIP_MODULES.contains(&file_stem) {
+    const SKIP_CARGO_HEADERS: &[&str] = &["lib", "mod", "version"];
+    if SKIP_CARGO_HEADERS.contains(&file_stem) {
         return;
     }
 

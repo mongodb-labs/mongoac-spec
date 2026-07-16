@@ -77,8 +77,6 @@ else ()
    set (MONGOAC_VERSION_PRERELEASE "")
 endif ()
 
-# Generate version.h from template so that C code can query the same
-# version that CMake reports.
 configure_file (
    "${CMAKE_CURRENT_SOURCE_DIR}/include/mongoac/version.h.in"
    "${include_dir}/mongoac/version.h"
@@ -108,9 +106,13 @@ set (cargo_dependencies
 set (cargo_headers "")
 foreach (source IN LISTS cargo_sources)
   cmake_path (GET source FILENAME filename)
-  if (filename STREQUAL "lib.rs" OR filename STREQUAL "mod.rs")
+
+  # Keep synchronized with `SKIP_CARGO_HEADERS` list in build.rs.
+  set (skip_cargo_headers "lib.rs" "mod.rs" "version.rs")
+  if (filename IN_LIST skip_cargo_headers)
     continue ()
   endif ()
+
   cmake_path (RELATIVE_PATH source BASE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/src" OUTPUT_VARIABLE header)
   if (header MATCHES "^private/")
     continue ()
