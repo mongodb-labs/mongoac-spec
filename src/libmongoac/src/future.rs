@@ -223,15 +223,7 @@ pub extern "C" fn mongoac_future_get_int32(future: *mut FutureT, error: *mut Err
     let error = safe_optional_error_as_mut!(error);
     let future = safe_as_ref_with_error!(future, error);
 
-    match future.value().get_int32() {
-        Ok(val) => *val,
-        Err(err) => {
-            if let Some(e) = error {
-                *e = err.into();
-            }
-            Default::default()
-        }
-    }
+    *safe_error!(future.value().get_int32(), error)
 }
 
 #[unsafe(no_mangle)]
