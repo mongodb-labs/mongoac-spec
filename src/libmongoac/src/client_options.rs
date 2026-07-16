@@ -1,10 +1,10 @@
 use crate::{
-    safe_as_mut, safe_as_mut_with_error, safe_drop, safe_optional_as_ref,
+    safe_as_mut, safe_as_mut_with_error, safe_drop, safe_optional_const_bson,
     safe_optional_error_as_mut,
 };
 
 use crate::error::ErrorT;
-use crate::private::bson::bson_t;
+use crate::private::bson::{ConstBsonT, bson_t};
 use mongodb::options::ServerApi;
 
 #[derive(Default)]
@@ -29,11 +29,11 @@ impl ClientOptionsT {
 
     pub fn set_server_api(
         &mut self,
-        api: Option<&bson_t>,
+        api: Option<ConstBsonT>,
     ) -> Result<(), mongodb::bson::error::Error> {
         match api {
-            Some(bson_ref) => {
-                let doc = mongodb::bson::Document::try_from(bson_ref)?;
+            Some(ref bson) => {
+                let doc = mongodb::bson::Document::try_from(bson)?;
                 let server_api = mongodb::bson::deserialize_from_document::<ServerApi>(doc)?;
                 self.server_api = Some(server_api);
                 Ok(())
@@ -110,7 +110,7 @@ pub extern "C" fn mongoac_client_options_set_server_api(
 ) {
     let error = safe_optional_error_as_mut!(error);
     let options = safe_as_mut_with_error!(options, error);
-    let api = safe_optional_as_ref!(api);
+    let api = safe_optional_const_bson!(api);
 
     if let Err(err) = options.set_server_api(api) {
         if let Some(e) = error {

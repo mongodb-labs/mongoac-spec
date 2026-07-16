@@ -104,11 +104,10 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
             "stdbool.h",
             "stdint.h",
         ],
-        "client_session" => includes!["mongoac/export.h"],
+        "client_session" => includes!["mongoac/export.h", "mongoac/future.h"],
         "error" => includes!["mongoac/export.h", "stdint.h"],
         "future" => includes![
             "mongoac/export.h",
-            "mongoac/client_session.h",
             "mongoac/error.h",
             "bson/bson_t.h",
             "stdint.h",

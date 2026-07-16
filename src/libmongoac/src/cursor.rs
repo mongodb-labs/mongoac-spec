@@ -10,6 +10,7 @@ use mongodb::ClientSession;
 use mongodb::bson::RawDocumentBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex as AsyncMutex;
+
 enum InnerCursor {
     Plain(mongodb::Cursor<RawDocumentBuf>),
     Session {
@@ -35,6 +36,7 @@ impl InnerCursor {
         }
     }
 }
+
 #[derive(Clone)]
 pub struct CursorT {
     inner: Arc<AsyncMutex<InnerCursor>>,
@@ -48,6 +50,7 @@ impl CursorT {
             runtime,
         }
     }
+
     pub(crate) fn new_with_session(
         cursor: mongodb::SessionCursor<RawDocumentBuf>,
         session: Arc<AsyncMutex<ClientSession>>,
@@ -58,10 +61,12 @@ impl CursorT {
             runtime,
         }
     }
+
     fn next_sync(&self) -> Result<bool, mongodb::error::Error> {
         self.runtime
             .block_on(async { self.inner.lock().await.advance().await })
     }
+
     fn next_async(&self) -> FutureT {
         let inner = self.inner.clone();
         let rt = self.runtime.clone();
@@ -83,13 +88,13 @@ impl CursorT {
             })),
         )
     }
-    fn get_document_bson(&self) -> Result<*mut bson_t, mongodb::bson::error::Error> {
+
+    fn get_document_bson(&self) -> Result<BsonT, mongodb::bson::error::Error> {
         let raw: Vec<u8> = self.runtime.block_on(async {
             let cursor = self.inner.lock().await;
             cursor.current().as_bytes().to_vec()
         });
-        let buf = mongodb::bson::RawDocumentBuf::from_bytes(raw)?;
-        Ok(BsonT::try_from(&buf)?.release())
+        BsonT::from_bytes(&raw)
     }
 }
 
@@ -136,7 +141,7 @@ pub extern "C" fn mongoac_cursor_get_document(
     let cursor = safe_as_ref_with_error!(cursor, error);
 
     match cursor.get_document_bson() {
-        Ok(ptr) => ptr,
+        Ok(bson) => bson.into(),
         Err(err) => {
             if let Some(e) = error {
                 *e = ErrorT::from_bson(&err);

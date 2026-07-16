@@ -1,14 +1,14 @@
 use crate::{
     safe_as_mut, safe_as_ref, safe_as_ref_with_error, safe_cstr_from_ptr_with_error, safe_drop,
-    safe_optional_as_mut, safe_optional_as_ref, safe_optional_cstr_from_ptr_with_error,
-    safe_optional_error_as_mut,
+    safe_optional_as_mut, safe_optional_as_ref, safe_optional_const_bson,
+    safe_optional_cstr_from_ptr_with_error, safe_optional_error_as_mut,
 };
 
 use crate::client_options::ClientOptionsT;
 use crate::client_session::ClientSessionT;
 use crate::error::ErrorT;
 use crate::future::FutureT;
-use crate::private::bson::bson_t;
+use crate::private::bson::{BsonT, ConstBsonT, bson_t};
 use crate::runtime::RuntimeT;
 use crate::spawn;
 use crate::version::{MONGOAC_BUILD_PLATFORM, MONGOAC_VERSION_FULL};
@@ -402,8 +402,8 @@ pub extern "C" fn mongoac_client_get_command_event(
     let client = safe_as_ref!(client);
 
     match client.get_command_event(index) {
-        Some(raw) => match bson_t::from_raw_document_buf(&raw) {
-            Ok(ptr) => ptr,
+        Some(raw) => match BsonT::try_from(&raw) {
+            Ok(doc) => doc.into(),
             Err(err) => {
                 if let Some(e) = error {
                     *e = ErrorT::from_bson(&err);
@@ -428,13 +428,13 @@ pub extern "C" fn mongoac_client_destroy(client: *mut ClientT) {
 }
 
 fn parse_session_options(
-    bson: *const bson_t,
+    bson: Option<ConstBsonT>,
 ) -> Result<Option<mongodb::options::SessionOptions>, ErrorT> {
-    let bson = match safe_optional_as_ref!(bson) {
+    let bson = match bson {
         Some(r) => r,
         None => return Ok(None),
     };
-    let doc = bson.to_document().map_err(|e| ErrorT::from_bson(&e))?;
+    let doc = Document::try_from(&bson).map_err(|e| ErrorT::from_bson(&e))?;
     let opts = mongodb::bson::deserialize_from_document(doc).map_err(|e| ErrorT::from_bson(&e))?;
     Ok(Some(opts))
 }
@@ -448,6 +448,7 @@ pub extern "C" fn mongoac_client_start_session_async(
     let error = safe_optional_error_as_mut!(error);
     let client = safe_as_ref_with_error!(client, error);
 
+    let options = safe_optional_const_bson!(options);
     let session_opts = match parse_session_options(options) {
         Ok(opts) => opts,
         Err(err) => {
@@ -471,6 +472,7 @@ pub extern "C" fn mongoac_client_start_session(
     let error = safe_optional_error_as_mut!(error);
     let client = safe_as_ref_with_error!(client, error);
 
+    let options = safe_optional_const_bson!(options);
     let session_opts = match parse_session_options(options) {
         Ok(opts) => opts,
         Err(err) => {
@@ -492,14 +494,9 @@ pub extern "C" fn mongoac_client_start_session(
     }
 }
 
-fn parse_options(bson: *const bson_t) -> Result<Option<ListDatabasesOptions>, ErrorT> {
-    let bson = match safe_optional_as_ref!(bson) {
-        Some(r) => r,
-        None => return Ok(None),
-    };
-    let doc = bson.to_document().map_err(|e| ErrorT::from_bson(&e))?;
-    let opts = mongodb::bson::deserialize_from_document(doc).map_err(|e| ErrorT::from_bson(&e))?;
-    Ok(Some(opts))
+fn parse_options(bson: &ConstBsonT) -> Result<ListDatabasesOptions, ErrorT> {
+    let doc = Document::try_from(bson).map_err(|e| ErrorT::from_bson(&e))?;
+    mongodb::bson::deserialize_from_document(doc).map_err(|e| ErrorT::from_bson(&e))
 }
 
 #[unsafe(no_mangle)]
@@ -512,11 +509,11 @@ pub extern "C" fn mongoac_client_list_databases_async(
     let error = safe_optional_error_as_mut!(error);
     let client = safe_as_ref_with_error!(client, error);
     let session = safe_optional_as_mut!(session);
-    let options = safe_optional_as_ref!(options);
+    let options = safe_optional_const_bson!(options);
 
     let future = match options {
-        Some(opts) => match parse_options(opts) {
-            Ok(opts) => client.list_databases_async(session, opts),
+        Some(ref opts) => match parse_options(opts) {
+            Ok(opts) => client.list_databases_async(session, Some(opts)),
             Err(err) => {
                 if let Some(e) = error {
                     *e = err;
@@ -540,11 +537,11 @@ pub extern "C" fn mongoac_client_list_databases(
     let error = safe_optional_error_as_mut!(error);
     let client = safe_as_ref_with_error!(client, error);
     let session = safe_optional_as_mut!(session);
-    let options = safe_optional_as_ref!(options);
+    let options = safe_optional_const_bson!(options);
 
     let opts = match options {
-        Some(opts) => match parse_options(opts) {
-            Ok(opts) => opts,
+        Some(ref opts) => match parse_options(opts) {
+            Ok(opts) => Some(opts),
             Err(err) => {
                 if let Some(e) = error {
                     *e = err;
@@ -556,8 +553,8 @@ pub extern "C" fn mongoac_client_list_databases(
     };
 
     match client.list_databases(session, opts) {
-        Ok(doc) => match bson_t::from_document(&doc) {
-            Ok(ptr) => ptr,
+        Ok(doc) => match BsonT::try_from(&doc) {
+            Ok(doc) => doc.into(),
             Err(err) => {
                 if let Some(e) = error {
                     *e = ErrorT::from_bson(&err);
@@ -584,11 +581,11 @@ pub extern "C" fn mongoac_client_list_database_names_async(
     let error = safe_optional_error_as_mut!(error);
     let client = safe_as_ref_with_error!(client, error);
     let session = safe_optional_as_mut!(session);
-    let options = safe_optional_as_ref!(options);
+    let options = safe_optional_const_bson!(options);
 
     let future = match options {
-        Some(opts) => match parse_options(opts) {
-            Ok(opts) => client.list_database_names_async(session, opts),
+        Some(ref opts) => match parse_options(opts) {
+            Ok(opts) => client.list_database_names_async(session, Some(opts)),
             Err(err) => {
                 if let Some(e) = error {
                     *e = err;
@@ -612,11 +609,11 @@ pub extern "C" fn mongoac_client_list_database_names(
     let error = safe_optional_error_as_mut!(error);
     let client = safe_as_ref_with_error!(client, error);
     let session = safe_optional_as_mut!(session);
-    let options = safe_optional_as_ref!(options);
+    let options = safe_optional_const_bson!(options);
 
     let opts = match options {
-        Some(opts) => match parse_options(opts) {
-            Ok(opts) => opts,
+        Some(ref opts) => match parse_options(opts) {
+            Ok(opts) => Some(opts),
             Err(err) => {
                 if let Some(e) = error {
                     *e = err;
@@ -628,8 +625,8 @@ pub extern "C" fn mongoac_client_list_database_names(
     };
 
     match client.list_database_names(session, opts) {
-        Ok(doc) => match bson_t::from_document(&doc) {
-            Ok(ptr) => ptr,
+        Ok(doc) => match BsonT::try_from(&doc) {
+            Ok(doc) => doc.into(),
             Err(err) => {
                 if let Some(e) = error {
                     *e = ErrorT::from_bson(&err);

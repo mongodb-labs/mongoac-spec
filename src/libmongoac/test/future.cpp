@@ -1,6 +1,7 @@
 #include <mongoac/future.h>
 
 #include <catch2/catch_test_macros.hpp>
+#include <mongoac/client_session.h>
 #include <mongoac/error.h>
 
 TEST_CASE("destroy", "[mongoac][future]")

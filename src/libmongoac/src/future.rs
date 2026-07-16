@@ -4,7 +4,7 @@ use crate::runtime::RuntimeT;
 use crate::{safe_as_mut, safe_as_ref_with_error, safe_drop, safe_optional_error_as_mut};
 
 use crate::error::{ErrorCodeT, ErrorT};
-use crate::private::bson::bson_t;
+use crate::private::bson::{BsonT, bson_t};
 
 use async_ffi::FfiFuture;
 
@@ -127,10 +127,10 @@ impl<T: Send + 'static> Pollable for FutureValueType<T> {
 
 pub(crate) enum FutureValue {
     Bson(FutureValueType<mongodb::bson::Document>),
-    Int32(FutureValueType<i32>),
     ClientSession(FutureValueType<ClientSessionT>),
-    Void(FutureValueType<()>),
     Cursor(FutureValueType<CursorT>),
+    Int32(FutureValueType<i32>),
+    Void(FutureValueType<()>),
 }
 
 impl Pollable for FutureValue {
@@ -233,8 +233,8 @@ pub extern "C" fn mongoac_future_get_bson(future: *mut FutureT, error: *mut Erro
     let future = safe_as_ref_with_error!(future, error);
 
     match future.value().get_bson() {
-        Ok(doc) => match bson_t::from_document(doc) {
-            Ok(ptr) => ptr,
+        Ok(doc) => match BsonT::try_from(doc) {
+            Ok(doc) => doc.into(),
             Err(err) => {
                 if let Some(e) = error {
                     *e = ErrorT::from_bson(&err);
@@ -242,25 +242,6 @@ pub extern "C" fn mongoac_future_get_bson(future: *mut FutureT, error: *mut Erro
                 Default::default()
             }
         },
-        Err(err) => {
-            if let Some(e) = error {
-                *e = err;
-            }
-            Default::default()
-        }
-    }
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn mongoac_future_get_client_session(
-    future: *mut FutureT,
-    error: *mut ErrorT,
-) -> *mut ClientSessionT {
-    let error = safe_optional_error_as_mut!(error);
-    let future = safe_as_ref_with_error!(future, error);
-
-    match future.value().get_client_session() {
-        Ok(session) => Box::into_raw(Box::new(session.clone())),
         Err(err) => {
             if let Some(e) = error {
                 *e = err;
