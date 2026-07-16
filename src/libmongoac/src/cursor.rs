@@ -1,7 +1,8 @@
 use crate::error::ErrorT;
-use crate::future::{FutureT, FutureValue, FutureValueType};
+use crate::future::FutureT;
 use crate::private::bson::{BsonT, bson_t};
 use crate::runtime::RuntimeT;
+use crate::spawn;
 use crate::{
     safe_as_mut_with_error, safe_as_ref_with_error, safe_drop, safe_error,
     safe_optional_error_as_mut,
@@ -70,23 +71,10 @@ impl CursorT {
 
     fn next_async(&self) -> FutureT {
         let inner = self.inner.clone();
-        let rt = self.runtime.clone();
-
-        let handle = rt.spawn(async move {
-            let advanced = inner.lock().await.advance().await?;
-            Ok::<_, mongodb::error::Error>(advanced)
-        });
-
-        FutureT::new(
-            rt,
-            FutureValue::Int32(FutureValueType::new(async move {
-                match handle.await {
-                    Ok(Ok(true)) => Ok(1),
-                    Ok(Ok(false)) => Ok(0),
-                    Ok(Err(e)) => Err(e),
-                    Err(e) => Err(mongodb::error::Error::custom(format!("{e}"))),
-                }
-            })),
+        spawn!(
+            self,
+            Bool,
+            async move { inner.lock().await.advance().await }
         )
     }
 

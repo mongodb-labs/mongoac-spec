@@ -11,6 +11,7 @@ use crate::private::bson::{BsonT, bson_t};
 use async_ffi::FfiFuture;
 
 use std::future::Future;
+use std::pin::pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 #[macro_export]
@@ -38,6 +39,7 @@ macro_rules! spawn {
 macro_rules! future_value_op {
     ($value:expr, $v:ident => $e:expr) => {
         match $value {
+            FutureValue::Bool($v) => $e,
             FutureValue::Bson($v) => $e,
             FutureValue::Int32($v) => $e,
             FutureValue::ClientSession($v) => $e,
@@ -53,7 +55,7 @@ trait Pollable {
 }
 
 pub(crate) struct FutureValueType<T> {
-    future: Option<std::pin::Pin<Box<FfiFuture<Result<T, mongodb::error::Error>>>>>,
+    future: FfiFuture<Result<T, mongodb::error::Error>>,
     result: Option<Result<T, mongodb::error::Error>>,
     ready: AtomicBool,
     polling: AtomicBool,
@@ -64,7 +66,7 @@ impl<T: Send + 'static> FutureValueType<T> {
         future: impl Future<Output = Result<T, mongodb::error::Error>> + Send + 'static,
     ) -> Self {
         Self {
-            future: Some(Box::pin(FfiFuture::new(future))),
+            future: FfiFuture::new(future),
             result: None,
             ready: AtomicBool::new(false),
             polling: AtomicBool::new(false),
@@ -72,20 +74,17 @@ impl<T: Send + 'static> FutureValueType<T> {
     }
 
     pub(crate) fn result(&self) -> Result<&T, ErrorT> {
-        if !self.ready.load(Ordering::Acquire) {
+        if !self.is_ready() {
             return Err(ErrorT::from_mongoac(
                 ErrorCodeT::RuntimeError,
                 "future is not ready",
             ));
         }
 
-        match self.result.as_ref() {
-            Some(Ok(val)) => Ok(val),
-            Some(Err(err)) => Err(err.clone().into()),
-            None => Err(ErrorT::from_mongoac(
-                ErrorCodeT::RuntimeError,
-                "future is not ready",
-            )),
+        // Invariant: `ready == true` -> `Some(result)`.
+        match self.result.as_ref().unwrap() {
+            Ok(val) => Ok(val),
+            Err(err) => Err(err.clone().into()),
         }
     }
 }
@@ -100,34 +99,34 @@ impl<T: Send + 'static> Pollable for FutureValueType<T> {
             return true;
         }
 
-        if self.polling.swap(true, Ordering::Acquire) {
-            return false;
+        if self
+            .polling
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            return self.ready.load(Ordering::Acquire);
         }
 
-        let ready = match self.future.as_mut() {
-            Some(f) => {
-                let waker = std::task::Waker::noop();
-                let mut ctx = std::task::Context::from_waker(&waker);
-
-                match std::pin::Pin::new(&mut *f).poll(&mut ctx) {
-                    std::task::Poll::Ready(val) => {
-                        self.result = Some(val);
-                        self.ready.store(true, Ordering::Release);
-                        true
-                    }
-                    std::task::Poll::Pending => false,
-                }
+        let is_ready = match pin!(&mut self.future)
+            .as_mut()
+            .poll(&mut std::task::Context::from_waker(std::task::Waker::noop()))
+        {
+            std::task::Poll::Ready(val) => {
+                self.result = Some(val);
+                self.ready.store(true, Ordering::Release);
+                true
             }
-            None => false,
+            std::task::Poll::Pending => false,
         };
 
         self.polling.store(false, Ordering::Release);
 
-        ready
+        is_ready
     }
 }
 
 pub(crate) enum FutureValue {
+    Bool(FutureValueType<bool>),
     Bson(FutureValueType<mongodb::bson::Document>),
     ClientSession(FutureValueType<ClientSessionT>),
     Cursor(FutureValueType<CursorT>),
@@ -146,6 +145,16 @@ impl Pollable for FutureValue {
 }
 
 impl FutureValue {
+    pub(crate) fn get_bool(&self) -> Result<&bool, ErrorT> {
+        match self {
+            Self::Bool(fvt) => fvt.result(),
+            _ => Err(mongodb::error::Error::custom(
+                "called mismatched bool getter on non-bool future",
+            )
+            .into()),
+        }
+    }
+
     pub(crate) fn get_int32(&self) -> Result<&i32, ErrorT> {
         match self {
             Self::Int32(fvt) => fvt.result(),
