@@ -308,15 +308,40 @@ impl ExampleT {
 
 #### BSON Library
 
-mongoac reuses the existing **libbson** `bson_t` for FFI BSON interchange. `private/bson.rs` defines a zero-sized opaque `#[repr(C)] struct bson_t` matching libbson's ABI, with internal helpers bridging `bson_t*` ↔ `mongodb::bson::Document`.
+The mongoac library deliberately reuses the existing BSON C library in its API.
 
-Every `bson_t*` passed into mongoac must contain a valid embedded BSON length. This is a **library-wide precondition**: all internal conversion paths read the embedded length and trust it exactly.
+Unfortunately, `unsafe` blocksc are required when invoking bson API (currently the only expected use of `unsafe` that
+  is not in Layer 1).
+A zero-sized opaque `bson_t` is required, as otherwise reimplementing the `bson_t` struct definition may lead to many
+  undesirable complications such as One Definition Rule violations, redefinitions errors in cbindgen-generated headers,
+  complex special-casing in `build.rs`, and more.
+Instead, `u32::from_le_bytes()` and `from_raw_parts()` are used to extract the length data member (due to the lack of
+  a `bson_get_len()` function); all other features are utilized using public C API functions.
+Accordingly, as a **library-wide precondition**, all `bson_t*` handled by mongoac MUST contain a valid embedded BSON
+  length.
+This precondition is the same as what is used by the new `bsoncxx::v1` API in the C++ Driver.
 
-**Ownership:** BSON access is either non-owning (borrowed via `bson_init_static`, caller must not `bson_destroy()`) for data stored internally (cursor iteration, event retrieval), or owning (heap-allocated via `bson_new_from_data`, caller must `bson_destroy()`) for independently produced results (future extraction).
+`*mut bson_t` is assumed to be an owning pointer.
+`*const bson_t` is assumed to be a read-only, non-owning pointer.
+This convention applies both to pointers given to mongoac and pointers returned from mongoac.
+This design specification proposes using return values instead of using out-parameters whenever possible, e.g.:
 
-> [!TIP]
-> - [Why reuse libbson bson_t?](#why-reuse-bson-t)
-> - [Why the valid-length precondition?](#why-valid-length-precondition)
+```c
+bson_t *bson = mongoac_future_get_bson(future, &bson, error);
+if (mongoac_error_code(error) != MONGOAC_ERROR_CODE_OK) { /* error handling */ }
+else { use(bson); bson_destroy(bson); }
+```
+
+However, this may exclude some opportunities to use `bson_static_init()` to initialize a `*mut bson_t` out-parameter,
+  which can avoid allocations and internal copying of BSON data.
+We may consider extending the API in the future with `bson_non_owning()` API if the cost of (de)allocating owning
+  return values is measurably resulting in significant overhead, e.g.:
+
+```c
+bson_t bson;
+if (!mongoac_future_get_bson_non_owning(future, &bson, error)) { /* error handling */ }
+else { use(&bson); } // Non-owning: `bson_destroy(doc)` not required.
+```
 
 #### Opaque Handles
 
@@ -778,18 +803,6 @@ Rather than forcing unique `TEST_CASE` names (conflicting with native Catch2 des
 Rust tests exercise internal logic without cbindgen/C compilation overhead. C++ tests validate the public ABI: header syntax, opaque-pointer contracts, linking, and behavior visible to C callers.
 
 ### Rust FFI Design
-
-#### BSON Library
-
-<a id="why-reuse-bson-t"></a>
-##### Why reuse libbson bson_t?
-
-Reusing `bson_t` avoids redefining a complex data structure in Rust. C users can continue using familiar libbson constructors without learning a new type.
-
-<a id="why-valid-length-precondition"></a>
-##### Why the valid-length precondition?
-
-The BSON specification defines each document's first 4 bytes as its total length, making the embedded length authoritative over any external bound. Both `bson_get_data` and `bson_new_from_data` read this length from the buffer — mongoac inherits the same invariant through its conversion helpers.
 
 <a id="why-t-suffix"></a>
 #### Why the `T` suffix in Rust?
