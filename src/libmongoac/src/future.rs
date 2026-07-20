@@ -104,7 +104,7 @@ impl<T: Send + 'static> Pollable for FutureValueType<T> {
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_err()
         {
-            return self.ready.load(Ordering::Acquire);
+            return self.is_ready();
         }
 
         let is_ready = match pin!(&mut self.future)
