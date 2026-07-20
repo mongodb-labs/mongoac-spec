@@ -199,7 +199,7 @@ macro_rules! safe_error {
                 if let Some(e) = $error {
                     *e = ::std::convert::Into::into(err);
                 }
-                return ::std::default::Default::default();
+                return Default::default();
             }
         }
     };

@@ -151,10 +151,10 @@ uv run --frozen cmake --build <build> --target mongoac-doc
 
 ### Test Infrastructure
 
-Tests are organized into two layers:
+Tests are organized into two layers (reflecting the two-layer FFI architecture described below):
 
-- **Rust unit tests**: executed via `cargo test`.
-- **C++ integration tests**: executed via CTest or Catch2 executable.
+- **Rust Tests**: executed via `cargo test`, written in Rust.
+- **Catch2 Tests**: executed via CTest or Catch2 executable, written in C++.
 
 Rust tests permit test coverage of internal API without requiring conditional exports (e.g. `*_EXPORT_CDECL_TESTING` in
   the C++ Driver) or requiring static library linkage (e.g. `test-libmongoc` requiring `ENABLE_STATIC=ON`).
@@ -175,12 +175,136 @@ However, they are still registered with CTest as labels (e.g. `!serial`, `!mayfa
 > [!TIP]
 > - [Why Catch2?](#why-catch2)
 > - [Why dual testing layers?](#why-dual-testing-layers)
-> - [Why the two-layer approach?](#why-two-layer-approach)
 > - [Why custom discovery?](#why-custom-test-discovery)
 
 ### Rust FFI Design
 
-All FFI types are opaque pointers backed by Rust heap allocations.
+#### Two Layers
+
+The Rust FFI uses a two-layer architectural design:
+
+- **Layer 1 (Public API):** exported symbols prefixed with `mongoac_`.
+  Functions use "safety macros" to consistently handle conversions between unsafe C and safe Rust, validating only what
+    is needed to enforce FFI safety (e.g. null pointer checks, UTF-8 validation, etc.) and translating return values (or
+    errors) into their C representations (e.g. `Box::into_raw()`, `safe_error!()`, etc.).
+  This layer is tested by Catch2 tests.
+- **Layer 2 (Internal Rust):**: safe Rust implementations of corresponding public API symbols.
+  Functions are defined as methods of the corresponding `struct` being operated on.
+  No `unsafe` blocks are present in Layer 2: all unsafe input validation and C representation conversions are handled by
+    Layer 1.
+  This layer is tested by Catch2 tests (via Layer 1) and via `cargo test`.
+
+This results in the following general pattern for a given `example.rs` crate:
+
+```c
+// example.h (generated)
+typedef struct mongoac_example_t mongoac_example_t;
+
+mongoac_example_t* mongoac_example_new();
+void mongoac_example_destroy(mongoac_example_t *example);
+mongoac_future_t* mongoac_example_async(const char *input, mongoac_error_t *error);
+```
+
+```rs
+// example.rs
+
+use crate::error::ErrorT;   // mongoac_error_t
+use crate::future::FutureT; // mongoac_future_t
+
+// `mongoac_example_t`: renamed by cbindgen via build.rs.
+pub struct ExampleT {
+  inner: mongodb::Example, // Underlying Rust API struct.
+  // ...
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_example_new() -> *mut ExampleT {
+  Box::into_raw(Box::new(ExampleT::new()))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_example_destroy(example: *mut ExampleT) {
+  // if !example.is_null() {
+  //     unsafe { drop(Box::from_raw(example)) }
+  // }
+  safe_drop!(example)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_example_async(
+  example: *mut ExampleT, input: *const c_char, error: *mut ErrorT
+) -> *mut FutureT {
+  // Layer 1: optional pointer.
+  // let error = match unsafe { error.as_mut() } {
+  //     Some(e) => { e.clear(); Some(e) },
+  //     None    => None,
+  // }
+  let error = safe_optional_error_as_mut!(error);
+
+  // Layer 1: required parameter.
+  // let example = match unsafe { example.as_mut() } {
+  //     Some(r) => r,
+  //     None => {
+  //         $crate::private::safety::invalid_argument(
+  //             $error,
+  //             concat!(stringify!(example), ": must not be null"),
+  //         );
+  //         return Default::default();
+  //     }
+  // }
+  let example = safe_as_mut_with_error!(example);
+
+  // Layer 1: required UTF-8 string.
+  // let input = {
+  //     if input.is_null() {
+  //         $crate::private::safety::invalid_argument(
+  //             $error,
+  //             concat!(stringify!(input), ": must not be null"),
+  //         );
+  //         return Default::default();
+  //     }
+  //     match unsafe { std::ffi::CStr::from_ptr(input) }.to_str() {
+  //         Ok(s) => s.to_string(),
+  //         Err(_) => {
+  //             $crate::private::safety::invalid_argument(
+  //                 $error,
+  //                 concat!(stringify!(input), ": must be valid UTF-8"),
+  //             );
+  //             return Default::default();
+  //         }
+  //     }
+  // }
+  let input = safe_cstr_from_ptr_with_error!(str);
+
+  // Layer 1: error handling.
+  // let future = match example.async(input) {
+  //     Ok(val) => val,
+  //     Err(err) => {
+  //         if let Some(e) = error {
+  //             *e = ::std::convert::Into::into(err);
+  //         }
+  //         return Default::default();
+  //     }
+  // }
+  let future = safe_error!(example.async(input));
+
+  // Layer 1: returning an owning pointer.
+  Box::into_raw(Box::new(future))
+}
+
+// Layer 2: methods and helper functions.
+impl ExampleT {
+  fn new() -> ExampleT {
+    // Layer 2: safe Rust implementation.
+  }
+
+  // `drop()` is unnecessary in safe Rust.
+
+  fn async(str: String) -> FutureT {
+    // Layer 2: safe Rust implementation.
+  }
+}
+```
 
 #### BSON Library
 
@@ -283,18 +407,6 @@ Each macro follows a common pattern: one `unsafe` conversion per raw pointer, an
 > [!TIP]
 > - [Why enforce valid UTF-8?](#why-enforce-utf8)
 > - [Why use safety macros?](#why-safety-macros)
-
-#### Coding Guidelines
-
-Every public C API function follows a **two-layer** pattern:
-
-- **Layer 1 (Public API):** `extern "C"` function prefixed `mongoac_`. Uses safety macros to convert C pointers to safe Rust, validates only what is needed for FFI safety (null, UTF-8), delegates to a native method, translates result/error back to C. This is the only layer that contains `unsafe` blocks, safety macro calls, `Box::into_raw()` / `Box::from_raw()`, or any pointer-to-reference conversion.
-- **Layer 2 (Internal Rust):** Method on the `TypeT` struct. All parameters are safe Rust types. No `unsafe` blocks. No safety macros. No `Box::into_raw()` or `Box::from_raw()`. Testable directly via `cargo test`.
-
-The FFI shim is the only layer containing `unsafe` blocks and safety macro calls; it validates only what is needed for FFI safety (null, UTF-8) then delegates to Layer 2, which contains all behavior with no pointer manipulation.
-
-> [!TIP]
-> - [Why the two-layer approach?](#why-two-layer-approach)
 
 #### Async Runtime
 
@@ -751,11 +863,6 @@ BSON strings, the Rust driver API, MongoDB wire-protocol strings, and metadata a
 #### Why use safety macros?
 
 The safety macros rely on `ptr::as_ref()`, `ptr::as_mut()`, and `CStr::from_ptr()` within `unsafe` blocks. These never panic at runtime, allowing use inside `unsafe` blocks without violating the no-panic rule. The macros eliminate the null-pointer class (the most common C FFI error) while the remaining precondition — valid, properly-aligned object — is documented as an `unsafe` contract for the caller.
-
-<a id="why-two-layer-approach"></a>
-#### Why the two-layer approach?
-
-Layer 2 is testable via `cargo test` without FFI overhead. Layer 1 is then verified by C++ integration tests exercising null-pointer paths and error propagation. This also keeps security review mechanical — the FFI shim never contains inline logic; all behavior lives in safe Rust with no pointer manipulation.
 
 <a id="why-per-client-runtime"></a>
 #### Why per-client runtime?
