@@ -151,17 +151,32 @@ uv run --frozen cmake --build <build> --target mongoac-doc
 
 ### Test Infrastructure
 
-Tests are organized in two layers:
+Tests are organized into two layers:
 
-- **Rust unit tests** (`cargo test`) exercise internal APIs without C FFI exposure.
-- **C++ integration tests** (Catch2, executed via CTest) validate the public C FFI surface: headers, linking, and opaque-handle contracts.
+- **Rust unit tests**: executed via `cargo test`.
+- **C++ integration tests**: executed via CTest or Catch2 executable.
 
-Catch2 provides `TEST_CASE` macros and CTest integration. A custom `mongoac_catch_discover_tests()` wrapper embeds Catch2 tags in CTest names to avoid duplicate-name collisions. Tests tagged `[run-serial]` are scheduled with mutual exclusion via `RUN_SERIAL`; all others run in parallel up to the `-j N` limit.
+Rust tests permit test coverage of internal API without requiring conditional exports (e.g. `*_EXPORT_CDECL_TESTING` in
+  the C++ Driver) or requiring static library linkage (e.g. `test-libmongoc` requiring `ENABLE_STATIC=ON`).
+However, most tests should primarily be written as Catch2 test cases in order to cover the actual public API layer where
+   input validation (e.g. `safe_*!()`) and return value conversions take place.
+
+A `PATCH_COMMAND` during `FetchContent_Declare()` adds support for registering Catch2 test cases with CTest, where a
+  `TEST_CASE` has a duplicate name but unique tags (supported by Catch2, but not by `catch_discover_tests()`).
+
+```cpp
+// CTest: "mongoac/a/b/c/example"
+TEST_CASE("example", "[a][b][c]") { ... }
+```
+
+Special tags (e.g. `[!serial]`, `[!mayfail]`, etc.) are excluded in the CTest unique test name.
+However, they are still registered with CTest as labels (e.g. `!serial`, `!mayfail`, etc.).
 
 > [!TIP]
 > - [Why Catch2?](#why-catch2)
-> - [Why custom discovery?](#why-custom-test-discovery)
 > - [Why dual testing layers?](#why-dual-testing-layers)
+> - [Why the two-layer approach?](#why-two-layer-approach)
+> - [Why custom discovery?](#why-custom-test-discovery)
 
 ### Rust FFI Design
 
@@ -273,8 +288,8 @@ Each macro follows a common pattern: one `unsafe` conversion per raw pointer, an
 
 Every public C API function follows a **two-layer** pattern:
 
-- **Layer 1 (FFI shim):** `extern "C"` function prefixed `mongoac_`. Uses safety macros to convert C pointers to safe Rust, validates only what is needed for FFI safety (null, UTF-8), delegates to a native method, translates result/error back to C. This is the only layer that contains `unsafe` blocks, safety macro calls, `Box::into_raw()` / `Box::from_raw()`, or any pointer-to-reference conversion.
-- **Layer 2 (native Rust):** Method on the `TypeT` struct. All parameters are safe Rust types. No `unsafe` blocks. No safety macros. No `Box::into_raw()` or `Box::from_raw()`. Testable directly via `cargo test`.
+- **Layer 1 (Public API):** `extern "C"` function prefixed `mongoac_`. Uses safety macros to convert C pointers to safe Rust, validates only what is needed for FFI safety (null, UTF-8), delegates to a native method, translates result/error back to C. This is the only layer that contains `unsafe` blocks, safety macro calls, `Box::into_raw()` / `Box::from_raw()`, or any pointer-to-reference conversion.
+- **Layer 2 (Internal Rust):** Method on the `TypeT` struct. All parameters are safe Rust types. No `unsafe` blocks. No safety macros. No `Box::into_raw()` or `Box::from_raw()`. Testable directly via `cargo test`.
 
 The FFI shim is the only layer containing `unsafe` blocks and safety macro calls; it validates only what is needed for FFI safety (null, UTF-8) then delegates to Layer 2, which contains all behavior with no pointer manipulation.
 
@@ -637,11 +652,13 @@ Catch2 provides CMake integration via `catch_discover_tests`, standard `TEST_CAS
 <a id="why-custom-test-discovery"></a>
 #### Why custom discovery?
 
-Deriving CTest names from Catch2's JSON reporter output embeds tags into the identifier, preventing collisions when two `TEST_CASE` entries share the same name but differ in tags.
+Catch2's `catch_discover_tests()` permits duplicate `TEST_CASE` names with different tags, but does not register these
+  as unique tests in CTest.
+Instead, only one test of many tests are registered with CTest, with the other tests silently discarded.
 
-> [!TIP]
-> - [Why not stock catch_discover_tests?](#rejected-stock-catch-discover)
-> - [Why not mandate unique TEST_CASE names?](#rejected-unique-test-case-names)
+Rather than forcing unique `TEST_CASE` names (conflicting with native Catch2 design patterns), patching the internal
+  `CatchAddTest.cmake` file to support unique test registration with tags is the most direct approach with minimal
+  complexity.
 
 <a id="why-dual-testing-layers"></a>
 #### Why dual testing layers?
@@ -1037,16 +1054,6 @@ Rejected: statically embedding libbson into the shared library would create dupl
 #### Reusing mongoc's TestSuite
 
 Rejected: `TestSuite` is C-only and sync-centric, with `fork()`-based isolation and compile-time test registration. It has no awareness of C++ lifetimes or async polling. Adapting it for C++ and async futures exceeds the value of reuse.
-
-<a id="rejected-unique-test-case-names"></a>
-#### Mandating unique TEST_CASE names
-
-Rejected: Catch2 explicitly permits duplicate names with different tags. Human-enforced uniqueness is unreliable at scale, and silent CTest overwrites would only be caught by missing coverage.
-
-<a id="rejected-stock-catch-discover"></a>
-#### Using stock catch_discover_tests with silent overwrites
-
-Silent data loss in test discovery is unacceptable for a driver test suite. Upstream PRs to embed tags in CTest names have been rejected, so there is no supported path to fixing the stock behavior without maintaining a fork.
 
 ### Rust FFI Design
 

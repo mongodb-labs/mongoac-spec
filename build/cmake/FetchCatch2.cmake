@@ -3,11 +3,6 @@
 include(FetchContent)
 
 function(fetch_catch2)
-    set(fetch_args "")
-    if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.25.0")
-        list(APPEND fetch_args "SYSTEM")
-    endif()
-
     FetchContent_Declare(
         EP_Catch2
 
@@ -16,7 +11,10 @@ function(fetch_catch2)
         GIT_SHALLOW TRUE
         LOG_DOWNLOAD ON
 
-        ${fetch_args}
+        # Support registering Catch2 tests with CTest uniquely by tags.
+        PATCH_COMMAND git apply "${CMAKE_SOURCE_DIR}/build/cmake/catch-add-tests-with-tags.patch"
+
+        SYSTEM
     )
 
     FetchContent_GetProperties(EP_Catch2)
@@ -39,6 +37,20 @@ function(fetch_catch2)
 
         message (STATUS "Downloading Catch2... done.")
     endif()
+
+    if (ep_catch2_SOURCE_DIR)
+        set (catch_add_tests_file "${ep_catch2_SOURCE_DIR}/extras/CatchAddTests.cmake")
+        if (EXISTS "${catch_add_tests_file}")
+            file (READ "${catch_add_tests_file}" catch_add_tests_file_content)
+            if (NOT catch_add_tests_file_content MATCHES "catch2-add-tests-with-tags")
+                message (
+                    WARNING
+                    "Unpatched Catch2 library (at ${ep_catch2_SOURCE_DIR}) may not register test cases with CTest"
+                    "correctly: some tests may be skipped!"
+                )
+            endif ()
+        endif ()
+    endif ()
 endfunction()
 
 fetch_catch2()

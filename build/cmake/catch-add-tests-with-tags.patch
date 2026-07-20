@@ -1,0 +1,75 @@
+diff --git a/extras/CatchAddTests.cmake b/extras/CatchAddTests.cmake
+index 4c27f47..24c8c8c 100644
+--- a/extras/CatchAddTests.cmake
++++ b/extras/CatchAddTests.cmake
+@@ -158,6 +158,28 @@ function(catch_discover_tests_impl)
+     string(JSON test_tags GET "${single_test}" "tags")
+     string(JSON plain_name GET "${single_test}" "name")
+
++    # --- catch2-add-tests-with-tags ---
++    string(JSON _num_tags LENGTH "${test_tags}")
++    math(EXPR _num_tags "${_num_tags} - 1")
++    set(_tag_name_parts "")
++    if(_num_tags GREATER_EQUAL "0")
++      foreach(_tag_idx RANGE ${_num_tags})
++        string(JSON _a_tag GET "${test_tags}" "${_tag_idx}")
++        string(SUBSTRING "${_a_tag}" 0 1 _first_char)
++        if(_first_char MATCHES "^[a-zA-Z0-9]$" AND NOT _a_tag STREQUAL "mongoac")
++          list(APPEND _tag_name_parts "${_a_tag}")
++        endif()
++      endforeach()
++    endif()
++    if(_tag_name_parts)
++      list(SORT _tag_name_parts)
++      string(REPLACE ";" "/" _tag_prefix "${_tag_name_parts}")
++      set(ctest_name "${_tag_prefix}/${plain_name}")
++    else()
++      set(ctest_name "${plain_name}")
++    endif()
++    string(REPLACE " " "_" ctest_name "${ctest_name}")
++
+     # Escape characters in test case names that would be parsed by Catch2
+     # Note that the \ escaping must happen FIRST! Do not change the order.
+     set(escaped_name "${plain_name}")
+@@ -172,7 +195,7 @@ function(catch_discover_tests_impl)
+
+     # ...and add to script
+     add_command(add_test
+-      "${prefix}${plain_name}${suffix}"
++      "${prefix}${ctest_name}${suffix}"
+       ${_TEST_EXECUTOR}
+       "${_TEST_EXECUTABLE}"
+       "${escaped_name}"
+@@ -181,7 +204,7 @@ function(catch_discover_tests_impl)
+       "${output_dir_arg}"
+     )
+     add_command(set_tests_properties
+-      "${prefix}${plain_name}${suffix}"
++      "${prefix}${ctest_name}${suffix}"
+       PROPERTIES
+       WORKING_DIRECTORY "${_TEST_WORKING_DIR}"
+       ${properties}
+@@ -206,7 +229,7 @@ function(catch_discover_tests_impl)
+         endforeach()
+
+         add_command(set_tests_properties
+-          "${prefix}${plain_name}${suffix}"
++          "${prefix}${ctest_name}${suffix}"
+           PROPERTIES
+           LABELS "${tag_list}"
+         )
+@@ -215,12 +238,12 @@ function(catch_discover_tests_impl)
+
+     if(environment_modifications)
+       add_command(set_tests_properties
+-        "${prefix}${plain_name}${suffix}"
++        "${prefix}${ctest_name}${suffix}"
+         PROPERTIES
+         ENVIRONMENT_MODIFICATION "${environment_modifications}")
+     endif()
+
+-    list(APPEND tests "${prefix}${plain_name}${suffix}")
++    list(APPEND tests "${prefix}${ctest_name}${suffix}")
+   endforeach()
+
+   # Create a list of all discovered tests, which users may use to e.g. set

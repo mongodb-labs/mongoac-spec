@@ -25,15 +25,12 @@ target_include_directories (test-libmongoac
 
 file (GLOB_RECURSE test_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
 target_sources (test-libmongoac PRIVATE ${test_sources})
-
 FetchContent_GetProperties (EP_Catch2)
 list (APPEND CMAKE_MODULE_PATH "${ep_catch2_SOURCE_DIR}/extras")
-list (APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake")
 include (Catch)
 include (CTest)
-include (MongoACCatchDiscoverTests)
 
-mongoac_catch_discover_tests (test-libmongoac
+catch_discover_tests (test-libmongoac
   TEST_SPEC "[run-serial]"
   TEST_PREFIX "mongoac/"
   ADD_TAGS_AS_LABELS
@@ -41,7 +38,7 @@ mongoac_catch_discover_tests (test-libmongoac
     RUN_SERIAL TRUE
 )
 
-mongoac_catch_discover_tests (test-libmongoac
+catch_discover_tests (test-libmongoac
   TEST_SPEC "~[run-serial]"
   TEST_PREFIX "mongoac/"
   ADD_TAGS_AS_LABELS
