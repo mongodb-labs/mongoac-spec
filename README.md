@@ -140,19 +140,14 @@ All other mongoac headers are generated via `cbindgen`.
 > [!TIP]
 > - [Why CMake for version.h instead of cbindgen?](#why-cmake-version-header)
 
-#### Documentation Build
+#### Documentation
 
-API documentation lives under `src/libmongoac/doc/` as Sphinx RST sources.
+API documentation for crate headers are under `src/libmongoac/doc/`, for symmetry with bson and mongoc docs.
 
 ```bash
 uv run --frozen cmake -S . -B <build> -DENABLE_HTML_DOCS=ON
 uv run --frozen cmake --build <build> --target mongoac-doc
 ```
-
-Dependencies (`sphinx>=7.1.1,<9.0`, `sphinx-design>=0.5.0`, `furo>=2023.5.20`) are declared in `pyproject.toml` under the `docs` group.
-
-> [!TIP]
-> - [Why RST instead of Markdown?](#rejected-markdown-docs)
 
 ### Test Infrastructure
 
@@ -1029,11 +1024,6 @@ The previous flat struct discarded error labels, wire version, server response, 
 #### Dedicated C-only header verification targets
 
 Manual `OBJECT` targets were investigated to verify generated headers as C. Rejected because `FILE_SET HEADERS` on `INTERFACE` targets already integrates with CMake's `CMAKE_VERIFY_INTERFACE_HEADER_SETS` option. Manual `OBJECT` targets would duplicate this functionality and require fragile `add_dependencies` logic for generated headers.
-
-<a id="rejected-markdown-docs"></a>
-#### Markdown (MyST) instead of RST
-
-Rejected: out of scope for the specification phase. Converting to Markdown would require updating shared `mongo-c-driver` docgen infrastructure for marginal benefit, given the small documentation surface area.
 
 <a id="rejected-downstream-bson-link"></a>
 #### Static embedding of libbson into the cdylib
