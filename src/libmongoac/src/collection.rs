@@ -28,7 +28,7 @@ impl CollectionT {
 
     fn drop_async(&self) -> FutureT {
         let coll = self.inner.clone();
-        spawn!(self, Void, async move { coll.drop().await.map_err(Into::into) })
+        spawn!(self, Void, async move { coll.drop().await })
     }
 }
 

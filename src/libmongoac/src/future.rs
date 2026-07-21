@@ -19,20 +19,11 @@ macro_rules! spawn {
     ($client:expr, $value_type:ident, $op:expr) => {{
         let rt = $client.runtime.clone();
         let handle = rt.spawn($op);
-
-        let future = async move {
-            match handle.await {
-                std::result::Result::Ok(res) => res,
-                std::result::Result::Err(e) => Err(ErrorT::from_mongoac(
-                    $crate::error::ErrorCodeT::RuntimeError,
-                    &format!("tokio::task::JoinError: {e}"),
-                )),
-            }
-        };
-
         $crate::future::FutureT::new(
             rt,
-            $crate::future::FutureValue::$value_type($crate::future::FutureValueType::new(future)),
+            $crate::future::FutureValue::$value_type(
+                $crate::future::FutureValueType::new(handle),
+            ),
         )
     }};
 }
@@ -63,11 +54,20 @@ pub(crate) struct FutureValueType<T> {
 }
 
 impl<T: Send + 'static> FutureValueType<T> {
-    pub(crate) fn new(
-        future: impl Future<Output = Result<T, ErrorT>> + Send + 'static,
+    pub(crate) fn new<E: Into<ErrorT> + Send + 'static>(
+        handle: tokio::task::JoinHandle<Result<T, E>>,
     ) -> Self {
         Self {
-            future: FfiFuture::new(future),
+            future: FfiFuture::new(async move {
+                match handle.await {
+                    std::result::Result::Ok(Ok(val)) => Ok(val),
+                    std::result::Result::Ok(Err(err)) => Err(err.into()),
+                    std::result::Result::Err(err) => Err(ErrorT::from_mongoac(
+                        ErrorCodeT::RuntimeError,
+                        &format!("tokio::task::JoinError: {err}"),
+                    )),
+                }
+            }),
             result: None,
             ready: AtomicBool::new(false),
             polling: AtomicBool::new(false),

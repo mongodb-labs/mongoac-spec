@@ -274,7 +274,7 @@ impl ClientT {
             if let Some(opts) = options {
                 builder = builder.with_options(opts);
             }
-            builder.await.map(ClientSessionT::new).map_err(Into::into)
+            builder.await.map(ClientSessionT::new)
         })
     }
 

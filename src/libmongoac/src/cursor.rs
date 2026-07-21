@@ -75,7 +75,7 @@ impl CursorT {
         spawn!(
             self,
             Bool,
-            async move { inner.lock().await.advance().await.map_err(Into::into) }
+            async move { inner.lock().await.advance().await }
         )
     }
 

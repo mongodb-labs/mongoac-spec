@@ -52,13 +52,13 @@ impl DatabaseT {
             if let Some(opts) = options {
                 action = action.with_options(opts);
             }
-            action.await.map_err(Into::into)
+            action.await
         })
     }
 
     fn drop_async(&self) -> FutureT {
         let db = self.inner.clone();
-        spawn!(self, Void, async move { db.drop().await.map_err(Into::into) })
+        spawn!(self, Void, async move { db.drop().await })
     }
 }
 
