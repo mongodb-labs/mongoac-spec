@@ -4,7 +4,7 @@ use crate::{
 };
 
 use crate::error::ErrorT;
-use crate::private::bson::{ConstBsonT, bson_t};
+use crate::private::bson::bson_t;
 use mongodb::options::ServerApi;
 
 #[derive(Default)]
@@ -27,22 +27,8 @@ impl ClientOptionsT {
         self.capture_sdam_events = value;
     }
 
-    pub fn set_server_api(
-        &mut self,
-        api: Option<ConstBsonT>,
-    ) -> Result<(), mongodb::bson::error::Error> {
-        match api {
-            Some(ref bson) => {
-                let doc = mongodb::bson::Document::try_from(bson)?;
-                let server_api = mongodb::bson::deserialize_from_document::<ServerApi>(doc)?;
-                self.server_api = Some(server_api);
-                Ok(())
-            }
-            None => {
-                self.server_api = None;
-                Ok(())
-            }
-        }
+    pub fn set_server_api(&mut self, api: Option<ServerApi>) {
+        self.server_api = api
     }
 
     pub(crate) fn capture_command_events(&self) -> bool {
@@ -112,5 +98,13 @@ pub extern "C" fn mongoac_client_options_set_server_api(
     let options = safe_as_mut_with_error!(options, error);
     let api = safe_optional_const_bson!(api);
 
-    safe_error!(options.set_server_api(api), error);
+    let server_api = match api {
+        Some(ref bson) => Some(safe_error!(
+            mongodb::bson::deserialize_from_slice(bson.as_bytes()),
+            error
+        )),
+        None => None,
+    };
+
+    options.set_server_api(server_api)
 }

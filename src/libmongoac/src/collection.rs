@@ -4,22 +4,21 @@ use crate::database::DatabaseT;
 use crate::error::ErrorT;
 use crate::future::FutureT;
 use crate::private::bson::bson_t;
+use mongodb::bson::RawDocumentBuf;
 use crate::runtime::RuntimeT;
 use crate::{
     safe_as_ref_with_error, safe_cstr_from_ptr_with_error, safe_drop, safe_optional_error_as_mut,
     spawn,
 };
 
-use mongodb::bson::Document;
-
 pub struct CollectionT {
-    inner: mongodb::Collection<Document>,
+    inner: mongodb::Collection<RawDocumentBuf>,
     runtime: RuntimeT,
 }
 
 impl CollectionT {
     fn new(db: &DatabaseT, name: String) -> Self {
-        let coll = db.database().collection::<Document>(&name);
+        let coll = db.database().collection::<RawDocumentBuf>(&name);
 
         CollectionT {
             inner: coll,
@@ -29,7 +28,7 @@ impl CollectionT {
 
     fn drop_async(&self) -> FutureT {
         let coll = self.inner.clone();
-        spawn!(self, Void, async move { coll.drop().await })
+        spawn!(self, Void, async move { coll.drop().await.map_err(Into::into) })
     }
 }
 

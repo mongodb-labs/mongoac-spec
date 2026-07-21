@@ -141,15 +141,14 @@ macro_rules! safe_optional_cstr_from_ptr_with_error {
 #[macro_export]
 macro_rules! safe_bson {
     ($ptr:expr, $error:expr) => {{
-        let ptr = $ptr;
-        if ptr.is_null() {
+        if $ptr.is_null() {
             $crate::private::safety::invalid_argument(
                 $error,
                 concat!(stringify!($ptr), ": must not be null"),
             );
             return Default::default();
         }
-        $crate::private::bson::BsonT::from(ptr)
+        $crate::private::bson::BsonT::from($ptr)
     }};
 }
 
@@ -157,9 +156,7 @@ macro_rules! safe_bson {
 macro_rules! safe_optional_bson {
     ($ptr:expr) => {{
         match unsafe { $ptr.as_mut() } {
-            Some(r) => Some($crate::private::bson::BsonT::from(
-                r as *mut $crate::private::bson::bson_t,
-            )),
+            Some(r) => Some($crate::private::bson::BsonT::from(r)),
             None => None,
         }
     }};
@@ -168,15 +165,14 @@ macro_rules! safe_optional_bson {
 #[macro_export]
 macro_rules! safe_const_bson {
     ($ptr:expr, $error:expr) => {{
-        let ptr = $ptr;
-        if ptr.is_null() {
+        if $ptr.is_null() {
             $crate::private::safety::invalid_argument(
                 $error,
                 concat!(stringify!($ptr), ": must not be null"),
             );
             return Default::default();
         }
-        $crate::private::bson::ConstBsonT::from(ptr)
+        $crate::private::bson::ConstBsonT::from($ptr)
     }};
 }
 

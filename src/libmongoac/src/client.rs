@@ -30,12 +30,12 @@ pub struct ClientT {
 }
 
 impl ClientT {
-    fn new(conn_str: String) -> Result<ClientT, mongodb::error::Error> {
+    fn new(conn_str: String) -> Result<ClientT, ErrorT> {
         let runtime = RuntimeT::new().map_err(|e| {
-            mongodb::error::Error::from(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("runtime creation failed: {e}"),
-            ))
+            ErrorT::from_mongoac(
+                crate::error::ErrorCodeT::RuntimeError,
+                &format!("runtime creation failed: {e}"),
+            )
         })?;
 
         let command_events: Arc<Mutex<VecDeque<mongodb::event::command::CommandEvent>>> =
@@ -72,17 +72,17 @@ impl ClientT {
     fn new_with_options(
         conn_str: String,
         options: Option<&ClientOptionsT>,
-    ) -> Result<ClientT, mongodb::error::Error> {
+    ) -> Result<ClientT, ErrorT> {
         let options = match options {
             Some(o) => o,
             None => return Self::new(conn_str),
         };
 
         let runtime = RuntimeT::new().map_err(|e| {
-            mongodb::error::Error::from(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("runtime creation failed: {e}"),
-            ))
+            ErrorT::from_mongoac(
+                crate::error::ErrorCodeT::RuntimeError,
+                &format!("runtime creation failed: {e}"),
+            )
         })?;
 
         let command_events: Option<Arc<Mutex<VecDeque<mongodb::event::command::CommandEvent>>>> =
@@ -220,7 +220,7 @@ impl ClientT {
         &self,
         session: Option<&mut ClientSessionT>,
         options: Option<ListDatabasesOptions>,
-    ) -> Result<Document, mongodb::error::Error> {
+    ) -> Result<RawDocumentBuf, ErrorT> {
         let session_arc = session.map(|s| s.inner.clone());
         self.runtime.block_on(async move {
             if let Some(ref session_arc) = session_arc {
@@ -243,7 +243,7 @@ impl ClientT {
         &self,
         session: Option<&mut ClientSessionT>,
         options: Option<ListDatabasesOptions>,
-    ) -> Result<Document, mongodb::error::Error> {
+    ) -> Result<RawDocumentBuf, ErrorT> {
         let session_arc = session.map(|s| s.inner.clone());
         self.runtime.block_on(async move {
             if let Some(ref session_arc) = session_arc {
@@ -274,7 +274,7 @@ impl ClientT {
             if let Some(opts) = options {
                 builder = builder.with_options(opts);
             }
-            builder.await.map(|session| ClientSessionT::new(session))
+            builder.await.map(ClientSessionT::new).map_err(Into::into)
         })
     }
 
@@ -295,7 +295,7 @@ impl ClientT {
 
 fn specs_to_bson_array(
     specs: &[mongodb::results::DatabaseSpecification],
-) -> Result<Document, mongodb::error::Error> {
+) -> Result<RawDocumentBuf, ErrorT> {
     let mut doc = Document::new();
 
     for (i, spec) in specs.iter().enumerate() {
@@ -305,17 +305,17 @@ fn specs_to_bson_array(
         );
     }
 
-    Ok(doc)
+    RawDocumentBuf::try_from(doc).map_err(Into::into)
 }
 
-fn names_to_bson_array(names: &[String]) -> Result<Document, mongodb::error::Error> {
+fn names_to_bson_array(names: &[String]) -> Result<RawDocumentBuf, ErrorT> {
     let mut doc = Document::new();
 
     for (i, name) in names.iter().enumerate() {
         doc.insert(i.to_string(), name);
     }
 
-    Ok(doc)
+    RawDocumentBuf::try_from(doc).map_err(Into::into)
 }
 
 #[unsafe(no_mangle)]
@@ -381,7 +381,7 @@ pub extern "C" fn mongoac_client_get_command_event(
     let client = safe_as_ref!(client);
 
     match client.get_command_event(index) {
-        Some(raw) => safe_error!(BsonT::try_from(&raw), error).into(),
+        Some(doc) => safe_error!(BsonT::try_from(&doc), error).into(),
         None => Default::default(),
     }
 }
@@ -405,8 +405,9 @@ fn parse_session_options(
         Some(r) => r,
         None => return Ok(None),
     };
-    let doc = Document::try_from(&bson).map_err(Into::<ErrorT>::into)?;
-    let opts = mongodb::bson::deserialize_from_document(doc).map_err(Into::<ErrorT>::into)?;
+
+    let opts =
+        mongodb::bson::deserialize_from_reader(bson.as_bytes()).map_err(Into::<ErrorT>::into)?;
     Ok(Some(opts))
 }
 
@@ -442,11 +443,6 @@ pub extern "C" fn mongoac_client_start_session(
     Box::into_raw(Box::new(session))
 }
 
-fn parse_options(bson: &ConstBsonT) -> Result<ListDatabasesOptions, ErrorT> {
-    let doc = Document::try_from(bson).map_err(|e| Into::<ErrorT>::into(e))?;
-    mongodb::bson::deserialize_from_document(doc).map_err(|e| Into::<ErrorT>::into(e))
-}
-
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_client_list_databases_async(
     client: *mut ClientT,
@@ -460,7 +456,10 @@ pub extern "C" fn mongoac_client_list_databases_async(
     let options = safe_optional_const_bson!(options);
 
     let opts = match options {
-        Some(ref opts) => Some(safe_error!(parse_options(opts), error)),
+        Some(ref opts) => Some(safe_error!(
+            mongodb::bson::deserialize_from_slice(opts.as_bytes()),
+            error
+        )),
         None => None,
     };
 
@@ -481,7 +480,10 @@ pub extern "C" fn mongoac_client_list_databases(
     let options = safe_optional_const_bson!(options);
 
     let opts = match options {
-        Some(ref opts) => Some(safe_error!(parse_options(opts), error)),
+        Some(ref opts) => Some(safe_error!(
+            mongodb::bson::deserialize_from_slice(opts.as_bytes()),
+            error
+        )),
         None => None,
     };
 
@@ -502,7 +504,10 @@ pub extern "C" fn mongoac_client_list_database_names_async(
     let options = safe_optional_const_bson!(options);
 
     let opts = match options {
-        Some(ref opts) => Some(safe_error!(parse_options(opts), error)),
+        Some(ref opts) => Some(safe_error!(
+            mongodb::bson::deserialize_from_slice(opts.as_bytes()),
+            error
+        )),
         None => None,
     };
 
@@ -523,7 +528,10 @@ pub extern "C" fn mongoac_client_list_database_names(
     let options = safe_optional_const_bson!(options);
 
     let opts = match options {
-        Some(ref opts) => Some(safe_error!(parse_options(opts), error)),
+        Some(ref opts) => Some(safe_error!(
+            mongodb::bson::deserialize_from_slice(opts.as_bytes()),
+            error
+        )),
         None => None,
     };
 

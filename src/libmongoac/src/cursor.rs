@@ -9,7 +9,7 @@ use crate::{
 };
 
 use mongodb::ClientSession;
-use mongodb::bson::RawDocumentBuf;
+use mongodb::bson::{RawDocument, RawDocumentBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -31,7 +31,8 @@ impl InnerCursor {
             }
         }
     }
-    fn current(&self) -> &mongodb::bson::RawDocument {
+
+    fn current(&self) -> &RawDocument {
         match self {
             InnerCursor::Plain(c) => c.current(),
             InnerCursor::Session { cursor, .. } => cursor.current(),
@@ -74,16 +75,15 @@ impl CursorT {
         spawn!(
             self,
             Bool,
-            async move { inner.lock().await.advance().await }
+            async move { inner.lock().await.advance().await.map_err(Into::into) }
         )
     }
 
-    fn get_document_bson(&self) -> Result<BsonT, mongodb::bson::error::Error> {
-        let raw: Vec<u8> = self.runtime.block_on(async {
+    fn get_document_bson(&self) -> RawDocumentBuf {
+        self.runtime.block_on(async {
             let cursor = self.inner.lock().await;
-            cursor.current().as_bytes().to_vec()
-        });
-        BsonT::from_bytes(&raw)
+            cursor.current().to_owned()
+        })
     }
 }
 
@@ -120,7 +120,7 @@ pub extern "C" fn mongoac_cursor_get_document(
     let error = safe_optional_error_as_mut!(error);
     let cursor = safe_as_ref_with_error!(cursor, error);
 
-    safe_error!(cursor.get_document_bson(), error).into()
+    safe_error!(BsonT::try_from(&cursor.get_document_bson()).into(), error).into()
 }
 
 #[unsafe(no_mangle)]

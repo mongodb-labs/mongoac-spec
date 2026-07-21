@@ -1,5 +1,7 @@
 use mongodb::bson::{Document, RawDocument, RawDocumentBuf};
 
+use crate::error::ErrorT;
+
 #[repr(C)]
 pub struct bson_t {
     _private: [u8; 0],
@@ -8,12 +10,12 @@ pub struct bson_t {
 unsafe extern "C" {
     pub fn bson_destroy(bson: *mut bson_t);
     pub fn bson_get_data(bson: *const bson_t) -> *const u8;
-    pub fn bson_init_static(bson: *mut bson_t, data: *const u8, length: usize) -> bool;
     pub fn bson_new_from_data(data: *const u8, length: usize) -> *mut bson_t;
 }
 
-impl AsRef<[u8]> for bson_t {
-    fn as_ref(&self) -> &[u8] {
+impl bson_t {
+    // Library-wide precondition: BSON data is always valid.
+    fn as_bytes(&self) -> &[u8] {
         let data = unsafe { bson_get_data(self as *const bson_t) };
         let raw_len = unsafe { std::slice::from_raw_parts(data, 4) };
         let len = u32::from_le_bytes([raw_len[0], raw_len[1], raw_len[2], raw_len[3]]) as usize;
@@ -21,173 +23,77 @@ impl AsRef<[u8]> for bson_t {
     }
 }
 
-impl TryFrom<&bson_t> for Document {
-    type Error = mongodb::bson::error::Error;
-
-    fn try_from(bson: &bson_t) -> Result<Self, Self::Error> {
-        let slice: &[u8] = bson.as_ref();
-        Self::from_reader(&mut &slice[..])
-    }
-}
-
-impl TryFrom<&bson_t> for RawDocumentBuf {
-    type Error = mongodb::bson::error::Error;
-
-    fn try_from(bson: &bson_t) -> Result<Self, Self::Error> {
-        let slice: &[u8] = bson.as_ref();
-        Self::from_bytes(slice.to_vec()).map_err(|e| {
-            mongodb::bson::error::Error::from(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                e.to_string(),
-            ))
-        })
-    }
-}
-
-impl<'a> TryFrom<&'a bson_t> for &'a RawDocument {
-    type Error = mongodb::bson::error::Error;
-
-    fn try_from(bson: &'a bson_t) -> Result<Self, Self::Error> {
-        let slice: &[u8] = bson.as_ref();
-        RawDocument::from_bytes(slice)
-    }
-}
-
 pub struct BsonT(*mut bson_t);
-
-impl BsonT {
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, mongodb::bson::error::Error> {
-        let ptr = unsafe { bson_new_from_data(bytes.as_ptr(), bytes.len()) };
-        if ptr.is_null() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "bson_new_from_data: allocation failure",
-            )
-            .into());
-        }
-        Ok(Self(ptr))
-    }
-
-    pub fn as_ptr(&self) -> *const bson_t {
-        self.0 as *const bson_t
-    }
-
-    pub fn as_mut_ptr(&mut self) -> *mut bson_t {
-        self.0
-    }
-}
+pub struct ConstBsonT(*const bson_t);
 
 impl Drop for BsonT {
     fn drop(&mut self) {
-        if !self.0.is_null() {
-            unsafe { bson_destroy(self.0) };
+        unsafe { bson_destroy(self.0) }
+    }
+}
+
+impl BsonT {
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, ErrorT> {
+        let ptr = unsafe { bson_new_from_data(bytes.as_ptr(), bytes.len()) };
+
+        if ptr.is_null() {
+            Err(ErrorT::from_mongoac(
+                crate::error::ErrorCodeT::RuntimeError,
+                "bson_new_from_data failed",
+            ))
+        } else {
+            Ok(Self(ptr))
         }
     }
-}
 
-impl AsRef<[u8]> for BsonT {
-    fn as_ref(&self) -> &[u8] {
-        unsafe { (*self.0).as_ref() }
+    // Library-wide precondition: BsonT is never null.
+    pub fn as_bytes(&self) -> &[u8] {
+        unsafe { self.0.as_ref() }.unwrap().as_bytes()
     }
 }
-
-impl AsRef<bson_t> for BsonT {
-    fn as_ref(&self) -> &bson_t {
-        unsafe { &*self.0 }
-    }
-}
-
-impl From<*mut bson_t> for BsonT {
-    fn from(ptr: *mut bson_t) -> Self {
-        Self(ptr)
-    }
-}
-
-impl From<BsonT> for *mut bson_t {
-    fn from(wrapper: BsonT) -> Self {
-        let ptr = wrapper.0;
-        std::mem::forget(wrapper);
-        ptr
-    }
-}
-
-impl TryFrom<BsonT> for Document {
-    type Error = mongodb::bson::error::Error;
-
-    fn try_from(bson: BsonT) -> Result<Self, Self::Error> {
-        Document::try_from(unsafe { &*bson.0 })
-    }
-}
-
-impl TryFrom<BsonT> for RawDocumentBuf {
-    type Error = mongodb::bson::error::Error;
-
-    fn try_from(bson: BsonT) -> Result<Self, Self::Error> {
-        RawDocumentBuf::try_from(unsafe { &*bson.0 })
-    }
-}
-
-impl TryFrom<&RawDocument> for BsonT {
-    type Error = mongodb::bson::error::Error;
-
-    fn try_from(raw: &RawDocument) -> Result<Self, Self::Error> {
-        Self::from_bytes(raw.as_bytes())
-    }
-}
-
-impl TryFrom<&RawDocumentBuf> for BsonT {
-    type Error = mongodb::bson::error::Error;
-
-    fn try_from(raw: &RawDocumentBuf) -> Result<Self, Self::Error> {
-        Self::from_bytes(raw.as_bytes())
-    }
-}
-
-impl TryFrom<&Document> for BsonT {
-    type Error = mongodb::bson::error::Error;
-
-    fn try_from(doc: &Document) -> Result<Self, Self::Error> {
-        let bytes = doc.to_vec()?;
-        Self::from_bytes(&bytes)
-    }
-}
-
-#[derive(Clone, Copy)]
-pub struct ConstBsonT(*const bson_t);
 
 impl ConstBsonT {
-    pub fn as_ptr(&self) -> *const bson_t {
-        self.0
+    // Library-wide precondition: ConstBsonT is never null.
+    pub fn as_bytes(&self) -> &[u8] {
+        unsafe { self.0.as_ref() }.unwrap().as_bytes()
     }
 }
 
-impl AsRef<[u8]> for ConstBsonT {
-    fn as_ref(&self) -> &[u8] {
-        unsafe { (*self.0).as_ref() }
+impl From<&mut bson_t> for BsonT {
+    fn from(bson: &mut bson_t) -> Self {
+        Self(bson)
     }
 }
 
-impl AsRef<bson_t> for ConstBsonT {
-    fn as_ref(&self) -> &bson_t {
-        unsafe { &*self.0 }
-    }
-}
-
-impl From<*const bson_t> for ConstBsonT {
-    fn from(ptr: *const bson_t) -> Self {
-        Self(ptr)
-    }
-}
-
-impl<'a> From<&'a bson_t> for ConstBsonT {
-    fn from(bson: &'a bson_t) -> Self {
-        Self(bson as *const bson_t)
+impl From<&bson_t> for ConstBsonT {
+    fn from(bson: &bson_t) -> Self {
+        Self(bson)
     }
 }
 
 impl From<&BsonT> for ConstBsonT {
     fn from(bson: &BsonT) -> Self {
-        Self(bson.as_ptr())
+        Self(bson.0)
+    }
+}
+
+impl From<BsonT> for *mut bson_t {
+    fn from(bson: BsonT) -> Self {
+        bson.0
+    }
+}
+
+impl From<ConstBsonT> for *const bson_t {
+    fn from(bson: ConstBsonT) -> Self {
+        bson.0
+    }
+}
+
+impl TryFrom<&BsonT> for Document {
+    type Error = mongodb::bson::error::Error;
+
+    fn try_from(bson: &BsonT) -> Result<Self, Self::Error> {
+        Document::from_reader(bson.as_bytes()) // Deep-copy!
     }
 }
 
@@ -195,15 +101,23 @@ impl TryFrom<&ConstBsonT> for Document {
     type Error = mongodb::bson::error::Error;
 
     fn try_from(bson: &ConstBsonT) -> Result<Self, Self::Error> {
-        Document::try_from(unsafe { &*bson.0 })
+        Document::from_reader(bson.as_bytes()) // Deep-copy!
     }
 }
 
-impl TryFrom<&ConstBsonT> for RawDocumentBuf {
+impl TryFrom<&BsonT> for RawDocumentBuf {
     type Error = mongodb::bson::error::Error;
 
-    fn try_from(bson: &ConstBsonT) -> Result<Self, Self::Error> {
-        RawDocumentBuf::try_from(unsafe { &*bson.0 })
+    fn try_from(bson: &BsonT) -> Result<Self, Self::Error> {
+        RawDocumentBuf::from_reader(bson.as_bytes()) // Deep-copy!
+    }
+}
+
+impl<'a> TryFrom<&'a BsonT> for &'a RawDocument {
+    type Error = mongodb::bson::error::Error;
+
+    fn try_from(bson: &'a BsonT) -> Result<Self, Self::Error> {
+        RawDocument::from_bytes(bson.as_bytes())
     }
 }
 
@@ -211,6 +125,38 @@ impl<'a> TryFrom<&'a ConstBsonT> for &'a RawDocument {
     type Error = mongodb::bson::error::Error;
 
     fn try_from(bson: &'a ConstBsonT) -> Result<Self, Self::Error> {
-        RawDocument::from_bytes(bson)
+        RawDocument::from_bytes(bson.as_bytes()) // Deep-copy!
+    }
+}
+
+impl TryFrom<&RawDocumentBuf> for BsonT {
+    type Error = ErrorT;
+
+    fn try_from(doc: &RawDocumentBuf) -> Result<Self, Self::Error> {
+        Self::from_bytes(doc.as_bytes()) // Deep-copy!
+    }
+}
+
+impl TryFrom<&RawDocument> for BsonT {
+    type Error = ErrorT;
+
+    fn try_from(doc: &RawDocument) -> Result<Self, Self::Error> {
+        Self::from_bytes(doc.as_bytes()) // Deep-copy!
+    }
+}
+
+impl TryFrom<&RawDocumentBuf> for ConstBsonT {
+    type Error = mongodb::bson::error::Error;
+
+    fn try_from(doc: &RawDocumentBuf) -> Result<Self, Self::Error> {
+        Ok(Self(doc.as_bytes().as_ptr() as *const bson_t))
+    }
+}
+
+impl TryFrom<&RawDocument> for ConstBsonT {
+    type Error = mongodb::bson::error::Error;
+
+    fn try_from(doc: &RawDocument) -> Result<Self, Self::Error> {
+        Ok(Self(doc.as_bytes().as_ptr() as *const bson_t))
     }
 }

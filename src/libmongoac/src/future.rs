@@ -23,9 +23,10 @@ macro_rules! spawn {
         let future = async move {
             match handle.await {
                 std::result::Result::Ok(res) => res,
-                std::result::Result::Err(e) => {
-                    Err(::mongodb::error::Error::custom(std::format!("{e}")))
-                }
+                std::result::Result::Err(e) => Err(ErrorT::from_mongoac(
+                    $crate::error::ErrorCodeT::RuntimeError,
+                    &format!("tokio::task::JoinError: {e}"),
+                )),
             }
         };
 
@@ -55,15 +56,15 @@ trait Pollable {
 }
 
 pub(crate) struct FutureValueType<T> {
-    future: FfiFuture<Result<T, mongodb::error::Error>>,
-    result: Option<Result<T, mongodb::error::Error>>,
+    future: FfiFuture<Result<T, ErrorT>>,
+    result: Option<Result<T, ErrorT>>,
     ready: AtomicBool,
     polling: AtomicBool,
 }
 
 impl<T: Send + 'static> FutureValueType<T> {
     pub(crate) fn new(
-        future: impl Future<Output = Result<T, mongodb::error::Error>> + Send + 'static,
+        future: impl Future<Output = Result<T, ErrorT>> + Send + 'static,
     ) -> Self {
         Self {
             future: FfiFuture::new(future),
@@ -84,7 +85,7 @@ impl<T: Send + 'static> FutureValueType<T> {
         // Invariant: `ready == true` -> `Some(result)`.
         match self.result.as_ref().unwrap() {
             Ok(val) => Ok(val),
-            Err(err) => Err(err.clone().into()),
+            Err(err) => Err(err.clone()),
         }
     }
 }
@@ -127,7 +128,7 @@ impl<T: Send + 'static> Pollable for FutureValueType<T> {
 
 pub(crate) enum FutureValue {
     Bool(FutureValueType<bool>),
-    Bson(FutureValueType<mongodb::bson::Document>),
+    Bson(FutureValueType<mongodb::bson::RawDocumentBuf>),
     ClientSession(FutureValueType<ClientSessionT>),
     Cursor(FutureValueType<CursorT>),
     Int32(FutureValueType<i32>),
@@ -165,7 +166,7 @@ impl FutureValue {
         }
     }
 
-    pub(crate) fn get_bson(&self) -> Result<&mongodb::bson::Document, ErrorT> {
+    pub(crate) fn get_bson(&self) -> Result<&mongodb::bson::RawDocumentBuf, ErrorT> {
         match self {
             Self::Bson(fvt) => fvt.result(),
             _ => Err(mongodb::error::Error::custom(

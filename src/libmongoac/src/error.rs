@@ -59,6 +59,7 @@ impl ErrorCodeT {
     }
 }
 
+#[derive(Clone)]
 pub enum ErrorT {
     None,
     MongoAC {

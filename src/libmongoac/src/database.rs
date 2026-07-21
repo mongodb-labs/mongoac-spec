@@ -8,7 +8,7 @@ use crate::{
 };
 
 use crate::client::ClientT;
-use mongodb::bson::Document;
+use mongodb::options::DatabaseOptions;
 use std::ffi::c_char;
 
 pub struct DatabaseT {
@@ -20,17 +20,13 @@ impl DatabaseT {
     fn new(
         client: &ClientT,
         name: String,
-        options: Option<Document>,
+        options: Option<DatabaseOptions>,
     ) -> Result<Self, mongodb::bson::error::Error> {
         let db = match options {
-            Some(doc) => {
-                let opts = mongodb::bson::deserialize_from_document::<
-                    mongodb::options::DatabaseOptions,
-                >(doc)?;
-                client.client().database_with_options(&name, opts)
-            }
+            Some(opts) => client.client().database_with_options(&name, opts),
             None => client.client().database(&name),
         };
+
         Ok(DatabaseT {
             inner: db,
             runtime: client.get_runtime(),
@@ -56,13 +52,13 @@ impl DatabaseT {
             if let Some(opts) = options {
                 action = action.with_options(opts);
             }
-            action.await
+            action.await.map_err(Into::into)
         })
     }
 
     fn drop_async(&self) -> FutureT {
         let db = self.inner.clone();
-        spawn!(self, Void, async move { db.drop().await })
+        spawn!(self, Void, async move { db.drop().await.map_err(Into::into) })
     }
 }
 
@@ -77,12 +73,13 @@ pub extern "C" fn mongoac_client_get_database(
     let client = safe_as_ref_with_error!(client, error);
     let name = safe_cstr_from_ptr_with_error!(name, error);
     let options = safe_optional_const_bson!(options);
-    let opts_doc: Option<Document> = match options {
-        Some(ref bson) => Some(safe_error!(Document::try_from(bson), error)),
+
+    let opts = match options {
+        Some(ref opts) => Some(safe_error!(mongodb::bson::deserialize_from_slice(opts.as_bytes()), error)),
         None => None,
     };
 
-    let db = safe_error!(DatabaseT::new(client, name, opts_doc), error);
+    let db = safe_error!(DatabaseT::new(client, name, opts), error);
     Box::into_raw(Box::new(db))
 }
 
@@ -102,12 +99,11 @@ pub extern "C" fn mongoac_database_create_collection_async(
     let database = safe_as_ref_with_error!(database, error);
     let name = safe_cstr_from_ptr_with_error!(name, error);
     let options = safe_optional_const_bson!(options);
-    let create_opts: Option<mongodb::options::CreateCollectionOptions> = match options {
-        Some(ref bson) => {
-            let doc = safe_error!(Document::try_from(bson), error);
-            let opts = safe_error!(mongodb::bson::deserialize_from_document(doc), error);
-            Some(opts)
-        }
+    let create_opts = match options {
+        Some(ref bson) => Some(safe_error!(
+            mongodb::bson::deserialize_from_slice(bson.as_bytes()),
+            error
+        )),
         None => None,
     };
 
