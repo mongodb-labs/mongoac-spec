@@ -87,7 +87,12 @@ impl RuntimeT {
         F::Output: Send + 'static,
     {
         let handle = self.state.runtime.spawn(future);
-        let mut guard = self.state.spawn_mut.lock(); // TODO: replace with non-blocking alternative.
+
+        // IMPORTANT: this guard MAY be blocked by other spawners or by a worker thread, but the lock is held for a very
+        // short time in all cases, so this is *effectively* non-blocking in most scenarios. Nevertheless, it may need
+        // to be replaced with a semaphores or channels (truly non-blocking) if spawner contention becomes a measurable
+        // bottleneck.
+        let mut guard = self.state.spawn_mut.lock();
         *guard = true;
         self.state.spawn_cv.notify_one();
         handle
@@ -134,9 +139,9 @@ impl RuntimeT {
 
     fn wait_impl(&self, timeout: Option<Duration>) -> bool {
         let deadline = timeout.map(|t| Instant::now() + t);
-        let mut guard = self.state.spawn_mut.lock();
 
-        // Loop while no work is available.
+        // IMPORTANT: this guard MUST be held for as short as possible to avoid blocking spawning threads.
+        let mut guard = self.state.spawn_mut.lock();
         while !*guard {
             match deadline {
                 None => self.state.spawn_cv.wait(&mut guard),
