@@ -4,12 +4,12 @@ use crate::database::DatabaseT;
 use crate::error::ErrorT;
 use crate::future::FutureT;
 use crate::private::bson::bson_t;
-use mongodb::bson::RawDocumentBuf;
 use crate::runtime::RuntimeT;
 use crate::{
     safe_as_ref_with_error, safe_cstr_from_ptr_with_error, safe_drop, safe_optional_error_as_mut,
     spawn,
 };
+use mongodb::bson::RawDocumentBuf;
 
 pub struct CollectionT {
     inner: mongodb::Collection<RawDocumentBuf>,

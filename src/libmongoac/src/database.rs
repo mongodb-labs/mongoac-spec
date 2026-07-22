@@ -75,7 +75,10 @@ pub extern "C" fn mongoac_client_get_database(
     let options = safe_optional_const_bson!(options);
 
     let opts = match options {
-        Some(ref opts) => Some(safe_error!(mongodb::bson::deserialize_from_slice(opts.as_bytes()), error)),
+        Some(ref opts) => Some(safe_error!(
+            mongodb::bson::deserialize_from_slice(opts.as_bytes()),
+            error
+        )),
         None => None,
     };
 
