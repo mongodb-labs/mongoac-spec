@@ -118,7 +118,12 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
             "bson/bson_t.h",
             "stdbool.h",
         ],
-        "runtime" => includes!["mongoac/export.h", "stdint.h"],
+        "runtime" => includes![
+            "mongoac/export.h",
+            "mongoac/error.h",
+            "mongoac/future.h",
+            "stdint.h"
+        ],
         "database" => includes![
             "mongoac/export.h",
             "mongoac/client.h",

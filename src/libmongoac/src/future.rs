@@ -11,6 +11,7 @@ use crate::{
 
 use std::future::Future;
 use std::pin::Pin;
+use std::task::Context;
 
 use std::time::{Duration, Instant};
 
@@ -86,8 +87,16 @@ impl FutureT {
         &self.value
     }
 
+    pub(crate) fn from_runtime(&self, runtime: &RuntimeT) -> bool {
+        runtime == &self.runtime
+    }
+
     fn is_ready(&self) -> bool {
         self.value.is_ready()
+    }
+
+    pub(crate) fn poll_with_context(&mut self, ctx: &mut Context<'_>) -> bool {
+        self.value.poll_with_context(ctx)
     }
 
     fn poll(&mut self) -> bool {
@@ -95,14 +104,47 @@ impl FutureT {
     }
 
     fn wait(&mut self) {
-        self.value.wait()
+        if self.value.is_ready() {
+            return;
+        }
+
+        let completion = CompletionWaker::new();
+        let waker = completion.waker();
+        let mut ctx = Context::from_waker(&waker);
+
+        loop {
+            if self.value.poll_with_context(&mut ctx) {
+                return;
+            }
+            completion.wait(None);
+        }
     }
 
     fn wait_with_timeout(&mut self, timeout: Duration) -> bool {
-        self.value.wait_with_timeout(timeout)
+        if self.value.is_ready() {
+            return true;
+        }
+
+        let deadline = Instant::now() + timeout;
+        let completion = CompletionWaker::new();
+        let waker = completion.waker();
+        let mut ctx = Context::from_waker(&waker);
+
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return false;
+            }
+
+            if self.value.poll_with_context(&mut ctx) {
+                return true;
+            }
+
+            completion.wait(Some(remaining));
+        }
     }
 
-    fn block_on(&mut self) {
+    pub(crate) fn block_on(&mut self) {
         self.value.block_on(&self.runtime);
     }
 }
@@ -141,7 +183,7 @@ macro_rules! future_value_op {
     };
 }
 impl FutureValue {
-    fn is_ready(&self) -> bool {
+    pub(crate) fn is_ready(&self) -> bool {
         future_value_op!(&*self, v => v.is_ready())
     }
 
@@ -149,12 +191,8 @@ impl FutureValue {
         future_value_op!(&mut *self, v => v.poll())
     }
 
-    fn wait(&mut self) {
-        future_value_op!(&mut *self, v => v.wait())
-    }
-
-    fn wait_with_timeout(&mut self, timeout: Duration) -> bool {
-        future_value_op!(&mut *self, v => v.wait_with_timeout(timeout))
+    fn poll_with_context(&mut self, ctx: &mut std::task::Context<'_>) -> bool {
+        future_value_op!(&mut *self, v => v.poll_with_context(ctx))
     }
 
     fn block_on(&mut self, runtime: &RuntimeT) {
@@ -304,58 +342,6 @@ impl<T: Send + 'static> FutureValueType<T> {
         }
     }
 
-    /// Blocking wait using a condvar-backed waker.
-    ///
-    /// Parks the thread via `CompletionWaker` until a progress thread drives
-    /// the runtime and the future resolves.  Returns only when ready.
-    fn wait(&mut self) {
-        match self {
-            FutureValueType::Result(_) => {}
-            FutureValueType::Future(_) => {
-                let completion = CompletionWaker::new();
-                let waker = completion.waker();
-                let mut ctx = std::task::Context::from_waker(&waker);
-
-                loop {
-                    if self.poll_with_context(&mut ctx) {
-                        return;
-                    }
-                    completion.wait(None);
-                }
-            }
-        }
-    }
-
-    /// Blocking wait with a wall-clock timeout.
-    ///
-    /// Parks the thread via `CompletionWaker` until ready or the deadline
-    /// expires.  Returns `true` if the future completed, `false` if the
-    /// timeout expired first.
-    fn wait_with_timeout(&mut self, timeout: Duration) -> bool {
-        match self {
-            FutureValueType::Result(_) => true,
-            FutureValueType::Future(_) => {
-                let deadline = Instant::now() + timeout;
-                let completion = CompletionWaker::new();
-                let waker = completion.waker();
-                let mut ctx = std::task::Context::from_waker(&waker);
-
-                loop {
-                    let remaining = deadline.saturating_duration_since(Instant::now());
-                    if remaining.is_zero() {
-                        return false;
-                    }
-
-                    if self.poll_with_context(&mut ctx) {
-                        return true;
-                    }
-
-                    completion.wait(Some(remaining));
-                }
-            }
-        }
-    }
-
     /// Blocking resolution by entering the Tokio runtime.
     ///
     /// Extracts the inner future and calls `runtime.block_on()` on it.
@@ -477,6 +463,75 @@ mod tests {
         });
         future.block_on();
         blocker.join().unwrap();
+    }
+
+    #[test]
+    fn block_on_long_sleep_parks_until_ready() {
+        let runtime = make_runtime();
+        let mut future = spawn_delayed(&runtime, Duration::from_millis(500));
+        let start = Instant::now();
+        future.block_on();
+        let elapsed = start.elapsed();
+
+        assert!(
+            future.value.is_ready(),
+            "future should be ready after block_on"
+        );
+        assert!(
+            elapsed >= Duration::from_millis(400) && elapsed < Duration::from_millis(1500),
+            "block_on should park until the sleep fires, not spin or return early (elapsed: {elapsed:?})"
+        );
+    }
+
+    #[test]
+    fn runtime_block_on_any_does_not_take_ownership() {
+        let runtime = make_runtime();
+        let mut f1 = spawn_delayed(&runtime, Duration::from_millis(50));
+        let mut f2 = spawn_delayed(&runtime, Duration::from_millis(500));
+
+        let mut futures = [Some(&mut f1 as &mut FutureT), Some(&mut f2 as &mut FutureT)];
+        let start = Instant::now();
+        // Both spawned futures are short, so at least one will become ready; None is impossible here.
+        let future = runtime
+            .block_on_any(&mut futures)
+            .expect("one future should be ready");
+        let elapsed = start.elapsed();
+
+        assert!(std::ptr::eq(future, &mut f1));
+        assert!(
+            elapsed >= Duration::from_millis(40) && elapsed < Duration::from_millis(150),
+            "block_on_any should return as soon as the short task fires (elapsed: {elapsed:?})"
+        );
+
+        // The futures are borrowed, not consumed. The ready one can be queried and the
+        // other one can still be driven to completion.
+        assert!(f1.value.is_ready());
+        assert!(!f2.value.is_ready());
+
+        f2.block_on();
+        assert!(f2.value.is_ready());
+    }
+
+    #[test]
+    fn runtime_block_on_all_waits_for_all_futures() {
+        let runtime = make_runtime();
+        let mut f1 = spawn_delayed(&runtime, Duration::from_millis(50));
+        let mut f2 = spawn_delayed(&runtime, Duration::from_millis(200));
+
+        let mut futures = [Some(&mut f1 as &mut FutureT), Some(&mut f2 as &mut FutureT)];
+        let start = Instant::now();
+        runtime.block_on_all(&mut futures);
+        let elapsed = start.elapsed();
+
+        // block_on_all should wait for the slowest task, not the fastest.
+        assert!(
+            elapsed >= Duration::from_millis(180) && elapsed < Duration::from_millis(400),
+            "block_on_all should wait for the slowest task (elapsed: {elapsed:?})"
+        );
+
+        // Both futures are borrowed, not consumed, and are now ready.
+        assert!(f1.value.is_ready());
+        assert!(f2.value.is_ready());
     }
 
     // -- wait tests --

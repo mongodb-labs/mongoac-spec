@@ -43,3 +43,20 @@ TEST_CASE("runtime destroy", "[mongoac][runtime]")
       SUCCEED();
    }
 }
+
+TEST_CASE("block_on_any", "[mongoac][runtime]")
+{
+   SECTION("null")
+   {
+      CHECK(mongoac_runtime_block_on_any(nullptr, nullptr, 0, nullptr) == nullptr);
+   }
+}
+
+TEST_CASE("block_on_all", "[mongoac][runtime]")
+{
+   SECTION("null")
+   {
+      mongoac_runtime_block_on_all(nullptr, nullptr, 0);
+      SUCCEED();
+   }
+}
