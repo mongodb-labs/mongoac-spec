@@ -382,7 +382,7 @@ This pattern is also consistent with the Rust API's use of `*_with_options()` fu
 > - [Should unrecognized fields be warned about?](#unrecognized-bson-fields)
 
 > [!NOTE]
-> `ClientSessionT` is a notable exception to the "non-options structs are immutable" pattern.
+> `ClientSession` is a notable exception to the "non-options structs are immutable" pattern.
 
 <!-- Audit Progress -->
 
@@ -470,7 +470,19 @@ Async operations return an opaque `mongoac_future_t*`. The C caller creates one 
 
 `mongoac_runtime_make_progress_with_timeout(runtime, timeout_ms)` wraps the yield in `tokio::time::timeout` to bound wall-clock time.
 
+`mongoac_runtime_wait(runtime)` blocks (parks) the calling thread until work is available on the per-client runtime, then returns without driving the runtime. It is intended for a **worker thread** that would otherwise spin between `make_progress()` calls. Work availability is signaled by `RuntimeT::spawn()` when a new task is queued; the worker thread typically follows `wait()` with `make_progress()` to advance the runtime. Does not call `make_progress()` internally. Returns no value; the only meaningful exit is work having become available. `NULL` is accepted safely and returns immediately.
+
+`mongoac_runtime_wait_with_timeout(runtime, timeout_ms)` blocks (parks) until work is available or the wall-clock `timeout_ms` expires. Returns `true` if work became available, `false` on timeout. Uses the same condvar-backed signal as `wait()`. `NULL` is accepted safely and returns `false`.
+
 For single-threaded contexts, a convenience loop works but loses the concurrency benefit of separate poll and worker threads.
+
+`mongoac_future_wait_with_timeout(future, timeout_ms)` blocks (parks) until the future is ready or the wall-clock `timeout_ms` expires. Returns `true` if ready, `false` on timeout. **Does not call `make_progress()` internally** — uses a condvar-backed `Waker` (via `std::task::Wake`) to register a real waker with the underlying `JoinHandle` poll chain, then parks on a condvar. An external thread must concurrently call `make_progress()` or `make_progress_with_timeout()` to advance the runtime; without it the call will block until the timeout expires.
+
+`mongoac_future_wait(future)` blocks (parks) indefinitely until the future is ready. Same mechanism as `wait_with_timeout()` with an infinite timeout. Postcondition: `mongoac_future_poll(future) == true`. Does not return a value — the only meaningful exit is the future being ready. Does not call `make_progress()` internally. Same precondition: an external thread must drive `make_progress()` concurrently.
+
+`mongoac_future_block_on(future)` blocks (parks) until ready by acquiring `progress_lock` and entering the Tokio runtime directly via `tokio::runtime::Runtime::block_on()`. Postcondition: `mongoac_future_poll(future) == true`. Does not return a value. Self-contained — does not require an external worker thread. Holds `progress_lock` for the duration, preventing concurrent `make_progress()` on other threads.
+
+**Thread-safety model:** `*const mongoac_future_t` functions (result getters) support concurrent access. `*mut mongoac_future_t` functions (`poll`, `wait`, `block_on`) are **NOT** thread-safe. `destroy` must be the last call on the object.
 
 > [!TIP]
 > - [Why timeout granularity?](#why-timeout-granularity)
@@ -893,6 +905,11 @@ Yielding exactly once per call advances the runtime without monopolizing the wor
 > [!TIP]
 > - [Why not yield until idle?](#rejected-exhaustive-progress)
 
+<a id="why-runtime-wait"></a>
+#### Why runtime wait?
+
+A dedicated worker thread that repeatedly calls `make_progress()` would otherwise spin or sleep in a busy loop between yields. A condvar-backed wait lets the worker thread park until a new task is actually queued via `RuntimeT::spawn()`, then wake only when there is work to advance. The timeout variant keeps the same non-spinning behavior while allowing the caller to bound blocking time.
+
 <a id="why-timeout-granularity"></a>
 ##### Why timeout granularity?
 
@@ -924,7 +941,7 @@ Cancellation is deferred because opaque handles allow it to be added later as an
 <a id="why-parking-lot"></a>
 #### Why parking_lot?
 
-`parking_lot::Mutex` and `Condvar` replace `std::sync` equivalents for async FFI: no spurious wakeups, no poisoning across FFI (panic unlocks rather than poisons), and simpler `try_lock()` without error-variant matching. Note: session operations use `tokio::sync::Mutex` instead (see [Sessions](#sessions)) because `tokio::sync::MutexGuard` is `Send` and must be held across `.await` points inside spawned tasks.
+`parking_lot::{Condvar, Mutex}` powers the `CompletionWaker` — no spurious `Condvar` wakeups and no poisoning across FFI (a panic in the `Wake` impl or waiting thread unlocks rather than corrupts). Note: session operations use `tokio::sync::Mutex` instead (see [Sessions](#sessions)) because `tokio::sync::MutexGuard` is `Send` and must be held across `.await` points inside spawned tasks.
 
 <a id="why-single-cursor-type"></a>
 #### Why a single `mongoac_cursor_t` type?
@@ -1199,7 +1216,7 @@ Rejected: fixed-size arrays truncate long messages and rigidify ABI. Changing ar
 <a id="rejected-waker-integration"></a>
 #### Waker-based event-loop integration
 
-A waker callback inverts control: Rust decides when to notify the caller rather than the caller polling. This imposes a mandatory thread-safe synchronization contract on all consumers, including those without an event loop, and `async-ffi`'s waker vtables are complex to implement correctly across language boundaries.
+A waker callback inverts control: Rust decides when to notify the caller rather than the caller polling. This imposes a mandatory thread-safe synchronization contract on all consumers, including those without an event loop, and waker vtables are complex to implement correctly across language boundaries.
 
 <a id="rejected-separate-futures"></a>
 #### Separate future types per result category
@@ -1230,6 +1247,17 @@ Rejected: the per-client runtime already exists at parse time. Using it eliminat
 #### Exposing separate C cursor types for implicit and explicit sessions
 
 The Rust driver's dual-cursor type is a borrow-checker artifact. C lacks Rust's lifetime system, so the distinction cannot be enforced at compile time. A single cursor type with an embedded session provides the same capabilities with a simpler API and fewer opportunities for caller error.
+
+<a id="rejected-interior-sync-future"></a>
+#### Interior synchronization for concurrent FFI access
+
+Wrapping `FutureValue` in `RwLock` (or `Mutex`) inside `FutureT` to allow FFI functions to operate through a shared `&FutureT` reference was investigated and rejected for three reasons:
+
+1. **Getter path regresses from lock-free to locked.** Every `get_*()` call would acquire a read lock, whereas the lock-free `Acquire`/`Release` protocol on the `ready` flag is both cheaper (2–3× for the uncontended case) and already correct.
+
+2. **`block_on()` forces an awkward two-phase lock handoff.** The inner future must be extracted under the lock, the lock released for `runtime.block_on()`, then the lock reacquired to store the result. This forces either type-erased `Box<dyn Any>` futures, double matching on all `FutureValue` variants, or holding the write lock through `runtime.block_on()` (which risks re-entrancy if the runtime processes tasks that call back into mongoac).
+
+3. **`Future::poll()` requires `Pin<&mut Self>` regardless of how the outer reference is obtained.** The `&mut self` at the `FutureValueType` level comes from the write guard's `DerefMut`, so the lock is held during `poll()` either way — the `RwLock` adds getter overhead without removing any internal serialization.
 
 ### Supported Features
 
@@ -1470,12 +1498,6 @@ Verification of `DropIndexOptions` collation support is deferred to the index ma
 The current `list_collection_names` implementation eagerly collects all results into a `Vec<String>` before returning. A streaming variant returning a cursor of name strings would reduce memory overhead for databases with very large numbers of collections. Deferred — the `list_collections` cursor path already provides a streaming alternative, and adding a streaming names variant later is an additive change.
 
 #### Async Operations
-
-<a id="deferred-blocking-poll-with-timeout"></a>
-
-##### Blocking Poll with Timeout
-
-`mongoac_future_poll_with_timeout` was initially specified but is deferred due to implementation complexity: `make_progress()` with timeout provides more value to callers than `poll()` with timeout. The blocking variant required a condvar-backed waker and relied on a separate thread driving `make_progress()`, which adds complexity without a corresponding ergonomic benefit over the existing polling loop + `make_progress_with_timeout` pattern. Adding it later is ABI-compatible.
 
 <a id="deferred-transaction-retry-callback"></a>
 

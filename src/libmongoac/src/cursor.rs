@@ -125,7 +125,7 @@ pub extern "C" fn mongoac_cursor_get_document(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_future_get_cursor(
-    future: *mut FutureT,
+    future: *const FutureT,
     error: *mut ErrorT,
 ) -> *mut CursorT {
     let error = safe_optional_error_as_mut!(error);

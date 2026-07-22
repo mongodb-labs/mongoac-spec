@@ -27,7 +27,7 @@ pub extern "C" fn mongoac_client_session_destroy(session: *mut ClientSessionT) {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_future_get_client_session(
-    future: *mut FutureT,
+    future: *const FutureT,
     error: *mut ErrorT,
 ) -> *mut ClientSessionT {
     let error = safe_optional_error_as_mut!(error);
