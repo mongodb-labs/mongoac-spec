@@ -92,8 +92,11 @@ impl RuntimeT {
         // short time in all cases, so this is *effectively* non-blocking in most scenarios. Nevertheless, it may need
         // to be replaced with a semaphores or channels (truly non-blocking) if spawner contention becomes a measurable
         // bottleneck.
-        let mut guard = self.state.spawn_mut.lock();
-        *guard = true;
+        {
+            let mut guard = self.state.spawn_mut.lock();
+            *guard = true;
+        }
+
         self.state.spawn_cv.notify_one();
         handle
     }
