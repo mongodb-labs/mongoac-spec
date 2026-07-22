@@ -6,8 +6,11 @@ This project is the initial design specification for the new MongoDB Async C Dri
 
 > [!CAUTION]
 > This specification is still in a drafting state!
+> As a Proof of Concept, this project uses heavy LLM-assistance using Kimi K2.7 Code and DeepSeek V4 Flash.
 > Details in this README.md are still being reviewed and the reference implementation under `src/libmongoac` is still
 >   being audited.
+> Contents above the `<!-- Audit Progress -->` marker comment in this file have been manually reviewed, audited, and
+>   edited for accuracy and intent.
 
 ## Terminology
 
@@ -343,40 +346,56 @@ if (!mongoac_future_get_bson_non_owning(future, &bson, error)) { /* error handli
 else { use(&bson); } // Non-owning: `bson_destroy(doc)` not required.
 ```
 
-#### Opaque Handles
+#### Opaque Pointers
 
-Every type is created by `mongoac_<type>_new()` and destroyed by `mongoac_<type>_destroy()`. All functions accept `NULL` gracefully: constructors return `NULL` on error, destructors are no-ops on `NULL`.
+All structs owned and returned by mongoac are opaque, including `bson_t` objects.
+Safety macros enforce not-null requirements as graceful errors returned via `mongoac_error_t *error` out-params.
+Owning pointers to mongoac structs are returned using `Box::into_raw()` and destroyed by `drop(Box::from_raw(ptr))`
+  within a dedicated `mongoac_*_destroy()` function using `safe_drop!(ptr)`.
 
-Memory flows one direction: Rust allocates with `Box::into_raw()` and C returns with `mongoac_*_destroy()`, which calls `Box::from_raw()`. Strings are `CString`-owned by the Rust type; C borrows via `as_ptr()`. cbindgen renames Rust types (`ClientT`, `ErrorT`) to C names (`mongoac_client_t`, `mongoac_error_t`) via per-crate overrides in `build.rs`.
+All public structs are defined as `pub struct ExampleT`, which are renamed to `mongoac_example_t` by cbindgen via
+  build.rs.
+The `T` suffix in Rust mirrors the `_t` suffix in C and prevents ambiguity with existing Rust structs and traits (e.g.
+  `ErrorT` vs. `std::error::Error`, `ClientT` vs. `mongodb::Client`, etc.).
+Private structs (under `src/libmongoac/private/`) do not need to follow this naming convention.
 
-> [!TIP]
-> - [Why opaque handles?](#why-opaque-handles)
-> - [Why the `T` suffix in Rust?](#why-t-suffix)
+The Rust API treats most non-options classes such as `Client`, `Database`, and `Collection` as immutable
+  post-construction.
+This means most public API operating on these objects are logically-const.
+Therefore, with the exception of `mongoac_*_destroy()`, most functions `mongoac_example_*(example, ...)` may accept
+  `const mongoac_example_t *example` when `ExampleT` corresponds to an immutable struct.
+The mongoac library internally uses `Arc<Mutex<T>>` for consistency with the Rust Driver's thread-safety model.
+This is conceptually analogous to `std::shared_ptr<std::pair<std::mutex, T>>` in C++.
 
-#### Object Immutability
-
-The Rust driver treats `Client`, `Database`, `Collection`, and `GridFsBucket` as immutable after construction. Consequently:
-
-- mongoac constructors accept all mutable options at creation time.
-- There are no `mongoac_*_set_*()` functions for top-level objects.
-- Per-operation overrides (e.g., `SelectionCriteria`) are passed at invocation time.
-
-> [!TIP]
-> - [Why immutable top-level objects?](#why-immutable-top-level-objects)
-
-#### Options Deserialization
-
-Every Rust API `*Options` struct exposed by the C API is passed as a single `*const bson_t`. The C caller constructs a BSON document containing the desired fields, and the FFI layer deserializes it into the corresponding Rust `*Options` type via serde. Passing `NULL` uses the Rust default. Serde silently ignores unrecognized fields.
-
-Options follow the Client → Database → Collection → operation inheritance chain: `NULL` (or omitting a field) inherits from the parent; an explicit BSON document overrides.
-
-> **BSON key casing** varies by options struct due to inconsistent serde renaming in the underlying Rust driver. `ClientOptions`, `CollectionOptions`, and per-operation options use `camelCase`; `DatabaseOptions` uses `snake_case`. The FFI layer normalizes `DatabaseOptions` to accept both casings.
+Because (nearly) all Rust API `*Options` structs support deserialization via
+  [serde](https://docs.rs/serde/latest/serde/), the initial design specification proposes consistently using a single
+  `options: *const bson_t` optional (nullable) parameter for all options by default to keep the Rust FFI as "thin" as
+  possible.
+This avoids needing to implement a large number of `*OptionsT` structs and accessor API in the initial Rust FFI
+  implementation (several hundred functions in total when accounting for all the various options structs).
+The API may be extended as-needed in the future to support typed options structs by adding `*_with_options()` variants
+  to the existing API (e.g. see `mongoac_client_new_with_options()` for `mongoac_client_options_t`).
+This pattern is also consistent with the Rust API's use of `*_with_options()` functions.
 
 > [!TIP]
 > - [Why use a single `bson_t` for options structs?](#why-bson-options)
-> - [Why not expose typed C option structs with setters?](#rejected-typed-options-structs)
 > - [Should unrecognized fields be warned about?](#unrecognized-bson-fields)
-> - [Why normalize DatabaseOptions BSON key casing?](#why-normalize-database-options-casing)
+
+> [!NOTE]
+> `ClientSessionT` is a notable exception to the "non-options structs are immutable" pattern.
+
+<!-- Audit Progress -->
+
+#### Input Validation
+
+The `private/safety.rs` crate provides macros which encapsulate unsafe C-to-Rust input validation.
+All safety macros are defined to avoid runtime panics, both during validation (error handling) and after validation
+  (in safe Layer 2 internal Rust code).
+The `*_with_error` variants ensure the optional `mongoac_error_t *error` parameter is always cleared (when not null) and
+  set when an input validation error occurs.
+The macros which handle string-like arguments additionally validate the string is UTF-8 for Rust API compatibility:
+  this is also [a language-wide invariant](https://doc.rust-lang.org/book/ch08-02-strings.html).
+These macros are expected to be used exclusively in Layer 1 (Public API) function definitions.
 
 #### Client Options
 
@@ -412,26 +431,6 @@ Errors are reported through an opaque `mongoac_error_t` out-parameter with categ
 > - [Why raw integer codes?](#why-raw-error-codes)
 > - [Why #define macros?](#why-define-macros)
 > - [Why return-value-with-error convention?](#why-return-value-with-error)
-
-#### Input Validation
-
-The `private/safety.rs` module provides `macro_rules!` macros that convert unsafe C parameters into safe Rust references, validating null pointers and populating the `mongoac_error_t` out-parameter on failure:
-
-| Macro | Validation |
-|---|---|---|
-| `safe_as_{mut,ref}_with_error!(ptr, error)` | Must not be `NULL` |
-| `safe_as_{mut,ref}!(ptr)` | Must not be `NULL`; returns `Default::default()` |
-| `safe_optional_as_{mut,ref}!(ptr)` | Always safe; `NULL` → `None` |
-| `safe_optional_error_as_mut!(error)` | `NULL` → `None`; clears stale error on non-`NULL` |
-| `safe_cstr_from_ptr_with_error!(ptr, error)` | Must not be `NULL`; must be valid UTF-8 |
-| `safe_optional_cstr_from_ptr_with_error!(ptr, error)` | If non-`NULL`, must be valid UTF-8 |
-| `safe_drop!(ptr)` | Reclaims `Box`-allocated handle when not `NULL` |
-
-Each macro follows a common pattern: one `unsafe` conversion per raw pointer, an `"invalid argument"` message and early return of a default value on failure. A `NULL` error pointer means no error details are written. The `safe_optional_error_as_mut!` macro additionally clears any stale error on the non-`NULL` path, ensuring success paths leave the error in a clean `Ok` state.
-
-> [!TIP]
-> - [Why enforce valid UTF-8?](#why-enforce-utf8)
-> - [Why use safety macros?](#why-safety-macros)
 
 #### Async Runtime
 
@@ -537,7 +536,6 @@ C callers may optionally append wrapping-library metadata via `mongoac_client_ap
 >
 > [!TIP]
 > - [Why append C build metadata to the platform field?](#why-build-platform-metadata)
-> - [Why enforce valid UTF-8?](#why-enforce-utf8)
 
 #### Event API
 
@@ -614,7 +612,6 @@ Read concern and write concern follow the [Options Deserialization](#options-des
 
 > [!TIP]
 > - [Why use BSON documents for read/write concern?](#why-bson-options)
-> - [Why normalize DatabaseOptions BSON key casing?](#why-normalize-database-options-casing)
 > - [Why defer typed concern structs?](#deferred-typed-read-preference)
 
 <a id="crud-operations"></a>
@@ -655,7 +652,6 @@ The cursor is backed by the Rust driver's `Cursor<T>` (implicit session) or `Ses
 Collation is passed as a BSON sub-document inside existing `*const bson_t options` parameters. The BSON document follows the Rust `Collation` struct fields (`locale` required, plus optional `strength`, `caseLevel`, `caseFirst`, `numericOrdering`, `alternate`, `maxVariable`, `normalization`, `backwards`). Collation is supported on all CRUD operations except `estimated_document_count`, `insert_one`, and `insert_many`. mongoac does not check `maxWireVersion < 5` for collation; the Rust driver handles server incompatibility.
 
 > [!TIP]
-> - [Why no separate collation type?](#why-no-separate-collation-type)
 > - [Why no maxWireVersion check?](#why-no-maxwireversion-check)
 > - [Why are opcode-based writes not a concern?](#why-opcode-non-issue)
 
@@ -804,30 +800,26 @@ Rust tests exercise internal logic without cbindgen/C compilation overhead. C++ 
 
 ### Rust FFI Design
 
-<a id="why-t-suffix"></a>
-#### Why the `T` suffix in Rust?
-
-It marks types that cross the FFI boundary, analogous to C's `_t` suffix. `ErrorT` was chosen over `Error` to avoid shadowing `std::error::Error`.
-
-<a id="why-opaque-handles"></a>
-#### Why opaque handles?
-
-Opaque pointers provide ABI stability: the internal layout can change without breaking C callers. They also simplify memory ownership via clear `Box::into_raw` / `Box::from_raw` boundaries.
-
-<a id="why-immutable-top-level-objects"></a>
-#### Why immutable top-level objects?
-
-The Rust driver stores `Client`, `Database`, and `Collection` behind `Arc` wrappers with no public mutation API. mongoac mirrors this: top-level objects are configured at construction and cannot be changed afterwards, avoiding a parallel mutable C API for types the Rust driver does not support mutating.
-
 <a id="why-bson-options"></a>
 #### Why use a single `bson_t` for options structs?
 
-The Rust driver exposes many `#[non_exhaustive]` options structs, each with a large, evolving set of fields. A single `bson_t*` document deserializes directly into the Rust struct through serde, reusing the same validation and shape without introducing a parallel C API. This keeps the FFI surface small and avoids typed C setters for every new Rust field.
+Because (nearly) all Rust API `*Options` structs support deserialization via
+  [serde](https://docs.rs/serde/latest/serde/), the initial design specification proposes consistently using a single
+  `options: *const bson_t` optional (nullable) parameter for all options by default to keep the Rust FFI as "thin" as
+  possible.
+This avoids needing to implement a large number of `*OptionsT` structs and accessor API in the initial Rust FFI
+  implementation: over a hundred functions in total when accounting for all the various options structs whose accessors
+  must be kept in sync with every individual options field.
+The API may be extended as-needed in the future to support typed options structs by adding `*_with_options()` variants
+  to the existing API (e.g. see `mongoac_client_new_with_options()` for `mongoac_client_options_t`).
+This pattern is also consistent with the Rust API's use of `*_with_options()` functions.
 
-<a id="why-normalize-database-options-casing"></a>
-##### Why normalize DatabaseOptions BSON key casing?
-
-`DatabaseOptions` lacks `#[serde(rename_all = "camelCase")]` in the Rust driver, unlike every other options struct. This means `DatabaseOptions` expects `snake_case` keys while everything else expects `camelCase`. The FFI layer normalizes `DatabaseOptions` to accept both casings so callers do not need to track which casing each struct expects.
+> [!IMPORTANT]
+> BSON deserialization via serde automatically handles mapping `camelCase` BSON document fields to `snake_case` fields
+>   in options structs.
+> However, as a notable exception, `DatabaseOptions` is currently missing `#[serde(rename_all = "camelCase")]`.
+> The Rust FFI will need to implement its own support for mapping `camelCase` BSON document fields to `DatabaseOptions`
+>   fields for consistency.
 
 <a id="why-typed-client-options"></a>
 #### Why typed `ClientOptionsT` when operation options use `bson_t`?
@@ -864,18 +856,8 @@ Server and Rust driver codes are external values not owned by mongoac. Only a sm
 
 Returning the result value directly avoids forcing callers to declare extra variables. The `error` out-parameter carries structured diagnostics that a `bool` return cannot. The return value doubles as a safe default on error (0, `NULL`), so accessing it unconditionally is safe — the caller checks the error code only to distinguish a real result from a sentinel. Non-owning BSON out-params are the one exception: `bson_init_static` initializes an existing `bson_t` in place, requiring a pointer rather than a return value.
 
-<a id="why-enforce-utf8"></a>
-#### Why enforce valid UTF-8 at the FFI boundary?
-
-BSON strings, the Rust driver API, MongoDB wire-protocol strings, and metadata are all UTF-8. Rejecting non-UTF-8 at the boundary (`CStr::to_str()`) avoids lossy replacement logic (`Utf8Lossy` is internal to the driver for server responses, not a public escape hatch), simplifies the FFI implementation, and fails fast on what is almost always a caller bug. Spec-level validation (e.g., `|` in metadata, 512-byte limit) remains delegated to the Rust driver per the partially-transparent error-handling approach.
-
 > [!TIP]
 > - [Error-handling transparency trade-off](#error-handling-transparency)
-
-<a id="why-safety-macros"></a>
-#### Why use safety macros?
-
-The safety macros rely on `ptr::as_ref()`, `ptr::as_mut()`, and `CStr::from_ptr()` within `unsafe` blocks. These never panic at runtime, allowing use inside `unsafe` blocks without violating the no-panic rule. The macros eliminate the null-pointer class (the most common C FFI error) while the remaining precondition — valid, properly-aligned object — is documented as an `unsafe` contract for the caller.
 
 <a id="why-per-client-runtime"></a>
 #### Why per-client runtime?
@@ -1059,11 +1041,6 @@ These behaviors are managed entirely inside the Rust driver, which exposes no pu
 
 #### Collation
 
-<a id="why-no-separate-collation-type"></a>
-##### Why no separate collation type?
-
-The [existing rejection of typed option structs](#rejected-typed-options-structs) applies: a dedicated collation type would duplicate serde-deserialization of the Rust `Collation` struct and require maintenance for every new field.
-
 <a id="why-no-maxwireversion-check"></a>
 ##### Why no maxWireVersion check?
 
@@ -1243,11 +1220,6 @@ Cooperative cancellation requires wiring an `AbortHandle` or oneshot channel int
 #### Borrowed `&'r Runtime` references in RuntimeT
 
 Borrowed references are sufficient when Rust controls lifetimes and callers are single-threaded. C callers do not understand borrow semantics, and a `RuntimeT` may outlive its originating `ClientT`, so `Arc<Runtime>` inside `RuntimeT` is the only safe choice. `RuntimeT` stores `Arc<Runtime>` and `Arc<Mutex<()>>` (for `progress_lock`), and is `Clone`-derived so callers can cheaply share handles.
-
-<a id="rejected-typed-options-structs"></a>
-#### Typed C option structs with setters
-
-A dedicated `mongoac_find_options_t` (or similar) handle with per-field setters would provide stronger C API discoverability and type checking. However, the Rust driver exposes many `#[non_exhaustive]` options structs with large, evolving field sets. Maintaining a parallel C struct for each one would require ongoing updates for every new Rust option and would duplicate validation already implemented by serde.
 
 <a id="rejected-temporary-runtime"></a>
 ##### Temporary runtime for URI parse
