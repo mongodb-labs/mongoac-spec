@@ -19,7 +19,7 @@ This project is the initial design specification for the new MongoDB Async C Dri
 | **Async C Driver** | mongoac | This library (providing an async C API). |
 | **C Driver** | mongoc | The existing synchronous C library. |
 | **BSON Library** | bson2 | The existing C BSON library (v2). |
-| **mongo-c-driver** | N/A | The repository providing bson, mongoc, and mongoac. |
+| **mongo-c-driver** | N/A | The repository providing bson2, mongoc, and mongoac. |
 | **Rust Driver** | Rust API | The `mongodb` crate. |
 | **Rust FFI** | mongoac | This library (translating the Rust API into a C FFI). |
 
@@ -82,7 +82,7 @@ CMake invokes `cargo rustc` via `add_custom_command`, passing `--target-dir` ins
 The custom target directory is essential to support both single-config and multi-config CMake generators.
 
 The environment variables `MONGOAC_BSON_SHARED_LIBRARY_FILENAME` and `MONGOAC_BSON_STATIC_LIBRARY_FILENAME` direct
-  `build.rs` to use the correct linkage with the appropriate bson library, as detected and configured by the parent
+  `build.rs` to use the correct linkage with the appropriate bson2 library, as detected and configured by the parent
   CMake build configuration (for consistency with how mongoc links with bson, or how mongocxx links with bsoncxx).
 `build.rs` then emits `cargo:rustc-link-lib=bson2` (shared) or `cargo:rustc-link-lib=static=bson2` (static)
   accordingly.
@@ -100,9 +100,9 @@ To avoid unnecessarily coupling mongo-c-driver specific CMake configuration patt
 > Unlike mongoc, mongoac does **not** require `ENABLE_STATIC` to build tests.
 
 > [!TIP]
-> - [Why link libbson into the Rust crate?](#why-link-libbson-into-rust)
-> - [Why explicit environment variables for shared vs static libbson?](#why-explicit-bson-link-vars)
-> - [Why not statically embed libbson into the cdylib?](#rejected-downstream-bson-link)
+> - [Why link bson2 into the Rust crate?](#why-link-bson2-into-rust)
+> - [Why explicit environment variables for shared vs static bson2?](#why-explicit-bson-link-vars)
+> - [Why not statically embed bson2 into the cdylib?](#rejected-downstream-bson-link)
 
 #### Build Configuration
 
@@ -277,7 +277,7 @@ pub extern "C" fn mongoac_example_async(
   //         }
   //     }
   // }
-  let input = safe_cstr_from_ptr_with_error!(str);
+  let input = safe_cstr_from_ptr_with_error!(input);
 
   // Layer 1: error handling.
   // let future = match example.async(input) {
@@ -309,9 +309,9 @@ impl ExampleT {
 }
 ```
 
-#### BSON Library
+#### bson2
 
-The mongoac library deliberately reuses the existing BSON C library in its API.
+The mongoac library deliberately reuses the existing BSON C library (`bson2`) in its API.
 
 Unfortunately, `unsafe` blocksc are required when invoking bson API (currently the only expected use of `unsafe` that
   is not in Layer 1).
@@ -330,7 +330,7 @@ This convention applies both to pointers given to mongoac and pointers returned 
 This design specification proposes using return values instead of using out-parameters whenever possible, e.g.:
 
 ```c
-bson_t *bson = mongoac_future_get_bson(future, &bson, error);
+bson_t *bson = mongoac_future_get_bson(future, error);
 if (mongoac_error_code(error) != MONGOAC_ERROR_CODE_OK) { /* error handling */ }
 else { use(bson); bson_destroy(bson); }
 ```
@@ -408,7 +408,8 @@ construction.
 
 | Field | Setter | Type |
 |---|---|---|
-| Event capture (command, CMAP, SDAM) | `mongoac_client_options_set_capture_*_events(opts, bool)` | `bool` toggle (`false` default) |
+| Command event capture | `mongoac_client_options_set_capture_command_events(opts, bool)` | `bool` toggle (`false` default) |
+| CMAP/SDAM event capture toggles | `mongoac_client_options_set_capture_cmap_events(opts, bool)` / `mongoac_client_options_set_capture_sdam_events(opts, bool)` | `bool` toggle (`false` default; **not yet wired to event handlers**) |
 | `server_api` | `mongoac_client_options_set_server_api(opts, bson_t*, error)` | BSON document (`bson_t*`; `NULL` clears) |
 
 The `server_api` document is parsed and validated at setter time. It follows a
@@ -422,9 +423,9 @@ silently ignored.
 
 #### Error Model
 
-Errors are reported through an opaque `mongoac_error_t` out-parameter with category, code, and message fields. Four categories distinguish library-internal, Rust driver, BSON, and server errors; three synthetic codes cover common mongoac failures (missing category, invalid argument, runtime creation failure). Server and Rust driver error codes pass through as raw integers. Lifecycle is `mongoac_error_new()`/`mongoac_error_destroy()`; accessors return safe defaults on `NULL` input.
+Errors are reported through an opaque `mongoac_error_t` out-parameter with category, code, and message fields. Four categories are defined: `MONGOAC_ERROR_CATEGORY_NONE` (no error), `MONGOAC_ERROR_CATEGORY_MONGOAC` (mongoac-internal errors), `MONGOAC_ERROR_CATEGORY_BSON` (BSON deserialization errors), and `MONGOAC_ERROR_CATEGORY_RUST` (Rust driver errors, including server errors). Three synthetic codes cover common mongoac failures (unknown category, invalid argument, runtime error). Server and Rust driver error codes pass through as raw integers. Lifecycle is `mongoac_error_new()`/`mongoac_error_destroy()`; accessors return safe defaults on `NULL` input.
 
-**Return value convention:** Every function that accepts an `error` out-parameter returns its result value directly (not via an out-parameter). The return value doubles as a suitable default on error (0, `NULL`, etc.). The canonical way to test success vs. failure is `mongoac_error_code(error) == MONGOAC_ERROR_CODE_OK` — the `bool` return type is not used for this purpose. The only exception is non-owning BSON out-params (e.g., cursor document borrowing via `bson_init_static`), where an out-parameter is required because the caller borrows rather than owns the data.
+**Return value convention:** Every function that accepts an `error` out-parameter returns its result value directly (not via an out-parameter). The return value doubles as a suitable default on error (0, `NULL`, etc.). The canonical way to test success vs. failure is `mongoac_error_code(error) == MONGOAC_ERROR_CODE_OK` — the `bool` return type is not used for this purpose. A future exception may be non-owning BSON out-params (e.g., cursor document borrowing via `bson_init_static`), where an out-parameter would be required because the caller borrows rather than owns the data; the current cursor getter returns an owning `bson_t*` instead.
 
 > [!TIP]
 > - [Why opaque errors?](#why-opaque-error-handle)
@@ -480,9 +481,9 @@ Async operations return an opaque `mongoac_future_t*`. The C caller creates one 
 
 `mongoac_runtime_wait_with_timeout(runtime, timeout_ms)` blocks (parks) until work is available or the wall-clock `timeout_ms` expires. Returns `true` if work became available, `false` on timeout. Uses the same condvar-backed signal as `wait()`. `NULL` is accepted safely and returns `false`.
 
-`mongoac_runtime_request_stop(runtime)` signals any thread parked on `mongoac_runtime_wait()` or `mongoac_runtime_wait_with_timeout()` for this runtime to wake and exit. It sets a persistent stop flag and notifies all waiters. A worker thread typically checks `mongoac_runtime_is_stop_requested()` after each `wait()` to decide whether to stop driving the runtime. `NULL` is accepted safely. The stop request is not automatically cleared; a new runtime handle is required if the caller wants to resume worker threads after stopping.
+`mongoac_runtime_request_stop(runtime)` signals any thread parked on `mongoac_runtime_wait()` or `mongoac_runtime_wait_with_timeout()` for this runtime to wake and exit. It sets a persistent stop flag and notifies all waiters. A worker thread typically checks `mongoac_runtime_stop_requested()` after each `wait()` to decide whether to stop driving the runtime. `NULL` is accepted safely. The stop request is not automatically cleared; a new runtime handle is required if the caller wants to resume worker threads after stopping.
 
-`mongoac_runtime_is_stop_requested(runtime)` returns `true` if `mongoac_runtime_request_stop()` has been called on this runtime, otherwise `false`. `NULL` is accepted safely and returns `false`.
+`mongoac_runtime_stop_requested(runtime)` returns `true` if `mongoac_runtime_request_stop()` has been called on this runtime, otherwise `false`. `NULL` is accepted safely and returns `false`.
 
 **Thread-safety model:** All `mongoac_future_t` functions (`clone`, `is_ready`, `get_*`) are read-only and thread-safe across clones of the same underlying future. `mongoac_future_destroy()` must be the last call on a given handle; concurrent `destroy` with any other operation is not safe. `mongoac_runtime_t` `*mut` functions (`make_progress*`, `block_on*`, `wait*`, `request_stop`) are **NOT** thread-safe on the same runtime handle or its clones.
 
@@ -491,7 +492,7 @@ Async operations return an opaque `mongoac_future_t*`. The C caller creates one 
 
 ##### Result Extraction
 
-After `is_ready()` returns `true` or a `block_on*()` function has driven the future to completion, the caller extracts the result using a typed getter matching the operation's result category. Each getter returns the result value directly and writes error details to the `error` out-parameter. To distinguish a real result from a default/sentinel value, the caller checks `mongoac_error_code(error) == MONGOAC_ERROR_CODE_OK`. Calling a getter with a mismatched result type is undefined behavior. Calling a getter before the future is ready sets `error` to `MONGOAC_ERROR_CODE_RUNTIME_ERROR` and returns a default value.
+After `is_ready()` returns `true` or a `block_on*()` function has driven the future to completion, the caller extracts the result using a typed getter matching the operation's result category. Each getter returns the result value directly and writes error details to the `error` out-parameter. To distinguish a real result from a default/sentinel value, the caller checks `mongoac_error_code(error) == MONGOAC_ERROR_CODE_OK`. Calling a getter with a mismatched result type sets `error` to `MONGOAC_ERROR_CODE_RUNTIME_ERROR` and returns a default value. Calling a getter before the future is ready sets `error` to `MONGOAC_ERROR_CODE_RUNTIME_ERROR` and returns a default value.
 
 ##### Fire-and-Forget
 
@@ -505,6 +506,9 @@ Operations that do not require a result are spawned onto the per-client runtime 
 > - [Why defer cancellation?](#why-defer-cancellation)
 
 ### Supported Features
+
+> [!NOTE]
+> This section documents both features that are **implemented** in the current proof-of-concept and features that are **planned** for later phases. Subsections explicitly state their current status where applicable.
 
 #### Connection Strings (URI)
 
@@ -554,12 +558,12 @@ C callers may optionally append wrapping-library metadata via `mongoac_client_ap
 
 #### Event API
 
-Events use an **index-based** API rather than C callbacks: each category has `count`, `get`, and `clear` functions polling a client-owned `VecDeque` buffer. The `get` functions return an owning `*mut bson_t` via `bson_new_from_data`; the caller must `bson_destroy()` the returned pointer. Ring buffer storage avoids the O(N) `memmove` that `Vec` would require, but `clear(N)` is still O(N) due to per-element drop.
+Events use an **index-based** API rather than C callbacks: each implemented category has `count`, `get`, and `clear` functions polling a client-owned `VecDeque` buffer. The `get` functions return an owning `*mut bson_t` via `bson_new_from_data`; the caller must `bson_destroy()` the returned pointer. Ring buffer storage avoids the O(N) `memmove` that `Vec` would require, but `clear(N)` is still O(N) due to per-element drop.
 
 One event category is currently implemented — **command** events. Capture toggles for **CMAP** (connection pool) and **SDAM** (server discovery and monitoring) are present on `mongoac_client_options_t` but reserved for future use (see [client options](#client-options)). All capture toggles default to `false` and must be explicitly enabled before client construction.
 
 > [!NOTE]
-> The PoC implements only command event capture for reference. CMAP/SDAM toggles are wired for use, but the Rust driver's `CmapEvent` does not derive `Serialize`, requiring a custom serialization approach or upstream change.
+> The PoC implements only command event capture for reference. The CMAP/SDAM capture toggles on `mongoac_client_options_t` are accepted but are **not yet wired to event handlers** in the current implementation.
 
 Events are the Rust driver's serde-serialized event types, returned as BSON documents without transformation. The Rust driver uses `#[serde(untagged)]` on its `CommandEvent` and `SdamEvent` enums — serialized BSON documents contain no type-discriminant field. C callers distinguish event types by inspecting the presence of BSON document fields that are unique to each variant (e.g., `command` for `CommandStartedEvent` vs. `durationMS` for `CommandSucceededEvent` vs. `failure` for `CommandFailedEvent`).
 
@@ -583,7 +587,7 @@ SDAM runs inside the Rust driver. mongoac does not expose topology state or serv
 
 ##### Server Selection
 
-The Rust driver selects a server automatically for every operation. Client-specific options (`serverSelectionTimeoutMS`, `localThresholdMS`) are URI-only. Non-client-specific options (`readPreference`, `maxStalenessSeconds`, `readPreferenceTags`) map to `SelectionCriteria` and can be configured at any level by passing a `bson_t*` document with fields `mode`, `tagSets`, and `maxStalenessSeconds`.
+The Rust driver selects a server automatically for every operation. Client-specific options (`serverSelectionTimeoutMS`, `localThresholdMS`) are URI-only. Non-client-specific options (`readPreference`, `maxStalenessSeconds`, `readPreferenceTags`) map to `SelectionCriteria` and can be configured at any level by passing a `bson_t*` document with fields `mode`, `tagSets`, and `maxStalenessSeconds`. These options are deserialized when creating database/collection handles, but no CRUD operations currently consume them.
 
 > [!TIP]
 > - [Why are client-specific server selection options URI-only?](#why-uri-only-client-server-selection)
@@ -611,16 +615,22 @@ Options (`authorizedDatabases`, `comment`, `filter`) as `*const bson_t` deserial
 
 #### Enumerate Collections
 
-Two database-level async operations, following the same result-type split:
+> [!NOTE]
+> Not yet implemented in the current proof-of-concept. The `mongoac_cursor_t` handle exists, but no database operation currently returns it.
 
-- **`list_collections`** returns a cursor (`mongoac_cursor_t`) with non-owning `*const bson_t` views of `CollectionSpecification` documents. The `type` field is a string (no dedicated C enum).
-- **`list_collection_names`** returns a BSON array of name strings.
+Two database-level async operations are planned, following the same result-type split as enumerate databases:
+
+- **`list_collections`** will return a cursor (`mongoac_cursor_t`) with `*const bson_t` views of `CollectionSpecification` documents. The `type` field is a string (no dedicated C enum).
+- **`list_collection_names`** will return a BSON array of name strings.
 
 Options (`filter`, `batchSize`, `comment`, `authorizedCollections`) as `*const bson_t` deserialized into `ListCollectionsOptions`; `NULL` = defaults. `nameOnly` is not a valid option (same rationale as enumerate databases). `authorizedCollections` only affects `list_collection_names`.
 
 #### Read Concern & Write Concern
 
-Read concern and write concern follow the [Options Deserialization](#options-deserialization) pattern: passed as BSON fields within the `*const bson_t options` parameter. Key casing matches the containing options struct — `camelCase` for most structs, `snake_case` for `DatabaseOptions` (both accepted due to FFI normalization). `NULL` (or omitting the field) inherits from the parent level.
+> [!NOTE]
+> Not yet implemented in the current proof-of-concept. `DatabaseOptions` can be deserialized from a `bson_t*`, but no operation currently consumes read concern or write concern settings.
+
+Read concern and write concern will follow the [Options Deserialization](#why-bson-options) pattern: passed as BSON fields within the `*const bson_t options` parameter. Key casing matches the containing options struct — `camelCase` for most structs, `snake_case` for `DatabaseOptions` (both accepted due to FFI normalization). `NULL` (or omitting the field) inherits from the parent level.
 
 > [!WARNING]
 > **Empty ReadConcern for server-default reset** is not currently expressible — see [Rejected Ideas](#rejected-empty-read-concern-hack).
@@ -632,17 +642,20 @@ Read concern and write concern follow the [Options Deserialization](#options-des
 <a id="crud-operations"></a>
 #### CRUD Operations
 
-CRUD operations follow the general async pattern with these conventions:
+> [!NOTE]
+> Not yet implemented in the current proof-of-concept. The `mongoac_cursor_t` type and the async/runtime machinery exist, but no CRUD functions are exposed.
+
+CRUD operations will follow the general async pattern with these conventions:
 
 - **Session parameter:** Nullable `mongoac_client_session_t *session` (second param; `NULL` = implicit). See [Sessions](#sessions).
-- **Sequence parameters:** `insert_many` and `aggregate` accept C arrays of `bson_t*` with explicit count.
+- **Sequence parameters:** `insert_many` and `aggregate` will accept C arrays of `bson_t*` with explicit count.
 - **Result BSON encoding:** `camelCase` field names per CRUD spec.
-- **Cursor:** Single `mongoac_cursor_t` type for `find`, `aggregate`, `run_cursor_command`, wrapping `Cursor<T>` or `SessionCursor<T>`. Session embedded; iteration functions have no session parameter. Documents as non-owning `bson_t` views.
-- **Cursor iteration:** Sync `cursor_next()` (blocks) and `cursor_next_with_timeout()` (tailable). Async variants return a future. Document retrieval after async resolution via `cursor_get_document()`.
-- **Cursor lifecycle:** `mongoac_cursor_destroy()` triggers `killCursors` via `AsyncDropToken`; call `make_progress()` to flush pending killCursors.
-- **Sync find:** `mongoac_collection_find()` returns a cursor directly via `runtime.block_on()`.
+- **Cursor:** Single `mongoac_cursor_t` type for `find`, `aggregate`, `run_cursor_command`, wrapping `Cursor<T>` or `SessionCursor<T>`. Session embedded; iteration functions have no session parameter. The cursor implementation currently returns an owning `bson_t*` copy of the current document via `mongoac_cursor_get_document()`; a future non-owning view variant may be added.
+- **Cursor iteration:** Sync `cursor_next()` (blocks). Async variants return a future via `cursor_next_async()`. Document retrieval after async resolution via `cursor_get_document()`. A future `cursor_next_with_timeout()` may be added for tailable cursors.
+- **Cursor lifecycle:** `mongoac_cursor_destroy()` will trigger `killCursors` via `AsyncDropToken`; call `make_progress()` to flush pending killCursors.
+- **Sync find:** `mongoac_collection_find()` will return a cursor directly via `runtime.block_on()`.
 - **Per-getMore options:** `batchSize` and `maxTimeMS` fixed at cursor creation.
-- **Deferred (Database-level):** `aggregate` on `Database` and client-level `bulkWrite` (MongoDB 8.0+). `run_command` and `run_cursor_command` are provided as database-level operations (see [Run Command](#run-command-database-level)).
+- **Deferred (Database-level):** `aggregate` on `Database` and client-level `bulkWrite` (MongoDB 8.0+). `run_command` and `run_cursor_command` will be provided as database-level operations (see [Run Command](#run-command-database-level)).
 
 > [!TIP]
 > - [Why a single `mongoac_cursor_t` type?](#why-single-cursor-type)
@@ -664,7 +677,10 @@ The cursor is backed by the Rust driver's `Cursor<T>` (implicit session) or `Ses
 
 #### Collation
 
-Collation is passed as a BSON sub-document inside existing `*const bson_t options` parameters. The BSON document follows the Rust `Collation` struct fields (`locale` required, plus optional `strength`, `caseLevel`, `caseFirst`, `numericOrdering`, `alternate`, `maxVariable`, `normalization`, `backwards`). Collation is supported on all CRUD operations except `estimated_document_count`, `insert_one`, and `insert_many`. mongoac does not check `maxWireVersion < 5` for collation; the Rust driver handles server incompatibility.
+> [!NOTE]
+> Not yet implemented in the current proof-of-concept. No CRUD or index operations are exposed.
+
+Collation will be passed as a BSON sub-document inside existing `*const bson_t options` parameters. The BSON document follows the Rust `Collation` struct fields (`locale` required, plus optional `strength`, `caseLevel`, `caseFirst`, `numericOrdering`, `alternate`, `maxVariable`, `normalization`, `backwards`). Collation will be supported on all CRUD operations except `estimated_document_count`, `insert_one`, and `insert_many`. mongoac will not check `maxWireVersion < 5` for collation; the Rust driver handles server incompatibility.
 
 > [!TIP]
 > - [Why no maxWireVersion check?](#why-no-maxwireversion-check)
@@ -672,44 +688,56 @@ Collation is passed as a BSON sub-document inside existing `*const bson_t option
 
 #### Collection Management
 
+> [!NOTE]
+> Partially implemented in the current proof-of-concept. Only `create_collection_async`, `drop_collection_async`, and `drop_database_async` are exposed; the remaining behavior is planned.
+
 Mongoac provides async create and drop operations for collection lifecycle management. All resolve to void via `mongoac_future_get_void()`.
 
-- **`create_collection`** — database-level, accepts `CreateCollectionOptions` as a BSON document (capped, validator, `viewOn`/`pipeline` for views, collation, timeseries, clusteredIndex, `encryptedFields`, and other `CreateCollectionOptions` fields).
-- **`drop_collection`** — collection-level, accepts `DropCollectionOptions` as BSON.
-- **`drop_database`** — database-level, drops the entire database.
+- **`create_collection_async`** — database-level, accepts `CreateCollectionOptions` as a BSON document (capped, validator, `viewOn`/`pipeline` for views, collation, timeseries, clusteredIndex, `encryptedFields`, and other `CreateCollectionOptions` fields). Only the async form is available.
+- **`drop_collection_async`** — collection-level, accepts `DropCollectionOptions` as BSON (currently accepted but unused in the initial implementation).
+- **`drop_database_async`** — database-level, drops the entire database.
 
-`rename_collection` is not exposed — the Rust driver has no dedicated API. View creation uses `create_collection` with `viewOn`+`pipeline`; no separate create-view function. All operations are async-only.
+`rename_collection` is not exposed — the Rust driver has no dedicated API. View creation uses `create_collection_async` with `viewOn`+`pipeline`; no separate create-view function. All operations are async-only.
 
 <a id="sessions"></a>
 #### Sessions
 
+> [!NOTE]
+> Partially implemented in the current proof-of-concept. Only `mongoac_client_start_session()`, `mongoac_client_start_session_async()`, and `mongoac_client_session_destroy()` are exposed. Sessions can be passed to `list_databases` and `list_database_names`, but transaction accessors and causal-consistency accessors are not yet implemented.
+
 Session support follows the [Driver Sessions specification](https://github.com/mongodb/specifications/blob/master/source/sessions/driver-sessions.rst). The Rust driver manages server session lifetime internally; the FFI layer exposes explicit session handles for C callers.
 
-`mongoac_client_start_session()` (synchronous, via `block_on()`) creates a session and returns the handle directly. An async variant `mongoac_client_start_session_async()` is also provided as part of the public API. Session options are deserialized via the [standard BSON option pattern](#options-deserialization) into Rust's `SessionOptions`. Validation (`causal_consistency` + `snapshot` conflict) is delegated to the Rust driver. Sessions are destroyed with `mongoac_client_session_destroy()`, dropping the backing `ClientSession` which returns the server session to the pool. If a transaction is in-progress at destroy time, the Rust driver's `Drop` impl fires an async abort task unawaited (matching Rust driver conventions).
+`mongoac_client_start_session()` (synchronous, via `block_on()`) creates a session and returns the handle directly. An async variant `mongoac_client_start_session_async()` is also provided as part of the public API. Session options are deserialized via the [standard BSON option pattern](#why-bson-options) into Rust's `SessionOptions`. Validation (`causal_consistency` + `snapshot` conflict) is delegated to the Rust driver. Sessions are destroyed with `mongoac_client_session_destroy()`, dropping the backing `ClientSession` which returns the server session to the pool. If a transaction is in-progress at destroy time, the Rust driver's `Drop` impl fires an async abort task unawaited (matching Rust driver conventions).
 
 The session type wraps `Arc<tokio::sync::Mutex<ClientSession>>`, providing thread safety across the two-thread polling model. All session access — both async spawned tasks and synchronous accessors — goes through the mutex. Multiple tasks queued for the same session yield on contention via `lock().await`; no deadlock occurs.
 
 Planned synchronous accessors (`get_id`, `get_cluster_time`, `get_snapshot_time`, `advance_cluster_time`, `advance_operation_time`) will acquire the mutex via `blocking_lock()`. The Rust driver auto-populates `snapshot_time` from the server response after the first find, aggregate, or distinct operation on a snapshot session — the server picks a time (or returns `cursor.atClusterTime`), and the driver stores it in the session so all subsequent reads use the same snapshot.
 
-Every CRUD operation accepting an explicit session takes a nullable `mongoac_client_session_t*` as its second parameter. `NULL` selects an implicit session. Cursor-creating operations clone the `Arc` into the cursor so the session outlives the user's handle.
+Every CRUD operation accepting an explicit session will take a nullable `mongoac_client_session_t*` as its second parameter. `NULL` selects an implicit session. Cursor-creating operations will clone the `Arc` into the cursor so the session outlives the user's handle.
 
 <a id="transactions"></a>
 ##### Transactions
 
-Transaction support follows the [Driver Transactions specification](https://github.com/mongodb/specifications/blob/master/source/transactions/transactions.rst). Transactions build on Driver Sessions (minimum server 4.0 for replica sets, 4.2 for sharded clusters).
+> [!NOTE]
+> Not yet implemented in the current proof-of-concept. No transaction functions are exposed.
+
+Transaction support will follow the [Driver Transactions specification](https://github.com/mongodb/specifications/blob/master/source/transactions/transactions.rst). Transactions build on Driver Sessions (minimum server 4.0 for replica sets, 4.2 for sharded clusters).
 
 Each transaction operation (`start_transaction`, `commit_transaction`, `abort_transaction`) will be provided in two forms: async (`*_async()`) returning a `mongoac_future_t*`, and sync (no suffix) blocking via `runtime.block_on()` with `progress_lock`. The sync variants must not be called from within a `make_progress()` context, matching the sync session accessor convention.
 
 `TransactionOptions` will use the standard BSON deserialization pattern, supporting `readConcern`, `writeConcern`, `readPreference` (as a `SelectionCriteria` sub-document), and `maxCommitTimeMS` (`timeoutMS` is [deferred](#deferred-transaction-timeoutms)). `NULL` for options uses session-level defaults set via `defaultTransactionOptions` at session creation; per-call options override those defaults — the Rust driver handles the inheritance chain.
 
-Transaction state machine validation (`None → Starting → InProgress → Committed → Aborted`) is delegated to the Rust driver, which detects invalid transitions synchronously and propagates them through the error out-parameter. Error labels (`"TransientTransactionError"`, `"UnknownTransactionCommitResult"`) are accessible via `mongoac_error_has_label()`, which delegates directly to the Rust driver's `contains_label()` on the preserved original error.
+Transaction state machine validation (`None → Starting → InProgress → Committed → Aborted`) will be delegated to the Rust driver, which detects invalid transitions synchronously and propagates them through the error out-parameter. Error labels (`"TransientTransactionError"`, `"UnknownTransactionCommitResult"`) are accessible via `mongoac_error_has_label()`, which delegates directly to the Rust driver's `contains_label()` on the preserved original error.
 
-The Rust driver's `and_run()` retry-loop convenience will not be exposed; C callers implement their own retry logic around the explicit API. If a session is destroyed while a transaction is `InProgress`, the Rust driver's `Drop` impl fires a fire-and-forget async abort task — callers that need a clean abort should call `abort_transaction` explicitly before `destroy()`.
+The Rust driver's `and_run()` retry-loop convenience will not be exposed; C callers will implement their own retry logic around the explicit API. If a session is destroyed while a transaction is `InProgress`, the Rust driver's `Drop` impl fires a fire-and-forget async abort task — callers that need a clean abort should call `abort_transaction` explicitly before `destroy()`.
 
 <a id="causal-consistency"></a>
 ##### Causal Consistency
 
-Causal consistency follows the [Driver Causal Consistency specification](https://github.com/mongodb/specifications/blob/master/source/causal-consistency/causal-consistency.rst). It is **enabled by default** for explicit sessions (via `causalConsistency: true` in session options) and **not available** for implicit sessions. Causal consistency and snapshot reads are mutually exclusive — validation is delegated to the Rust driver.
+> [!NOTE]
+> Not yet implemented in the current proof-of-concept. No session accessors are exposed.
+
+Causal consistency will follow the [Driver Causal Consistency specification](https://github.com/mongodb/specifications/blob/master/source/causal-consistency/causal-consistency.rst). It is **enabled by default** for explicit sessions (via `causalConsistency: true` in session options) and **not available** for implicit sessions. Causal consistency and snapshot reads are mutually exclusive — validation is delegated to the Rust driver.
 
 The Rust driver tracks `operationTime` from every server response (including errors) and injects `afterClusterTime` into the `readConcern` of subsequent causally-consistent commands. Cluster time (`$clusterTime`) gossipping is fully automatic.
 
@@ -766,15 +794,15 @@ Version macros (`MONGOAC_VERSION_MAJOR`, etc.) cannot be defined from Rust.
 Using `configure_file()` follows the same pattern used by mongo-c-driver and ensures CMake is the source of truth
   without overcomplicating `build.rs`.
 
-<a id="why-link-libbson-into-rust"></a>
-#### Why link libbson into the Rust crate?
+<a id="why-link-bson2-into-rust"></a>
+#### Why link bson2 into the Rust crate?
 
-Reusing libbson avoids reimplementing `bson_t` layout in Rust. Dynamic linking over static embedding prevents duplicate libbson symbol instances in multi-component processes (e.g., when libmongoc is also loaded), avoiding one-definition-rule violations for `bson_t` internals.
+Reusing bson2 avoids reimplementing `bson_t` layout in Rust. Dynamic linking over static embedding prevents duplicate bson2 symbol instances in multi-component processes (e.g., when libmongoc is also loaded), avoiding one-definition-rule violations for `bson_t` internals.
 
 <a id="why-explicit-bson-link-vars"></a>
-#### Why explicit environment variables for shared vs static libbson?
+#### Why explicit environment variables for shared vs static bson2?
 
-`build.rs` cannot know which crate type or libbson variant CMake produced, so CMake passes the expected library explicitly as an absolute path, avoiding ambiguity when both variants are present in the same directory.
+`build.rs` cannot know which crate type or bson2 variant CMake produced, so CMake passes the expected library explicitly as an absolute path, avoiding ambiguity when both variants are present in the same directory.
 
 <a id="why-patchelf-soname"></a>
 #### Why `patchelf`?
@@ -784,7 +812,7 @@ Cargo currently does not support setting custom SONAME for cdylib: see [rust-lan
 On Linux, CMake owns packaging, versioning, and install rules. Using `patchelf` as a post-link step keeps the SONAME fix in the packaging layer without touching the Rust crate or Cargo.
 
 Attempting to handle this within the `build.rs` script would require detecting platform shared-library naming
-  conventions from the BSON library filename, then emitting `cargo:rustc-cdylib-link-arg` to pass `-Wl,-soname,...` to
+  conventions from the bson2 filename, then emitting `cargo:rustc-cdylib-link-arg` to pass `-Wl,-soname,...` to
   the linker.
 
 ### Test Infrastructure
@@ -967,7 +995,7 @@ A dedicated pointer locks the ABI from day one: callers pass `NULL` until sessio
 <a id="why-bson-string-cursortype"></a>
 #### Why BSON string for CursorType?
 
-Consistency with the existing [options deserialization pattern](#options-deserialization): the BSON options document is deserialized directly into the Rust struct via serde, which handles the string-to-enum mapping. An integer enum would require a parallel C `#define` set and manual conversion code that duplicates serde's work.
+Consistency with the existing [options deserialization pattern](#why-bson-options): the BSON options document is deserialized directly into the Rust struct via serde, which handles the string-to-enum mapping. An integer enum would require a parallel C `#define` set and manual conversion code that duplicates serde's work.
 
 ### Supported Features
 
@@ -1168,9 +1196,9 @@ The previous flat struct discarded error labels, wire version, server response, 
 Manual `OBJECT` targets were investigated to verify generated headers as C. Rejected because `FILE_SET HEADERS` on `INTERFACE` targets already integrates with CMake's `CMAKE_VERIFY_INTERFACE_HEADER_SETS` option. Manual `OBJECT` targets would duplicate this functionality and require fragile `add_dependencies` logic for generated headers.
 
 <a id="rejected-downstream-bson-link"></a>
-#### Static embedding of libbson into the cdylib
+#### Static embedding of bson2 into the cdylib
 
-Rejected: statically embedding libbson into the shared library would create duplicate symbol instances in processes that also load libmongoc, violating the one-definition rule for `bson_t` internals.
+Rejected: statically embedding bson2 into the shared library would create duplicate symbol instances in processes that also load libmongoc, violating the one-definition rule for `bson_t` internals.
 
 
 ### Test Infrastructure
@@ -1182,7 +1210,7 @@ Rejected: `TestSuite` is C-only and sync-centric, with `fork()`-based isolation 
 
 ### Rust FFI Design
 
-#### BSON Library
+#### bson2
 
 <a id="rejected-new-bson-type"></a>
 ##### New Rust BSON type for FFI
@@ -1400,13 +1428,13 @@ A separate `Vec<CString>` of error labels was considered, but it creates a dupli
 > [!IMPORTANT]
 > Features intentionally excluded from the current scope. Each item can be added later without breaking the existing API or ABI unless noted otherwise.
 
-### BSON Library
+### bson2
 
 <a id="deferred-bson-conversion-efficiency"></a>
 
 #### Avoiding deep-copies when converting between `bson_t` and `Document`/`RawDocument`/`RawDocumentBuf`
 
-Future result getters (`get_bson`, `get_optional_bson`, `get_bson_array`) serialize a `Document` to bytes then pass them to `bson_new_from_data`, which always copies. Avoiding the copy in the `Document` → owning `*mut bson_t` path could use `bson_new_from_buffer` to transfer ownership of the serialized bytes directly into the `bson_t`.
+The `mongoac_future_get_bson()` getter serializes a `Document` to bytes then passes them to `bson_new_from_data`, which always copies. Avoiding the copy in the `Document` → owning `*mut bson_t` path could use `bson_new_from_buffer` to transfer ownership of the serialized bytes directly into the `bson_t`.
 
 Options deserialization (`*const bson_t` → `Document` → `*Options`) goes through a full `IndexMap` parse because the Rust driver's `*Options` structs implement `DeserializeOwned`, not `Deserialize<'a>`. A non-owning `&RawDocument` → `*Options` path is not expressible without changes to the upstream `mongodb` crate. This is deferrable without public API or ABI impact.
 
@@ -1588,13 +1616,13 @@ Current approach: **silently ignore** — the FFI layer relies on serde's defaul
 
 Operations that return lists of values (e.g., `listDatabases`, `listDatabaseNames`, `listCollectionNames`, `listIndexes`) need a way to return array-like results across the FFI boundary. (Note: `listCollections` uses a cursor for its result, not a list result — see the CRUD Operations section for cursor conventions.) Three representations are under consideration:
 
-- **BSON array via `bson_t` (current approach):** The result is encoded as a BSON array stored in the existing `bson_t*` returned by `mongoac_future_get_bson()`. The caller iterates elements using standard libbson macros (`bson_iter_init_find` + `bson_iter_recurse`). Pros: reuses existing types and getter, no new API surface, consistent with BSON interchange format. Cons: C callers must know libbson iteration APIs; elements of homogeneous type (e.g., all strings) incur BSON encoding overhead for a single concrete type; BSON arrays are stored as `{"0": ..., "1": ...}` internally, which may be surprising for callers expecting a flat C array.
+- **BSON array via `bson_t` (current approach):** The result is encoded as a BSON array stored in the existing `bson_t*` returned by `mongoac_future_get_bson()`. The caller iterates elements using standard bson2 macros (`bson_iter_init_find` + `bson_iter_recurse`). Pros: reuses existing types and getter, no new API surface, consistent with BSON interchange format. Cons: C callers must know bson2 iteration APIs; elements of homogeneous type (e.g., all strings) incur BSON encoding overhead for a single concrete type; BSON arrays are stored as `{"0": ..., "1": ...}` internally, which may be surprising for callers expecting a flat C array.
 
 - **Pointer+length out-params:** A getter returning pointers with an explicit count, e.g. `mongoac_future_get_str_array(future, &data, &len, &error)` returning `const char**` for string arrays, or `mongoac_future_get_doc_array(future, &data, &len, &error)` returning `const bson_t**` for document arrays. Pros: familiar C idiom, avoids BSON parsing for simple types (strings), explicit length and pointer make iteration natural. Cons: introduces a family of getter functions, ownership semantics must be defined per variant (does the caller free elements individually? is the array contiguous?), and heterogeneous arrays cannot be represented without a tag.
 
 - **Dedicated `mongoac_array_t` opaque type:** An opaque handle with accessors like `mongoac_array_count(array, &error)` and `mongoac_array_get(array, index, &error)` returning a `bson_t*` element, plus a `mongoac_array_get_string(array, index, &error)` for string elements. Inspired by the cursor iteration pattern. Pros: type-safe, discoverable, extensible with typed accessors, single ownership convention (destroy the array). Cons: adds another opaque handle lifecycle (create, access, destroy) with its own memory management, requires index-based accessor functions per element type, heavier API surface for simple use cases.
 
-Current approach: **BSON array via `bson_t`** — the existing `Bson` variant of `FutureValue` is reused for `listDatabases`, `listDatabaseNames`, and `listCollectionNames`, with the caller iterating the BSON array using libbson macros. `listCollections` uses the `Cursor` variant of `FutureValue` instead, consistent with the CRUD cursor pattern. This choice is **not deferrable**: the `FutureValue` variant assigned to each operation determines which typed getter is valid. Changing an operation from one variant to another (e.g., from `Bson` to a dedicated array type) would break existing compiled callers, because `mongoac_future_get_bson()` on a future that no longer stores a `Bson` variant returns a runtime error. The chosen representation for each operation is locked at implementation time. Adding *new* operations with a different representation is always possible, but retrofitting an existing operation is an ABI break.
+Current approach: **BSON array via `bson_t`** — the existing `Bson` variant of `FutureValue` is reused for `listDatabases`, `listDatabaseNames`, and `listCollectionNames`, with the caller iterating the BSON array using bson2 macros. `listCollections` uses the `Cursor` variant of `FutureValue` instead, consistent with the CRUD cursor pattern. This choice is **not deferrable**: the `FutureValue` variant assigned to each operation determines which typed getter is valid. Changing an operation from one variant to another (e.g., from `Bson` to a dedicated array type) would break existing compiled callers, because `mongoac_future_get_bson()` on a future that no longer stores a `Bson` variant returns a runtime error. The chosen representation for each operation is locked at implementation time. Adding *new* operations with a different representation is always possible, but retrofitting an existing operation is an ABI break.
 
 ### Supported Features
 
