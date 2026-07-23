@@ -100,7 +100,16 @@ pub extern "C" fn mongoac_runtime_block_on_any(
     let runtime = safe_as_ref!(runtime);
     let futures = safe_as_ref!(futures);
 
-    let futures = futures_as_refs(futures, count, runtime, error);
+    if count == 0 {
+        return std::ptr::null();
+    }
+
+    // SAFETY: `futures` and `count` validity is an uncheckable precondition.
+    let futures = futures_as_refs(
+        unsafe { std::slice::from_raw_parts(futures, count) },
+        runtime,
+        error,
+    );
     if futures.is_empty() {
         return std::ptr::null();
     }
@@ -122,7 +131,16 @@ pub extern "C" fn mongoac_runtime_block_on_all(
     let runtime = safe_as_ref!(runtime);
     let futures = safe_as_ref!(futures);
 
-    let futures = futures_as_refs(futures, count, runtime, error);
+    if count == 0 {
+        return;
+    }
+
+    // SAFETY: `futures` and `count` validity is an uncheckable precondition.
+    let futures = futures_as_refs(
+        unsafe { std::slice::from_raw_parts(futures, count) },
+        runtime,
+        error,
+    );
     if futures.is_empty() {
         return;
     }
@@ -343,20 +361,13 @@ impl RuntimeState {
 }
 
 fn futures_as_refs<'a>(
-    futures: *const *const FutureT,
-    count: usize,
+    futures: &'a [*const FutureT],
     runtime: &RuntimeT,
     error: Option<&mut ErrorT>,
 ) -> Vec<&'a FutureT> {
-    if count == 0 {
-        return Vec::new();
-    }
+    let mut ret = Vec::with_capacity(futures.len());
 
-    // SAFETY: valid pointer + length is an uncheckable precondition.
-    let slice = unsafe { std::slice::from_raw_parts(futures, count) };
-    let mut ret = Vec::with_capacity(count);
-
-    for ptr in slice.iter() {
+    for ptr in futures.iter() {
         let Some(future) = safe_optional_as_ref!(*ptr) else {
             continue; // Ignore null pointers.
         };
