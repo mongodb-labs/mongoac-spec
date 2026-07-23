@@ -32,6 +32,6 @@ pub extern "C" fn mongoac_future_get_client_session(
 ) -> *mut ClientSessionT {
     let error = safe_optional_error_as_mut!(error);
     let future = safe_as_ref_with_error!(future, error);
-    let session = safe_error!(future.value().get_client_session(), error);
+    let session = safe_error!(future.get_client_session(), error);
     Box::into_raw(Box::new(session.clone()))
 }

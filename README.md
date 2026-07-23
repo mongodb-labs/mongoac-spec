@@ -460,13 +460,19 @@ A `mongoac_runtime_t` handle can be extracted from any client (via `mongoac_clie
 
 #### Async Operations
 
-Async operations return an opaque `mongoac_future_t*`. The C caller creates one via an `*_async()` operation function, drives it with `mongoac_future_poll()`, and destroys it with `mongoac_future_destroy()`. All functions accept `NULL` gracefully.
+Async operations return an opaque `mongoac_future_t*`. The C caller creates one via an `*_async()` operation function, drives it to completion with a `mongoac_runtime_t*` `block_on*()` function, and destroys it with `mongoac_future_destroy()`. `mongoac_future_clone()` creates an additional handle that shares the same underlying result. All functions accept `NULL` gracefully.
 
-##### Polling Loop
+##### Driving Futures
 
-`mongoac_future_poll()` advances the future once and returns `true` if resolved, `false` if pending. It uses `Waker::noop()` — non-blocking, no thread-safety synchronization required.
+`mongoac_future_t` is a read-only, cloneable receipt for an async operation. The only mutable operations on the underlying handle are performed internally by `mongoac_runtime_t` `block_on*()` functions; the C caller does not poll or wait directly on the future.
 
-`mongoac_runtime_make_progress()` enters the per-client Tokio runtime, yields once to other spawned tasks, and returns. Designed for a **worker thread** distinct from the future-polling thread. A per-client `progress_lock` serializes progress calls; `make_progress()` returns `false` if another thread is already driving progress. The same lock guards synchronous `block_on()` calls, preventing concurrent `block_on()` on a `current_thread` runtime (whose IO/timer driver `Core` is single-owner).
+`mongoac_runtime_block_on(runtime, future, error)` drives a single future to completion by acquiring `progress_lock` and entering the Tokio runtime. It is self-contained — no external worker thread is required. `NULL` is accepted safely. The future must have been created from the same runtime (or a clone of it); otherwise an error is written to the `error` out-parameter.
+
+`mongoac_runtime_block_on_any(runtime, futures, count, error)` drives the provided futures concurrently and returns a `const mongoac_future_t*` to the first one that resolves. The returned pointer is one of the input pointers; the future handle is not mutated. If no future resolves (e.g., all inputs are `NULL` or empty count), it returns `NULL`. Runtime association is validated for each non-`NULL` future; on mismatch an error is written to `error`.
+
+`mongoac_runtime_block_on_all(runtime, futures, count, error)` drives all provided futures to completion. `NULL` entries in the array are skipped. Runtime association is validated for each non-`NULL` future; on mismatch an error is written to `error`.
+
+`mongoac_runtime_make_progress()` enters the per-client Tokio runtime, yields once to other spawned tasks, and returns. It is designed for a **worker thread** that drives fire-and-forget tasks and background runtime work. A per-client `progress_lock` serializes progress calls; `make_progress()` returns `false` if another thread is already driving progress. The same lock guards synchronous `block_on*()` calls, preventing concurrent `block_on*()` on a `current_thread` runtime (whose IO/timer driver `Core` is single-owner).
 
 `mongoac_runtime_make_progress_with_timeout(runtime, timeout_ms)` wraps the yield in `tokio::time::timeout` to bound wall-clock time.
 
@@ -474,30 +480,27 @@ Async operations return an opaque `mongoac_future_t*`. The C caller creates one 
 
 `mongoac_runtime_wait_with_timeout(runtime, timeout_ms)` blocks (parks) until work is available or the wall-clock `timeout_ms` expires. Returns `true` if work became available, `false` on timeout. Uses the same condvar-backed signal as `wait()`. `NULL` is accepted safely and returns `false`.
 
-For single-threaded contexts, a convenience loop works but loses the concurrency benefit of separate poll and worker threads.
+`mongoac_runtime_request_stop(runtime)` signals any thread parked on `mongoac_runtime_wait()` or `mongoac_runtime_wait_with_timeout()` for this runtime to wake and exit. It sets a persistent stop flag and notifies all waiters. A worker thread typically checks `mongoac_runtime_is_stop_requested()` after each `wait()` to decide whether to stop driving the runtime. `NULL` is accepted safely. The stop request is not automatically cleared; a new runtime handle is required if the caller wants to resume worker threads after stopping.
 
-`mongoac_future_wait_with_timeout(future, timeout_ms)` blocks (parks) until the future is ready or the wall-clock `timeout_ms` expires. Returns `true` if ready, `false` on timeout. **Does not call `make_progress()` internally** — uses a condvar-backed `Waker` (via `std::task::Wake`) to register a real waker with the underlying `JoinHandle` poll chain, then parks on a condvar. An external thread must concurrently call `make_progress()` or `make_progress_with_timeout()` to advance the runtime; without it the call will block until the timeout expires.
+`mongoac_runtime_is_stop_requested(runtime)` returns `true` if `mongoac_runtime_request_stop()` has been called on this runtime, otherwise `false`. `NULL` is accepted safely and returns `false`.
 
-`mongoac_future_wait(future)` blocks (parks) indefinitely until the future is ready. Same mechanism as `wait_with_timeout()` with an infinite timeout. Postcondition: `mongoac_future_poll(future) == true`. Does not return a value — the only meaningful exit is the future being ready. Does not call `make_progress()` internally. Same precondition: an external thread must drive `make_progress()` concurrently.
-
-`mongoac_future_block_on(future)` blocks (parks) until ready by acquiring `progress_lock` and entering the Tokio runtime directly via `tokio::runtime::Runtime::block_on()`. Postcondition: `mongoac_future_poll(future) == true`. Does not return a value. Self-contained — does not require an external worker thread. Holds `progress_lock` for the duration, preventing concurrent `make_progress()` on other threads.
-
-**Thread-safety model:** `*const mongoac_future_t` functions (result getters) support concurrent access. `*mut mongoac_future_t` functions (`poll`, `wait`, `block_on`) are **NOT** thread-safe. `destroy` must be the last call on the object.
+**Thread-safety model:** All `mongoac_future_t` functions (`clone`, `is_ready`, `get_*`) are read-only and thread-safe across clones of the same underlying future. `mongoac_future_destroy()` must be the last call on a given handle; concurrent `destroy` with any other operation is not safe. `mongoac_runtime_t` `*mut` functions (`make_progress*`, `block_on*`, `wait*`, `request_stop`) are **NOT** thread-safe on the same runtime handle or its clones.
 
 > [!TIP]
 > - [Why timeout granularity?](#why-timeout-granularity)
 
 ##### Result Extraction
 
-After `poll()` returns `true`, the caller extracts the result using a typed getter matching the operation's result category. Each getter returns the result value directly and writes error details to the `error` out-parameter. To distinguish a real result from a default/sentinel value, the caller checks `mongoac_error_code(error) == MONGOAC_ERROR_CODE_OK`. Calling a getter with a mismatched result type is undefined behavior.
+After `is_ready()` returns `true` or a `block_on*()` function has driven the future to completion, the caller extracts the result using a typed getter matching the operation's result category. Each getter returns the result value directly and writes error details to the `error` out-parameter. To distinguish a real result from a default/sentinel value, the caller checks `mongoac_error_code(error) == MONGOAC_ERROR_CODE_OK`. Calling a getter with a mismatched result type is undefined behavior. Calling a getter before the future is ready sets `error` to `MONGOAC_ERROR_CODE_RUNTIME_ERROR` and returns a default value.
 
 ##### Fire-and-Forget
 
 Operations that do not require a result are spawned onto the per-client runtime (via `RuntimeT::spawn()`) without returning a future handle. The C side cannot await or cancel them.
 
 > [!TIP]
-> - [Why waker-less polling?](#why-waker-less-polling)
 > - [Why single opaque future?](#why-single-opaque-future)
+> - [Why are all driving operations on RuntimeT?](#why-driving-on-runtime)
+> - [Why is FutureT cloneable?](#why-future-cloneable)
 > - [Why single-yield make_progress?](#why-single-yield-make-progress)
 > - [Why defer cancellation?](#why-defer-cancellation)
 
@@ -655,7 +658,7 @@ Contracts: non-retryable; no `readConcern`/`writeConcern`; read preference follo
 The cursor is backed by the Rust driver's `Cursor<T>` (implicit session) or `SessionCursor<T>` (explicit session), wrapped in the `mongoac`-internal `CursorT`. `advance()` has a fast path (buffer has documents — resolves in a single poll with no yield) and a slow path (buffer empty — issues a `getMore` command, yielding at the TCP send/receive boundary). Alternative first-yield points include server topology changes, connection pool wait, or registered event handlers.
 
 > [!TIP]
-> - [Why waker-less polling?](#why-waker-less-polling)
+> - [Why are all driving operations on RuntimeT?](#why-driving-on-runtime)
 > - [Why single-yield make_progress?](#why-single-yield-make-progress)
 > - [Why timeout granularity?](#why-timeout-granularity)
 
@@ -881,13 +884,21 @@ Isolating each client's async context avoids `Send`/`Sync` requirements on futur
 
 A `current_thread` runtime is sufficient for a single-client context and avoids spawning an OS thread pool per client. The Rust driver's internal connection pool and topology monitoring already handle concurrency.
 
-<a id="why-waker-less-polling"></a>
-#### Why waker-less polling?
+<a id="why-driving-on-runtime"></a>
+#### Why are all driving operations on RuntimeT?
 
-Explicit polling gives the C caller full control over which thread advances a future and which yields to the runtime. `poll()` and `make_progress()` are designed to run on **different threads**: `poll()` is driven by the application thread (checking readiness), while `make_progress()` is driven by a dedicated worker thread (advancing the Tokio runtime). There is no hidden waker state to synchronize with an external event loop.
+Mutable operations on a `FutureT` (poll, wait, block-on) require `Pin<&mut Self>` on the underlying Tokio `JoinHandle` chain and must serialize with the `current_thread` runtime's single-owner driver core. Centralizing all such operations on `RuntimeT` lets `FutureT` be a read-only, cloneable receipt. C callers cannot accidentally poll or block on the same future from multiple threads, and the thread-safety model collapses to "read-only getters are safe, everything else is runtime-owned."
 
 > [!TIP]
 > - [Why not waker-based integration?](#rejected-waker-integration)
+
+<a id="why-future-cloneable"></a>
+#### Why is FutureT cloneable?
+
+Cloning lets multiple C contexts hold a reference to the same async result without coordinating ownership. Because the underlying `FutureValue` is reference-counted, all clones observe the same resolved state and share the same typed result. Cloning is cheap: it increments an `Arc` and a `RuntimeT` reference count.
+
+> [!TIP]
+> - [Why not separate future types?](#rejected-separate-futures)
 
 <a id="why-single-opaque-future"></a>
 #### Why single opaque future?
@@ -900,7 +911,7 @@ A single handle type minimizes API surface. The typed-getter pattern is idiomati
 <a id="why-single-yield-make-progress"></a>
 #### Why single-yield make_progress?
 
-Yielding exactly once per call advances the runtime without monopolizing the worker thread. The caller controls pacing by choosing how often to call `make_progress()` from the worker thread, and the application thread polls `poll()` independently.
+Yielding exactly once per call advances the runtime without monopolizing the worker thread. The caller controls pacing by choosing how often to call `make_progress()` from the worker thread. For futures with results, `block_on*()` is used instead; `make_progress()` is reserved for fire-and-forget tasks and background runtime work.
 
 > [!TIP]
 > - [Why not yield until idle?](#rejected-exhaustive-progress)
@@ -941,7 +952,7 @@ Cancellation is deferred because opaque handles allow it to be added later as an
 <a id="why-parking-lot"></a>
 #### Why parking_lot?
 
-`parking_lot::{Condvar, Mutex}` powers the `CompletionWaker` — no spurious `Condvar` wakeups and no poisoning across FFI (a panic in the `Wake` impl or waiting thread unlocks rather than corrupts). Note: session operations use `tokio::sync::Mutex` instead (see [Sessions](#sessions)) because `tokio::sync::MutexGuard` is `Send` and must be held across `.await` points inside spawned tasks.
+`parking_lot::{Condvar, Mutex}` powers the `progress_lock` that serializes synchronous runtime entry and the `spawn_mutex` that pairs with the `spawn_cv` condvar. The work-available signal itself is an `AtomicBool` (`spawn_flag`) so that `RuntimeT::spawn()` can signal without acquiring a lock. No spurious `Condvar` wakeups and no poisoning across FFI make it safe to use directly on the C boundary. Note: session operations use `tokio::sync::Mutex` instead (see [Sessions](#sessions)) because `tokio::sync::MutexGuard` is `Send` and must be held across `.await` points inside spawned tasks.
 
 <a id="why-single-cursor-type"></a>
 #### Why a single `mongoac_cursor_t` type?
@@ -1247,17 +1258,6 @@ Rejected: the per-client runtime already exists at parse time. Using it eliminat
 #### Exposing separate C cursor types for implicit and explicit sessions
 
 The Rust driver's dual-cursor type is a borrow-checker artifact. C lacks Rust's lifetime system, so the distinction cannot be enforced at compile time. A single cursor type with an embedded session provides the same capabilities with a simpler API and fewer opportunities for caller error.
-
-<a id="rejected-interior-sync-future"></a>
-#### Interior synchronization for concurrent FFI access
-
-Wrapping `FutureValue` in `RwLock` (or `Mutex`) inside `FutureT` to allow FFI functions to operate through a shared `&FutureT` reference was investigated and rejected for three reasons:
-
-1. **Getter path regresses from lock-free to locked.** Every `get_*()` call would acquire a read lock, whereas the lock-free `Acquire`/`Release` protocol on the `ready` flag is both cheaper (2–3× for the uncontended case) and already correct.
-
-2. **`block_on()` forces an awkward two-phase lock handoff.** The inner future must be extracted under the lock, the lock released for `runtime.block_on()`, then the lock reacquired to store the result. This forces either type-erased `Box<dyn Any>` futures, double matching on all `FutureValue` variants, or holding the write lock through `runtime.block_on()` (which risks re-entrancy if the runtime processes tasks that call back into mongoac).
-
-3. **`Future::poll()` requires `Pin<&mut Self>` regardless of how the outer reference is obtained.** The `&mut self` at the `FutureValueType` level comes from the write guard's `DerefMut`, so the lock is held during `poll()` either way — the `RwLock` adds getter overhead without removing any internal serialization.
 
 ### Supported Features
 

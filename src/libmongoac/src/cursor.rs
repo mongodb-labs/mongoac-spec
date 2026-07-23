@@ -130,6 +130,6 @@ pub extern "C" fn mongoac_future_get_cursor(
 ) -> *mut CursorT {
     let error = safe_optional_error_as_mut!(error);
     let future = safe_as_ref_with_error!(future, error);
-    let cursor = safe_error!(future.value().get_cursor(), error);
+    let cursor = safe_error!(future.get_cursor(), error);
     Box::into_raw(Box::new(cursor.clone()))
 }

@@ -4,6 +4,14 @@
 #include <mongoac/client_session.h>
 #include <mongoac/error.h>
 
+TEST_CASE("clone", "[mongoac][future]")
+{
+   SECTION("null")
+   {
+      CHECK(mongoac_future_clone(nullptr) == nullptr);
+   }
+}
+
 TEST_CASE("destroy", "[mongoac][future]")
 {
    SECTION("null")
@@ -13,11 +21,11 @@ TEST_CASE("destroy", "[mongoac][future]")
    }
 }
 
-TEST_CASE("poll", "[mongoac][future]")
+TEST_CASE("is_ready", "[mongoac][future]")
 {
-   SECTION("null future")
+   SECTION("null")
    {
-      CHECK(mongoac_future_poll(nullptr) == false);
+      CHECK(mongoac_future_is_ready(nullptr) == false);
    }
 }
 
@@ -62,31 +70,5 @@ TEST_CASE("get_client_session", "[mongoac][future]")
       CHECK(mongoac_future_get_client_session(nullptr, error) == nullptr);
       CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_INVALID_ARGUMENT);
       mongoac_error_destroy(error);
-   }
-}
-
-TEST_CASE("block_on", "[mongoac][future]")
-{
-   SECTION("null future")
-   {
-      mongoac_future_wait(nullptr);
-      SUCCEED();
-   }
-}
-
-TEST_CASE("wait_with_timeout", "[mongoac][future]")
-{
-   SECTION("null future")
-   {
-      CHECK(mongoac_future_wait_with_timeout(nullptr, 0) == false);
-   }
-}
-
-TEST_CASE("await", "[mongoac][future]")
-{
-   SECTION("null future")
-   {
-      mongoac_future_wait(nullptr);
-      SUCCEED();
    }
 }

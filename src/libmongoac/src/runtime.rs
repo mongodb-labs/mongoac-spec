@@ -1,14 +1,14 @@
 use crate::error::ErrorT;
 use crate::future::FutureT;
-use crate::safe_as_mut;
 use crate::safe_as_ref;
 use crate::safe_drop;
-use crate::safe_optional_as_mut;
+use crate::safe_optional_as_ref;
 use crate::safe_optional_error_as_mut;
 
 use parking_lot::{Condvar, Mutex};
 use std::future::{Future, poll_fn};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::Poll;
 use std::time::{Duration, Instant};
 
@@ -18,7 +18,7 @@ macro_rules! safe_from_runtime_with_error {
         if !$future.from_runtime($runtime) {
             $crate::private::safety::invalid_argument(
                 $error,
-                concat!("future is not associated with the given runtime"),
+                "future is not associated with the given runtime",
             );
             return Default::default();
         }
@@ -55,13 +55,13 @@ pub extern "C" fn mongoac_runtime_make_progress_with_timeout(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn mongoac_runtime_notify_one(runtime: *mut RuntimeT) {
-    safe_as_ref!(runtime).notify_one()
+pub extern "C" fn mongoac_runtime_request_stop(runtime: *mut RuntimeT) {
+    safe_as_ref!(runtime).request_stop()
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn mongoac_runtime_notify_all(runtime: *mut RuntimeT) {
-    safe_as_ref!(runtime).notify_all()
+pub extern "C" fn mongoac_runtime_stop_requested(runtime: *mut RuntimeT) -> bool {
+    safe_as_ref!(runtime).stop_requested()
 }
 
 #[unsafe(no_mangle)]
@@ -80,90 +80,54 @@ pub extern "C" fn mongoac_runtime_wait_with_timeout(
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_runtime_block_on(
     runtime: *mut RuntimeT,
-    future: *mut FutureT,
+    future: *const FutureT,
     error: *mut ErrorT,
 ) {
     let error = safe_optional_error_as_mut!(error);
-    let future = safe_from_runtime_with_error!(safe_as_mut!(future), safe_as_mut!(runtime), error);
+    let future = safe_from_runtime_with_error!(safe_as_ref!(future), safe_as_ref!(runtime), error);
 
-    future.block_on();
+    safe_as_ref!(runtime).block_on_future(future);
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn mongoac_runtime_block_on_any<'a>(
+pub extern "C" fn mongoac_runtime_block_on_any(
     runtime: *mut RuntimeT,
-    futures: *mut *mut FutureT,
+    futures: *const *const FutureT,
     count: usize,
     error: *mut ErrorT,
-) -> *mut FutureT {
+) -> *const FutureT {
     let error = safe_optional_error_as_mut!(error);
-    let runtime = safe_as_mut!(runtime);
-    let futures = safe_as_mut!(futures);
+    let runtime = safe_as_ref!(runtime);
+    let futures = safe_as_ref!(futures);
 
-    if count == 0 {
-        return std::ptr::null_mut();
-    }
-
-    // Precondition: valid range.
-    let slice = unsafe { std::slice::from_raw_parts_mut(futures, count) };
-    let mut futures: Vec<Option<&mut FutureT>> = Vec::with_capacity(count);
-    for ptr in slice.iter_mut() {
-        if let Some(f) = safe_optional_as_mut!(*ptr) {
-            futures.push(Some(safe_from_runtime_with_error!(f, runtime, error)));
-        } else {
-            futures.push(None);
-        }
+    let futures = futures_as_refs(futures, count, runtime, error);
+    if futures.is_empty() {
+        return std::ptr::null();
     }
 
     runtime
-        .block_on_any(&mut futures)
-        .map(|f| f as *mut FutureT)
-        .unwrap_or(std::ptr::null_mut())
+        .block_on_any(&futures)
+        .map(|f| f as *const FutureT)
+        .unwrap_or(std::ptr::null())
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_runtime_block_on_all(
     runtime: *mut RuntimeT,
-    futures: *mut *mut FutureT,
+    futures: *const *const FutureT,
     count: usize,
+    error: *mut ErrorT,
 ) {
+    let error = safe_optional_error_as_mut!(error);
     let runtime = safe_as_ref!(runtime);
-    let futures = safe_as_mut!(futures);
+    let futures = safe_as_ref!(futures);
 
-    if count == 0 {
+    let futures = futures_as_refs(futures, count, runtime, error);
+    if futures.is_empty() {
         return;
     }
 
-    // Precondition: valid range.
-    let slice = unsafe { std::slice::from_raw_parts_mut(futures, count) };
-    let mut futures: Vec<Option<&mut FutureT>> = Vec::with_capacity(count);
-    for ptr in slice.iter_mut() {
-        if let Some(f) = safe_optional_as_mut!(*ptr) {
-            futures.push(Some(f));
-        } else {
-            futures.push(None);
-        }
-    }
-
-    runtime.block_on_all(&mut futures);
-}
-
-struct RuntimeState {
-    runtime: tokio::runtime::Runtime,
-    progress_lock: Mutex<()>,
-    spawn_mut: Mutex<bool>,
-    spawn_cv: Condvar,
-}
-
-impl RuntimeState {
-    fn new(runtime: tokio::runtime::Runtime, progress_lock: Mutex<()>) -> Self {
-        Self {
-            runtime,
-            progress_lock,
-            spawn_mut: Mutex::new(false),
-            spawn_cv: Condvar::new(),
-        }
-    }
+    runtime.block_on_all(&futures);
 }
 
 impl PartialEq for RuntimeT {
@@ -199,20 +163,14 @@ impl RuntimeT {
         })
     }
 
-    fn notify_one(&self) {
-        {
-            let mut guard = self.state.spawn_mut.lock();
-            *guard = true;
-        }
-        self.state.spawn_cv.notify_one();
+    pub(crate) fn request_stop(&self) {
+        self.state.stop_requested.store(true, Ordering::Release);
+        self.state.wait_flag.store(true, Ordering::Release);
+        self.state.wait_cv.notify_all();
     }
 
-    fn notify_all(&self) {
-        {
-            let mut guard = self.state.spawn_mut.lock();
-            *guard = true;
-        }
-        self.state.spawn_cv.notify_all();
+    pub(crate) fn stop_requested(&self) -> bool {
+        self.state.stop_requested.load(Ordering::Acquire)
     }
 
     pub(crate) fn wait(&self) {
@@ -228,35 +186,73 @@ impl RuntimeT {
         self.state.runtime.block_on(future)
     }
 
-    pub(crate) fn block_on_any<'a>(
-        &self,
-        futures: &'a mut [Option<&'a mut FutureT>],
-    ) -> Option<&'a mut FutureT> {
+    pub(crate) fn block_on_future(&self, future: &FutureT) {
+        // Double-checked lock.
+        if future.is_ready() {
+            return;
+        }
+
         let _guard = self.state.progress_lock.lock();
+        // Double-checked lock.
+        if future.is_ready() {
+            return;
+        }
+
         self.state.runtime.block_on(poll_fn(|ctx| {
-            for f in futures.iter_mut() {
-                if let Some(future) = f.take() {
-                    if future.poll_with_context(ctx) {
-                        return Poll::Ready(Some(future));
-                    }
-                    *f = Some(future);
-                }
+            if future.poll_with_context(ctx) {
+                Poll::Ready(())
+            } else {
+                Poll::Pending
+            }
+        }))
+    }
+
+    pub(crate) fn block_on_any<'a>(&self, futures: &'a [&'a FutureT]) -> Option<&'a FutureT> {
+        // Double-checked lock.
+        if let Some(f) = futures.iter().find(|f| f.is_ready()) {
+            return Some(*f);
+        }
+
+        let _guard = self.state.progress_lock.lock();
+        // Double-checked lock.
+        if let Some(f) = futures.iter().find(|f| f.is_ready()) {
+            return Some(*f);
+        }
+
+        self.state.runtime.block_on(poll_fn(|ctx| {
+            if let Some(f) = futures.iter().find(|f| f.poll_with_context(ctx)) {
+                return Poll::Ready(Some(*f));
             }
             Poll::Pending
         }))
     }
 
-    pub(crate) fn block_on_all(&self, futures: &mut [Option<&mut FutureT>]) {
+    pub(crate) fn block_on_all(&self, futures: &[&FutureT]) {
+        // Double-checked lock.
+        if futures.iter().all(|f| f.is_ready()) {
+            return;
+        }
+
         let _guard = self.state.progress_lock.lock();
+        // Double-checked lock.
+        if futures.iter().all(|f| f.is_ready()) {
+            return;
+        }
+
         self.state.runtime.block_on(poll_fn(|ctx| {
-            for f in futures.iter_mut() {
-                if let Some(future) = f {
-                    if !future.poll_with_context(ctx) {
-                        return Poll::Pending;
-                    }
+            let mut is_pending = false;
+
+            for f in futures.iter() {
+                if !f.poll_with_context(ctx) {
+                    is_pending = true;
                 }
             }
-            Poll::Ready(())
+
+            if is_pending {
+                Poll::Pending
+            } else {
+                Poll::Ready(())
+            }
         }));
     }
 
@@ -272,66 +268,103 @@ impl RuntimeT {
 
     pub(crate) fn spawn<F>(&self, future: F) -> tokio::task::JoinHandle<F::Output>
     where
-        F: std::future::Future + Send + 'static,
+        F: Future + Send + 'static,
         F::Output: Send + 'static,
     {
         let handle = self.state.runtime.spawn(future);
-
-        // IMPORTANT: this guard MAY be blocked by other spawners or by a worker thread, but the lock is held for a very
-        // short time in all cases, so this is *effectively* non-blocking in most scenarios. Nevertheless, it may need
-        // to be replaced with a semaphores or channels (truly non-blocking) if spawner contention becomes a measurable
-        // bottleneck.
-        {
-            let mut guard = self.state.spawn_mut.lock();
-            *guard = true;
-        }
-        self.notify_one();
-
+        self.state.wait_flag.store(true, Ordering::Release);
+        self.state.wait_cv.notify_one();
         handle
     }
 
-    fn with_progress_lock<F>(&self, func: F) -> bool
+    fn with_progress_lock<Op>(&self, op: Op) -> bool
     where
-        F: FnOnce(&tokio::runtime::Runtime),
+        Op: FnOnce(&tokio::runtime::Runtime),
     {
         let Some(_guard) = self.state.progress_lock.try_lock() else {
             return false;
         };
 
-        func(&self.state.runtime);
+        op(&self.state.runtime);
         true
     }
 
     fn wait_impl(&self, timeout: Option<Duration>) -> bool {
         let deadline = timeout.map(|t| Instant::now() + t);
 
-        // IMPORTANT: this guard MUST be held for as short as possible to avoid blocking spawning threads.
-        let mut guard = self.state.spawn_mut.lock();
-        while !*guard {
+        let mut guard = self.state.wait_mutex.lock();
+        while !self.state.wait_flag.load(Ordering::Acquire) {
+            if self.state.stop_requested.load(Ordering::Acquire) {
+                return true;
+            }
+
             match deadline {
-                None => self.state.spawn_cv.wait(&mut guard),
+                None => self.state.wait_cv.wait(&mut guard),
                 Some(deadline) => {
                     let remaining = deadline.saturating_duration_since(Instant::now());
-                    if remaining.is_zero() {
-                        return false; // Early return on timeout.
-                    }
-
-                    if self
-                        .state
-                        .spawn_cv
-                        .wait_for(&mut guard, remaining)
-                        .timed_out()
+                    if remaining.is_zero()
+                        || self
+                            .state
+                            .wait_cv
+                            .wait_for(&mut guard, remaining)
+                            .timed_out()
                     {
-                        return false; // Early return on timeout.
+                        return false;
                     }
                 }
             }
         }
 
-        // Reset after successful wakeup.
-        *guard = false;
+        self.state.wait_flag.store(false, Ordering::Release);
         true
     }
+}
+
+struct RuntimeState {
+    runtime: tokio::runtime::Runtime,
+    progress_lock: Mutex<()>,
+    stop_requested: AtomicBool,
+    wait_flag: AtomicBool,
+    wait_mutex: Mutex<()>,
+    wait_cv: Condvar,
+}
+
+impl RuntimeState {
+    fn new(runtime: tokio::runtime::Runtime, progress_lock: Mutex<()>) -> Self {
+        Self {
+            runtime,
+            progress_lock,
+            wait_flag: AtomicBool::new(false),
+            stop_requested: AtomicBool::new(false),
+            wait_mutex: Mutex::new(()),
+            wait_cv: Condvar::new(),
+        }
+    }
+}
+
+fn futures_as_refs<'a>(
+    futures: *const *const FutureT,
+    count: usize,
+    runtime: &RuntimeT,
+    error: Option<&mut ErrorT>,
+) -> Vec<&'a FutureT> {
+    if count == 0 {
+        return Vec::new();
+    }
+
+    // SAFETY: valid pointer + length is an uncheckable precondition.
+    let slice = unsafe { std::slice::from_raw_parts(futures, count) };
+    let mut ret = Vec::with_capacity(count);
+
+    for ptr in slice.iter() {
+        let Some(future) = safe_optional_as_ref!(*ptr) else {
+            continue; // Ignore null pointers.
+        };
+        safe_from_runtime_with_error!(future, runtime, error);
+        ret.push(future);
+    }
+
+    ret
 }
 
 #[cfg(test)]
@@ -490,7 +523,7 @@ mod tests {
     }
 
     #[test]
-    fn notify_all_only_unblocks_one_worker_with_bool_predicate() {
+    fn request_stop_wakes_all_waiting_workers() {
         let runtime = make_runtime();
         let num_workers = 3;
         let mut handles = Vec::new();
@@ -498,24 +531,58 @@ mod tests {
         for _ in 0..num_workers {
             let rt = runtime.clone();
             handles.push(thread::spawn(move || {
-                rt.wait_with_timeout(Duration::from_secs(1))
+                rt.wait();
+                rt.stop_requested()
             }));
         }
 
         // Give workers time to start waiting on the runtime.
         thread::sleep(Duration::from_millis(50));
 
-        runtime.notify_all();
+        assert!(!runtime.stop_requested());
+        runtime.request_stop();
 
-        let unblocked = handles
+        let stopped = handles
             .into_iter()
             .map(|handle| handle.join().unwrap())
             .filter(|result| *result)
             .count();
 
         assert_eq!(
-            unblocked, 1,
-            "with a Mutex<bool> predicate, notify_all wakes all threads but only one consumes the flag; the rest time out"
+            stopped, num_workers,
+            "request_stop should wake all workers and each should observe the stop request"
+        );
+        assert!(runtime.stop_requested());
+    }
+
+    #[test]
+    fn request_stop_makes_subsequent_wait_return_immediately() {
+        let runtime = make_runtime();
+
+        runtime.request_stop();
+        let t0 = Instant::now();
+        runtime.wait();
+        let elapsed = t0.elapsed();
+
+        assert!(
+            elapsed < Duration::from_millis(10),
+            "wait should return immediately after request_stop, but took {elapsed:?}"
+        );
+        assert!(runtime.stop_requested());
+    }
+
+    #[test]
+    fn request_stop_makes_wait_with_timeout_return_true() {
+        let runtime = make_runtime();
+
+        runtime.request_stop();
+        let t0 = Instant::now();
+        assert!(runtime.wait_with_timeout(Duration::from_secs(10)));
+        let elapsed = t0.elapsed();
+
+        assert!(
+            elapsed < Duration::from_millis(10),
+            "wait_with_timeout should return immediately after request_stop, but took {elapsed:?}"
         );
     }
 
