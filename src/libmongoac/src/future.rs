@@ -65,8 +65,8 @@ pub extern "C" fn mongoac_future_get_void(future: *const FutureT, error: *mut Er
 }
 
 macro_rules! future_value_op {
-    ($inner:expr, $v:ident => $e:expr) => {
-        match &*$inner {
+    ($value:expr, $v:ident => $e:expr) => {
+        match &*$value {
             FutureValue::Bool($v) => $e,
             FutureValue::Bson($v) => $e,
             FutureValue::Int32($v) => $e,
