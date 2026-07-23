@@ -64,7 +64,7 @@ impl DatabaseT {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_client_get_database(
-    client: *mut ClientT,
+    client: *const ClientT,
     name: *const c_char,
     options: *const bson_t,
     error: *mut ErrorT,
@@ -93,7 +93,7 @@ pub extern "C" fn mongoac_database_destroy(database: *mut DatabaseT) {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_database_create_collection_async(
-    database: *mut DatabaseT,
+    database: *const DatabaseT,
     name: *const c_char,
     options: *const bson_t,
     error: *mut ErrorT,
@@ -116,7 +116,7 @@ pub extern "C" fn mongoac_database_create_collection_async(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_database_drop_async(
-    database: *mut DatabaseT,
+    database: *const DatabaseT,
     error: *mut ErrorT,
 ) -> *mut FutureT {
     let error = safe_optional_error_as_mut!(error);

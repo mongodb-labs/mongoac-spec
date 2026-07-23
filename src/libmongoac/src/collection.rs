@@ -34,7 +34,7 @@ impl CollectionT {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_database_get_collection(
-    database: *mut DatabaseT,
+    database: *const DatabaseT,
     name: *const c_char,
     error: *mut ErrorT,
 ) -> *mut CollectionT {
@@ -52,7 +52,7 @@ pub extern "C" fn mongoac_collection_destroy(collection: *mut CollectionT) {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_collection_drop_async(
-    collection: *mut CollectionT,
+    collection: *const CollectionT,
     _options: *const bson_t,
     error: *mut ErrorT,
 ) -> *mut FutureT {

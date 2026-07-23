@@ -60,7 +60,7 @@ pub extern "C" fn mongoac_runtime_request_stop(runtime: *mut RuntimeT) {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn mongoac_runtime_stop_requested(runtime: *mut RuntimeT) -> bool {
+pub extern "C" fn mongoac_runtime_stop_requested(runtime: *const RuntimeT) -> bool {
     safe_as_ref!(runtime).stop_requested()
 }
 

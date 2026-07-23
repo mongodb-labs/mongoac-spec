@@ -413,7 +413,7 @@ fn parse_session_options(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_client_start_session_async(
-    client: *mut ClientT,
+    client: *const ClientT,
     options: *const bson_t,
     error: *mut ErrorT,
 ) -> *mut FutureT {
@@ -429,7 +429,7 @@ pub extern "C" fn mongoac_client_start_session_async(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_client_start_session(
-    client: *mut ClientT,
+    client: *const ClientT,
     options: *const bson_t,
     error: *mut ErrorT,
 ) -> *mut ClientSessionT {
@@ -445,7 +445,7 @@ pub extern "C" fn mongoac_client_start_session(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_client_list_databases_async(
-    client: *mut ClientT,
+    client: *const ClientT,
     session: *mut ClientSessionT,
     options: *const bson_t,
     error: *mut ErrorT,
@@ -469,7 +469,7 @@ pub extern "C" fn mongoac_client_list_databases_async(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_client_list_databases(
-    client: *mut ClientT,
+    client: *const ClientT,
     session: *mut ClientSessionT,
     options: *const bson_t,
     error: *mut ErrorT,
@@ -493,7 +493,7 @@ pub extern "C" fn mongoac_client_list_databases(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_client_list_database_names_async(
-    client: *mut ClientT,
+    client: *const ClientT,
     session: *mut ClientSessionT,
     options: *const bson_t,
     error: *mut ErrorT,
@@ -517,7 +517,7 @@ pub extern "C" fn mongoac_client_list_database_names_async(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_client_list_database_names(
-    client: *mut ClientT,
+    client: *const ClientT,
     session: *mut ClientSessionT,
     options: *const bson_t,
     error: *mut ErrorT,
