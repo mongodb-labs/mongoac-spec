@@ -1,28 +1,30 @@
-use crate::error::ErrorT;
+use crate::error::{ErrorCodeT, ErrorT};
 use crate::future::FutureT;
-use crate::safe_as_ref;
 use crate::safe_drop;
 use crate::safe_optional_as_ref;
 use crate::safe_optional_error_as_mut;
+use crate::{safe_as_ref, safe_error};
 
-use parking_lot::{Condvar, Mutex};
+use event_listener::{Event, Listener};
+use parking_lot::Mutex;
 use std::future::{Future, poll_fn};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::Poll;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 #[macro_export]
 macro_rules! safe_from_runtime_with_error {
     ($future:expr, $runtime:expr, $error:expr) => {{
-        if !$future.from_runtime($runtime) {
+        let future = $future;
+        if !future.from_runtime($runtime) {
             $crate::private::safety::invalid_argument(
                 $error,
                 "future is not associated with the given runtime",
             );
             return Default::default();
         }
-        $future
+        future
     }};
 }
 
@@ -84,9 +86,27 @@ pub extern "C" fn mongoac_runtime_block_on(
     error: *mut ErrorT,
 ) {
     let error = safe_optional_error_as_mut!(error);
-    let future = safe_from_runtime_with_error!(safe_as_ref!(future), safe_as_ref!(runtime), error);
+    let runtime = safe_as_ref!(runtime);
+    let future = safe_from_runtime_with_error!(safe_as_ref!(future), runtime, error);
 
-    safe_as_ref!(runtime).block_on_future(future);
+    runtime.block_on_future(future);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_runtime_block_on_with_timeout(
+    runtime: *mut RuntimeT,
+    future: *const FutureT,
+    timeout_ms: u64,
+    error: *mut ErrorT,
+) {
+    let error = safe_optional_error_as_mut!(error);
+    let runtime = safe_as_ref!(runtime);
+    let future = safe_from_runtime_with_error!(safe_as_ref!(future), runtime, error);
+
+    safe_error!(
+        runtime.block_on_future_with_timeout(future, Duration::from_millis(timeout_ms)),
+        error
+    );
 }
 
 #[unsafe(no_mangle)]
@@ -95,29 +115,44 @@ pub extern "C" fn mongoac_runtime_block_on_any(
     futures: *const *const FutureT,
     count: usize,
     error: *mut ErrorT,
-) -> *const FutureT {
+) -> *const *const FutureT {
     let error = safe_optional_error_as_mut!(error);
     let runtime = safe_as_ref!(runtime);
-    let futures = safe_as_ref!(futures);
 
-    if count == 0 {
-        return std::ptr::null();
+    let refs = match safe_error!(futures_as_refs_for_any(futures, count, runtime), error) {
+        Some(refs) => refs,
+        None => return Default::default(),
+    };
+
+    match runtime.block_on_any(&refs) {
+        Some(i) => unsafe { futures.add(i) },
+        None => Default::default(),
     }
+}
 
-    // SAFETY: `futures` and `count` validity is an uncheckable precondition.
-    let futures = futures_as_refs(
-        unsafe { std::slice::from_raw_parts(futures, count) },
-        runtime,
-        error,
-    );
-    if futures.is_empty() {
-        return std::ptr::null();
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_runtime_block_on_any_with_timeout(
+    runtime: *mut RuntimeT,
+    futures: *const *const FutureT,
+    count: usize,
+    timeout_ms: u64,
+    error: *mut ErrorT,
+) -> *const *const FutureT {
+    let error = safe_optional_error_as_mut!(error);
+    let runtime = safe_as_ref!(runtime);
+
+    let refs = match safe_error!(futures_as_refs_for_any(futures, count, runtime), error) {
+        Some(refs) => refs,
+        None => return Default::default(),
+    };
+
+    match safe_error!(
+        runtime.block_on_any_with_timeout(&refs, Duration::from_millis(timeout_ms)),
+        error
+    ) {
+        Some(i) => unsafe { futures.add(i) },
+        None => Default::default(),
     }
-
-    runtime
-        .block_on_any(&futures)
-        .map(|f| f as *const FutureT)
-        .unwrap_or(std::ptr::null())
 }
 
 #[unsafe(no_mangle)]
@@ -129,23 +164,35 @@ pub extern "C" fn mongoac_runtime_block_on_all(
 ) {
     let error = safe_optional_error_as_mut!(error);
     let runtime = safe_as_ref!(runtime);
-    let futures = safe_as_ref!(futures);
 
-    if count == 0 {
-        return;
-    }
+    let refs = match safe_error!(futures_as_refs_for_all(futures, count, runtime), error) {
+        Some(refs) => refs,
+        None => return,
+    };
 
-    // SAFETY: `futures` and `count` validity is an uncheckable precondition.
-    let futures = futures_as_refs(
-        unsafe { std::slice::from_raw_parts(futures, count) },
-        runtime,
-        error,
-    );
-    if futures.is_empty() {
-        return;
-    }
+    runtime.block_on_all(&refs);
+}
 
-    runtime.block_on_all(&futures);
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_runtime_block_on_all_with_timeout(
+    runtime: *mut RuntimeT,
+    futures: *const *const FutureT,
+    count: usize,
+    timeout_ms: u64,
+    error: *mut ErrorT,
+) {
+    let error = safe_optional_error_as_mut!(error);
+    let runtime = safe_as_ref!(runtime);
+
+    let refs = match safe_error!(futures_as_refs_for_all(futures, count, runtime), error) {
+        Some(refs) => refs,
+        None => return,
+    };
+
+    safe_error!(
+        runtime.block_on_all_with_timeout(&refs, Duration::from_millis(timeout_ms)),
+        error
+    )
 }
 
 impl PartialEq for RuntimeT {
@@ -163,18 +210,18 @@ impl RuntimeT {
             .build()?;
 
         Ok(Self {
-            state: Arc::new(RuntimeState::new(runtime, Mutex::new(()))),
+            state: Arc::new(RuntimeState::new(runtime)),
         })
     }
 
     pub(crate) fn make_progress(&self) -> bool {
-        self.with_progress_lock(|runtime| {
+        self.try_with_progress_lock(|runtime| {
             runtime.block_on(async { tokio::task::yield_now().await });
         })
     }
 
     pub(crate) fn make_progress_with_timeout(&self, timeout: Duration) -> bool {
-        self.with_progress_lock(|runtime| {
+        self.try_with_progress_lock(|runtime| {
             runtime.block_on(async {
                 let _ = tokio::time::timeout(timeout, tokio::task::yield_now()).await;
             });
@@ -184,7 +231,7 @@ impl RuntimeT {
     pub(crate) fn request_stop(&self) {
         self.state.stop_requested.store(true, Ordering::Release);
         self.state.wait_flag.store(true, Ordering::Release);
-        self.state.wait_cv.notify_all();
+        self.state.wait_event.notify(usize::MAX);
     }
 
     pub(crate) fn stop_requested(&self) -> bool {
@@ -205,78 +252,183 @@ impl RuntimeT {
     }
 
     pub(crate) fn block_on_future(&self, future: &FutureT) {
-        // Double-checked lock.
-        if future.is_ready() {
-            return;
-        }
-
-        let _guard = self.state.progress_lock.lock();
-        // Double-checked lock.
-        if future.is_ready() {
-            return;
-        }
-
-        self.state.runtime.block_on(poll_fn(|ctx| {
-            if future.poll_with_context(ctx) {
-                Poll::Ready(())
-            } else {
-                Poll::Pending
-            }
-        }))
+        self.with_progress_lock(
+            || if future.is_ready() { Some(()) } else { None },
+            |runtime| {
+                runtime.block_on(poll_fn(|ctx| {
+                    if future.poll_with_context(ctx) {
+                        Poll::Ready(())
+                    } else {
+                        Poll::Pending
+                    }
+                }))
+            },
+        );
     }
 
-    pub(crate) fn block_on_any<'a>(&self, futures: &'a [&'a FutureT]) -> Option<&'a FutureT> {
-        // Double-checked lock.
-        if let Some(f) = futures.iter().find(|f| f.is_ready()) {
-            return Some(*f);
-        }
+    pub(crate) fn block_on_future_with_timeout(
+        &self,
+        future: &FutureT,
+        timeout: Duration,
+    ) -> Result<(), ErrorT> {
+        self.with_progress_lock(
+            || {
+                if future.is_ready() {
+                    Some(Ok(()))
+                } else {
+                    None
+                }
+            },
+            |runtime| {
+                runtime.block_on(async {
+                    tokio::time::timeout(
+                        timeout,
+                        poll_fn(|ctx| {
+                            if future.poll_with_context(ctx) {
+                                Poll::Ready(())
+                            } else {
+                                Poll::Pending
+                            }
+                        }),
+                    )
+                    .await
+                    .map_err(|_| {
+                        ErrorT::from_mongoac(ErrorCodeT::Timeout, "block_on_future_with_timeout")
+                    })
+                })
+            },
+        )
+    }
 
-        let _guard = self.state.progress_lock.lock();
-        // Double-checked lock.
-        if let Some(f) = futures.iter().find(|f| f.is_ready()) {
-            return Some(*f);
-        }
+    pub(crate) fn block_on_any<'a>(&self, futures: &'a [(usize, &'a FutureT)]) -> Option<usize> {
+        // TODO: investigate making this more efficient by using something like FuturesUnordered instead of iteration.
+        self.with_progress_lock(
+            || {
+                futures
+                    .iter()
+                    .find(|(_, f)| f.is_ready())
+                    .map(|(i, _)| Some(*i))
+            },
+            |runtime| {
+                runtime.block_on(poll_fn(|ctx| {
+                    if let Some((i, _)) = futures.iter().find(|(_, f)| f.poll_with_context(ctx)) {
+                        return Poll::Ready(Some(*i));
+                    }
+                    Poll::Pending
+                }))
+            },
+        )
+    }
 
-        self.state.runtime.block_on(poll_fn(|ctx| {
-            if let Some(f) = futures.iter().find(|f| f.poll_with_context(ctx)) {
-                return Poll::Ready(Some(*f));
-            }
-            Poll::Pending
-        }))
+    pub(crate) fn block_on_any_with_timeout<'a>(
+        &self,
+        futures: &'a [(usize, &'a FutureT)],
+        timeout: Duration,
+    ) -> Result<Option<usize>, ErrorT> {
+        self.with_progress_lock(
+            || {
+                futures
+                    .iter()
+                    .find(|(_, f)| f.is_ready())
+                    .map(|(i, _)| Ok(Some(*i)))
+            },
+            |runtime| {
+                runtime.block_on(async {
+                    tokio::time::timeout(
+                        timeout,
+                        poll_fn(|ctx| {
+                            if let Some((i, _)) =
+                                futures.iter().find(|(_, f)| f.poll_with_context(ctx))
+                            {
+                                return Poll::Ready(Some(*i));
+                            }
+                            Poll::Pending
+                        }),
+                    )
+                    .await
+                    .map_err(|_| {
+                        ErrorT::from_mongoac(ErrorCodeT::Timeout, "block_on_any_with_timeout")
+                    })
+                })
+            },
+        )
     }
 
     pub(crate) fn block_on_all(&self, futures: &[&FutureT]) {
-        // Double-checked lock.
-        if futures.iter().all(|f| f.is_ready()) {
-            return;
-        }
-
-        let _guard = self.state.progress_lock.lock();
-        // Double-checked lock.
-        if futures.iter().all(|f| f.is_ready()) {
-            return;
-        }
-
-        self.state.runtime.block_on(poll_fn(|ctx| {
-            let mut is_pending = false;
-
-            for f in futures.iter() {
-                if !f.poll_with_context(ctx) {
-                    is_pending = true;
+        // TODO: investigate making this more efficient by using something like FuturesUnordered instead of iteration.
+        self.with_progress_lock(
+            || {
+                if futures.iter().all(|f| f.is_ready()) {
+                    Some(())
+                } else {
+                    None
                 }
-            }
+            },
+            |runtime| {
+                runtime.block_on(poll_fn(|ctx| {
+                    let mut is_pending = false;
 
-            if is_pending {
-                Poll::Pending
-            } else {
-                Poll::Ready(())
-            }
-        }));
+                    for f in futures.iter() {
+                        if !f.poll_with_context(ctx) {
+                            is_pending = true;
+                        }
+                    }
+
+                    if is_pending {
+                        Poll::Pending
+                    } else {
+                        Poll::Ready(())
+                    }
+                }))
+            },
+        );
+    }
+
+    pub(crate) fn block_on_all_with_timeout(
+        &self,
+        futures: &[&FutureT],
+        timeout: Duration,
+    ) -> Result<(), ErrorT> {
+        self.with_progress_lock(
+            || {
+                if futures.iter().all(|f| f.is_ready()) {
+                    Some(Ok(()))
+                } else {
+                    None
+                }
+            },
+            |runtime| {
+                runtime.block_on(async {
+                    tokio::time::timeout(
+                        timeout,
+                        poll_fn(|ctx| {
+                            let mut is_pending = false;
+
+                            for f in futures.iter() {
+                                if !f.poll_with_context(ctx) {
+                                    is_pending = true;
+                                }
+                            }
+
+                            if is_pending {
+                                Poll::Pending
+                            } else {
+                                Poll::Ready(())
+                            }
+                        }),
+                    )
+                    .await
+                    .map_err(|_| {
+                        ErrorT::from_mongoac(ErrorCodeT::Timeout, "block_on_all_with_timeout")
+                    })
+                })
+            },
+        )
     }
 
     pub(crate) fn from_raw(runtime: tokio::runtime::Runtime) -> Self {
         Self {
-            state: Arc::new(RuntimeState::new(runtime, Mutex::new(()))),
+            state: Arc::new(RuntimeState::new(runtime)),
         }
     }
 
@@ -291,11 +443,31 @@ impl RuntimeT {
     {
         let handle = self.state.runtime.spawn(future);
         self.state.wait_flag.store(true, Ordering::Release);
-        self.state.wait_cv.notify_one();
+        self.state.wait_event.notify(usize::MAX);
         handle
     }
 
-    fn with_progress_lock<Op>(&self, op: Op) -> bool
+    fn with_progress_lock<R>(
+        &self,
+        mut cond: impl FnMut() -> Option<R>,
+        run: impl FnOnce(&tokio::runtime::Runtime) -> R,
+    ) -> R {
+        // Double-checked lock.
+        if let Some(result) = cond() {
+            return result;
+        }
+
+        let _guard = self.state.progress_lock.lock();
+
+        // Double-checked lock.
+        if let Some(result) = cond() {
+            return result;
+        }
+
+        run(&self.state.runtime)
+    }
+
+    fn try_with_progress_lock<Op>(&self, op: Op) -> bool
     where
         Op: FnOnce(&tokio::runtime::Runtime),
     {
@@ -308,93 +480,137 @@ impl RuntimeT {
     }
 
     fn wait_impl(&self, timeout: Option<Duration>) -> bool {
-        let deadline = timeout.map(|t| Instant::now() + t);
-
-        let mut guard = self.state.wait_mutex.lock();
-        while !self.state.wait_flag.load(Ordering::Acquire) {
-            if self.state.stop_requested.load(Ordering::Acquire) {
-                return true;
-            }
-
-            match deadline {
-                None => self.state.wait_cv.wait(&mut guard),
-                Some(deadline) => {
-                    let remaining = deadline.saturating_duration_since(Instant::now());
-                    if remaining.is_zero()
-                        || self
-                            .state
-                            .wait_cv
-                            .wait_for(&mut guard, remaining)
-                            .timed_out()
-                    {
-                        return false;
-                    }
-                }
-            }
+        // Double-checked predicate against listener registration.
+        if self.state.stop_requested.load(Ordering::Acquire)
+            || self.state.wait_flag.swap(false, Ordering::Acquire)
+        {
+            return true;
         }
 
-        self.state.wait_flag.store(false, Ordering::Release);
-        true
+        let listener = self.state.wait_event.listen();
+
+        // Double-checked predicate against listener registration.
+        if self.state.stop_requested.load(Ordering::Acquire)
+            || self.state.wait_flag.swap(false, Ordering::Acquire)
+        {
+            return true;
+        }
+
+        match timeout {
+            None => {
+                listener.wait();
+                true
+            }
+            Some(timeout) => listener.wait_timeout(timeout).is_some(),
+        }
     }
 }
 
 struct RuntimeState {
     runtime: tokio::runtime::Runtime,
+    // Only one thread can `block_on*()` or `make_progress*()` at a time.
     progress_lock: Mutex<()>,
+    // Used to signal waiting threads that no more work should be done.
     stop_requested: AtomicBool,
+    // Used to signal waiting threads when work is available.
     wait_flag: AtomicBool,
-    wait_mutex: Mutex<()>,
-    wait_cv: Condvar,
+    // used to wake waiting threads when work is available or stop is requested.
+    wait_event: Event,
 }
 
 impl RuntimeState {
-    fn new(runtime: tokio::runtime::Runtime, progress_lock: Mutex<()>) -> Self {
+    fn new(runtime: tokio::runtime::Runtime) -> Self {
         Self {
             runtime,
-            progress_lock,
-            wait_flag: AtomicBool::new(false),
+            progress_lock: Mutex::new(()),
             stop_requested: AtomicBool::new(false),
-            wait_mutex: Mutex::new(()),
-            wait_cv: Condvar::new(),
+            wait_flag: AtomicBool::new(false),
+            wait_event: Event::new(),
         }
     }
+}
+
+fn futures_as_refs_for_any<'a>(
+    futures: *const *const FutureT,
+    count: usize,
+    runtime: &RuntimeT,
+) -> Result<Option<Vec<(usize, &'a FutureT)>>, ErrorT> {
+    if futures.is_null() || count == 0 {
+        return Ok(None); // No work to do.
+    }
+
+    // SAFETY: `futures` and `count` validity is an uncheckable precondition.
+    let refs = futures_as_refs(
+        unsafe { std::slice::from_raw_parts(futures, count) },
+        runtime,
+    )?;
+
+    if refs.is_empty() {
+        return Ok(None); // No work to do.
+    }
+
+    Ok(Some(refs))
+}
+
+fn futures_as_refs_for_all<'a>(
+    futures: *const *const FutureT,
+    count: usize,
+    runtime: &RuntimeT,
+) -> Result<Option<Vec<&'a FutureT>>, ErrorT> {
+    if futures.is_null() || count == 0 {
+        return Ok(None); // No work to do.
+    }
+
+    // SAFETY: `futures` and `count` validity is an uncheckable precondition.
+    let refs: Vec<&'a FutureT> = futures_as_refs(
+        unsafe { std::slice::from_raw_parts(futures, count) },
+        runtime,
+    )
+    .map(|v| v.into_iter().map(|(_, f)| f).collect())?;
+
+    if refs.is_empty() {
+        return Ok(None); // No work to do.
+    }
+
+    Ok(Some(refs))
 }
 
 fn futures_as_refs<'a>(
     futures: &'a [*const FutureT],
     runtime: &RuntimeT,
-    error: Option<&mut ErrorT>,
-) -> Vec<&'a FutureT> {
+) -> Result<Vec<(usize, &'a FutureT)>, ErrorT> {
     let mut ret = Vec::with_capacity(futures.len());
 
-    for ptr in futures.iter() {
+    for (i, ptr) in futures.iter().enumerate() {
         let Some(future) = safe_optional_as_ref!(*ptr) else {
-            continue; // Ignore null pointers.
+            return Err(ErrorT::from_mongoac(
+                ErrorCodeT::InvalidArgument,
+                &format!("futures array element at index {i}: must not be null"),
+            ));
         };
-        safe_from_runtime_with_error!(future, runtime, error);
-        ret.push(future);
+
+        if !future.from_runtime(runtime) {
+            return Err(ErrorT::from_mongoac(
+                ErrorCodeT::InvalidArgument,
+                &format!(
+                    "futures array element at index {i}: future is not associated with the given runtime"
+                ),
+            ));
+        }
+
+        ret.push((i, future));
     }
 
-    ret
+    Ok(ret)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::private::test_util::make_runtime;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::thread;
     use std::time::{Duration, Instant};
-
-    fn make_runtime() -> RuntimeT {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .event_interval(1)
-            .build()
-            .expect("failed to build runtime");
-
-        RuntimeT::from_raw(rt)
-    }
 
     #[test]
     fn make_progress_returns_true_when_lock_available() {

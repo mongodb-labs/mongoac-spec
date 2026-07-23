@@ -16,6 +16,7 @@ pub const MONGOAC_ERROR_CODE_OK: mongoac_error_code_t = 0;
 pub const MONGOAC_ERROR_CODE_UNKNOWN_CATEGORY: mongoac_error_code_t = 1;
 pub const MONGOAC_ERROR_CODE_INVALID_ARGUMENT: mongoac_error_code_t = 2;
 pub const MONGOAC_ERROR_CODE_RUNTIME_ERROR: mongoac_error_code_t = 3;
+pub const MONGOAC_ERROR_CODE_TIMEOUT: mongoac_error_code_t = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, num_enum::FromPrimitive, num_enum::IntoPrimitive)]
 #[repr(i32)]
@@ -47,6 +48,8 @@ pub enum ErrorCodeT {
     InvalidArgument = MONGOAC_ERROR_CODE_INVALID_ARGUMENT,
     #[strum(message = "runtime error")]
     RuntimeError = MONGOAC_ERROR_CODE_RUNTIME_ERROR,
+    #[strum(message = "timeout")]
+    Timeout = MONGOAC_ERROR_CODE_TIMEOUT,
 
     #[strum(message = "unknown error code")]
     #[num_enum(catch_all)]
@@ -59,7 +62,7 @@ impl ErrorCodeT {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum ErrorT {
     None,
     MongoAC {

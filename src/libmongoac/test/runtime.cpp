@@ -70,6 +70,32 @@ TEST_CASE("block_on_all", "[mongoac][runtime]")
    }
 }
 
+TEST_CASE("block_on_with_timeout", "[mongoac][runtime]")
+{
+   SECTION("null")
+   {
+      mongoac_runtime_block_on_with_timeout(nullptr, nullptr, 0, nullptr);
+      SUCCEED();
+   }
+}
+
+TEST_CASE("block_on_any_with_timeout", "[mongoac][runtime]")
+{
+   SECTION("null")
+   {
+      CHECK(mongoac_runtime_block_on_any_with_timeout(nullptr, nullptr, 0, 0, nullptr) == nullptr);
+   }
+}
+
+TEST_CASE("block_on_all_with_timeout", "[mongoac][runtime]")
+{
+   SECTION("null")
+   {
+      mongoac_runtime_block_on_all_with_timeout(nullptr, nullptr, 0, 0, nullptr);
+      SUCCEED();
+   }
+}
+
 TEST_CASE("request_stop", "[mongoac][runtime]")
 {
    SECTION("null")

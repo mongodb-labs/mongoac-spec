@@ -64,15 +64,27 @@ pub extern "C" fn mongoac_future_get_void(future: *const FutureT, error: *mut Er
     safe_error!(future.get_void(), error);
 }
 
+pub(crate) enum FutureValue {
+    Bool(FutureValueType<bool>),
+    Bson(FutureValueType<mongodb::bson::RawDocumentBuf>),
+    ClientSession(FutureValueType<ClientSessionT>),
+    Cursor(FutureValueType<CursorT>),
+    Int32(FutureValueType<i32>),
+    Void(FutureValueType<()>),
+}
+
+/// Applies `$e` to the typed payload inside every `FutureValue` variant.
+/// The match arms are ordered identically to the `FutureValue` enum so that
+/// exhaustiveness is easy to verify by inspection.
 macro_rules! future_value_op {
     ($value:expr, $v:ident => $e:expr) => {
         match &*$value {
             FutureValue::Bool($v) => $e,
             FutureValue::Bson($v) => $e,
-            FutureValue::Int32($v) => $e,
             FutureValue::ClientSession($v) => $e,
-            FutureValue::Void($v) => $e,
             FutureValue::Cursor($v) => $e,
+            FutureValue::Int32($v) => $e,
+            FutureValue::Void($v) => $e,
         }
     };
 }
@@ -158,7 +170,7 @@ impl FutureT {
     }
 }
 
-// The dynamic type of an `async` block which returns a `Result<T, ErrorT>`.
+/// The dynamic type of an `async` block which returns a `Result<T, ErrorT>`.
 type Async<T> = Pin<Box<dyn Future<Output = Result<T, ErrorT>> + Send>>;
 
 pub(crate) struct FutureValueType<T> {
@@ -220,15 +232,6 @@ impl<T: Send + 'static> FutureValueType<T> {
     }
 }
 
-pub(crate) enum FutureValue {
-    Bool(FutureValueType<bool>),
-    Bson(FutureValueType<mongodb::bson::RawDocumentBuf>),
-    ClientSession(FutureValueType<ClientSessionT>),
-    Cursor(FutureValueType<CursorT>),
-    Int32(FutureValueType<i32>),
-    Void(FutureValueType<()>),
-}
-
 #[macro_export]
 macro_rules! spawn {
     ($client:expr, $value_type:ident, $op:expr) => {{
@@ -244,20 +247,12 @@ macro_rules! spawn {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::private::test_util::make_runtime;
     use crate::runtime::RuntimeT;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::thread;
     use std::time::{Duration, Instant};
-
-    fn make_runtime() -> RuntimeT {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .event_interval(1)
-            .build()
-            .expect("failed to build runtime");
-        RuntimeT::from_raw(rt)
-    }
 
     fn spawn_immediate(runtime: &RuntimeT) -> FutureT {
         let handle = runtime.spawn(async { Ok::<(), ErrorT>(()) });
@@ -338,15 +333,15 @@ mod tests {
         let f1 = spawn_delayed(&runtime, Duration::from_millis(50));
         let f2 = spawn_delayed(&runtime, Duration::from_millis(500));
 
-        let futures = [&f1, &f2];
+        let futures = [(0, &f1), (1, &f2)];
         let start = Instant::now();
         // Both spawned futures are short, so at least one will become ready; None is impossible here.
-        let future = runtime
+        let index = runtime
             .block_on_any(&futures)
             .expect("one future should be ready");
         let elapsed = start.elapsed();
 
-        assert!(std::ptr::eq(future, &f1));
+        assert_eq!(index, 0);
         assert!(
             elapsed >= Duration::from_millis(40) && elapsed < Duration::from_millis(150),
             "block_on_any should return as soon as the short task fires (elapsed: {elapsed:?})"
@@ -381,6 +376,108 @@ mod tests {
         // Both futures are borrowed, not consumed, and are now ready.
         assert!(f1.is_ready());
         assert!(f2.is_ready());
+    }
+
+    // -- block_on*_with_timeout tests (via RuntimeT) --
+
+    #[test]
+    fn block_on_future_with_timeout_completes_before_deadline() {
+        let runtime = make_runtime();
+        let future = spawn_delayed(&runtime, Duration::from_millis(10));
+
+        let result = runtime.block_on_future_with_timeout(&future, Duration::from_millis(500));
+
+        assert!(result.is_ok(), "future should complete before timeout");
+        assert!(future.is_ready());
+    }
+
+    #[test]
+    fn block_on_future_with_timeout_times_out() {
+        let runtime = make_runtime();
+        let future = spawn_delayed(&runtime, Duration::from_millis(500));
+
+        let result = runtime.block_on_future_with_timeout(&future, Duration::from_millis(10));
+
+        assert!(
+            result.is_err(),
+            "should time out before the future completes"
+        );
+        assert!(
+            !future.is_ready(),
+            "future should not be ready after timeout"
+        );
+    }
+
+    #[test]
+    fn block_on_any_with_timeout_returns_first_ready_future() {
+        let runtime = make_runtime();
+        let f1 = spawn_delayed(&runtime, Duration::from_millis(50));
+        let f2 = spawn_delayed(&runtime, Duration::from_millis(500));
+
+        let futures = [(0, &f1), (1, &f2)];
+        let start = Instant::now();
+        let result = runtime.block_on_any_with_timeout(&futures, Duration::from_millis(200));
+        let elapsed = start.elapsed();
+
+        let index = result
+            .expect("should not time out")
+            .expect("one future should be ready");
+        assert_eq!(index, 0);
+        assert!(
+            elapsed >= Duration::from_millis(40) && elapsed < Duration::from_millis(150),
+            "block_on_any_with_timeout should return as soon as the short task fires (elapsed: {elapsed:?})"
+        );
+
+        assert!(f1.is_ready());
+        assert!(!f2.is_ready());
+    }
+
+    #[test]
+    fn block_on_any_with_timeout_times_out() {
+        let runtime = make_runtime();
+        let f1 = spawn_delayed(&runtime, Duration::from_millis(500));
+        let f2 = spawn_delayed(&runtime, Duration::from_millis(600));
+
+        let futures = [(0, &f1), (1, &f2)];
+        let result = runtime.block_on_any_with_timeout(&futures, Duration::from_millis(10));
+
+        assert!(
+            result.is_err(),
+            "should time out before either future completes"
+        );
+        assert!(!f1.is_ready());
+        assert!(!f2.is_ready());
+    }
+
+    #[test]
+    fn block_on_all_with_timeout_completes_before_deadline() {
+        let runtime = make_runtime();
+        let f1 = spawn_delayed(&runtime, Duration::from_millis(50));
+        let f2 = spawn_delayed(&runtime, Duration::from_millis(100));
+
+        let futures = [&f1, &f2];
+        let result = runtime.block_on_all_with_timeout(&futures, Duration::from_millis(500));
+
+        assert!(result.is_ok(), "all futures should complete before timeout");
+        assert!(f1.is_ready());
+        assert!(f2.is_ready());
+    }
+
+    #[test]
+    fn block_on_all_with_timeout_times_out() {
+        let runtime = make_runtime();
+        let f1 = spawn_delayed(&runtime, Duration::from_millis(500));
+        let f2 = spawn_delayed(&runtime, Duration::from_millis(600));
+
+        let futures = [&f1, &f2];
+        let result = runtime.block_on_all_with_timeout(&futures, Duration::from_millis(10));
+
+        assert!(
+            result.is_err(),
+            "should time out before all futures complete"
+        );
+        assert!(!f1.is_ready());
+        assert!(!f2.is_ready());
     }
 
     // -- clone tests --

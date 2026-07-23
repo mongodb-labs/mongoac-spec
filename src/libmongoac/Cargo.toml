@@ -36,6 +36,7 @@ serde = {
 num_enum = "0.7"
 strum = { version = "0.28", features = ["derive"] }
 parking_lot = "0.12"
+event-listener = "5"
 
 [build-dependencies]
 cbindgen = "0.29"
