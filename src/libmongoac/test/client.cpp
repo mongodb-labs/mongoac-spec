@@ -6,6 +6,7 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <mongoac/client_options.h>
 #include <mongoac/error.h>
+#include <mongoac/future.h>
 #include <mongoac/runtime.h>
 
 TEST_CASE("new", "[mongoac][client]")
@@ -257,5 +258,74 @@ TEST_CASE("destroy", "[mongoac][client]")
    {
       mongoac_client_destroy(nullptr);
       SUCCEED();
+   }
+}
+
+TEST_CASE("shutdown", "[mongoac][client]")
+{
+   SECTION("null")
+   {
+      auto const error = mongoac_error_new();
+      mongoac_client_shutdown(nullptr, error);
+
+      CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_MONGOAC);
+      CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_INVALID_ARGUMENT);
+
+      mongoac_error_destroy(error);
+   }
+
+   SECTION("valid client")
+   {
+      auto const client = mongoac_client_new("mongodb://localhost:27017", nullptr);
+      REQUIRE(client != nullptr);
+
+      auto const error = mongoac_error_new();
+      mongoac_client_shutdown(client, error);
+
+      CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_NONE);
+      CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_OK);
+
+      mongoac_client_destroy(client);
+      mongoac_error_destroy(error);
+   }
+}
+
+TEST_CASE("shutdown_async", "[mongoac][client]")
+{
+   SECTION("null")
+   {
+      auto const error = mongoac_error_new();
+      auto const future = mongoac_client_shutdown_async(nullptr, error);
+
+      CHECK(future == nullptr);
+      CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_MONGOAC);
+      CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_INVALID_ARGUMENT);
+
+      mongoac_error_destroy(error);
+   }
+
+   SECTION("valid client")
+   {
+      auto const client = mongoac_client_new("mongodb://localhost:27017", nullptr);
+      REQUIRE(client != nullptr);
+
+      auto const runtime = mongoac_client_get_runtime(client);
+      REQUIRE(runtime != nullptr);
+
+      auto const error = mongoac_error_new();
+      auto const future = mongoac_client_shutdown_async(client, error);
+      REQUIRE(future != nullptr);
+      CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_OK);
+
+      mongoac_runtime_block_on(runtime, future, error);
+      CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_OK);
+
+      mongoac_future_get_void(future, error);
+      CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_OK);
+
+      mongoac_future_destroy(future);
+      mongoac_runtime_destroy(runtime);
+      mongoac_client_destroy(client);
+      mongoac_error_destroy(error);
    }
 }

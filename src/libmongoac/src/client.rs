@@ -192,6 +192,29 @@ impl ClientT {
         })
     }
 
+    fn list_databases(
+        &self,
+        session: Option<&mut ClientSessionT>,
+        options: Option<ListDatabasesOptions>,
+    ) -> Result<RawDocumentBuf, ErrorT> {
+        let session_arc = session.map(|s| s.inner.clone());
+        self.runtime.block_on(async move {
+            if let Some(ref session_arc) = session_arc {
+                let mut guard = session_arc.lock().await;
+                let specs = self
+                    .inner
+                    .list_databases()
+                    .with_options(options)
+                    .session(&mut *guard)
+                    .await?;
+                specs_to_bson_array(&specs)
+            } else {
+                let specs = self.inner.list_databases().with_options(options).await?;
+                specs_to_bson_array(&specs)
+            }
+        })
+    }
+
     fn list_database_names_async(
         &self,
         session: Option<&mut ClientSessionT>,
@@ -212,29 +235,6 @@ impl ClientT {
             } else {
                 let names = client.list_database_names().with_options(options).await?;
                 names_to_bson_array(&names)
-            }
-        })
-    }
-
-    fn list_databases(
-        &self,
-        session: Option<&mut ClientSessionT>,
-        options: Option<ListDatabasesOptions>,
-    ) -> Result<RawDocumentBuf, ErrorT> {
-        let session_arc = session.map(|s| s.inner.clone());
-        self.runtime.block_on(async move {
-            if let Some(ref session_arc) = session_arc {
-                let mut guard = session_arc.lock().await;
-                let specs = self
-                    .inner
-                    .list_databases()
-                    .with_options(options)
-                    .session(&mut *guard)
-                    .await?;
-                specs_to_bson_array(&specs)
-            } else {
-                let specs = self.inner.list_databases().with_options(options).await?;
-                specs_to_bson_array(&specs)
             }
         })
     }
@@ -289,6 +289,26 @@ impl ClientT {
             }
             let session = builder.await?;
             Ok(ClientSessionT::new(session))
+        })
+    }
+
+    fn shutdown_async(&self) -> FutureT {
+        let client = self.inner.clone();
+
+        spawn!(&self, Void, async move {
+            client.shutdown().await;
+            Ok::<(), ErrorT>(())
+        })
+    }
+
+    fn shutdown(&self) -> Result<(), ErrorT> {
+        let client = self.inner.clone();
+
+        self.runtime.block_on({
+            async {
+                client.shutdown().await;
+                Ok(())
+            }
         })
     }
 }
@@ -396,6 +416,25 @@ pub extern "C" fn mongoac_client_clear_command_events(client: *mut ClientT, n: u
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_client_destroy(client: *mut ClientT) {
     safe_drop!(client);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_client_shutdown_async(
+    client: *const ClientT,
+    error: *mut ErrorT,
+) -> *mut FutureT {
+    let error = safe_optional_error_as_mut!(error);
+    let client = safe_as_ref_with_error!(client, error);
+
+    Box::into_raw(Box::new(client.shutdown_async()))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_client_shutdown(client: *const ClientT, error: *mut ErrorT) {
+    let error = safe_optional_error_as_mut!(error);
+    let client = safe_as_ref_with_error!(client, error);
+
+    safe_error!(client.shutdown(), error);
 }
 
 fn parse_session_options(

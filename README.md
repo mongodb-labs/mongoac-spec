@@ -457,10 +457,8 @@ A given future may make progress by a call to `block_on*()` on its associated ru
 > - `mongoac_client_session_destroy()`: spawns a background task to abort any in-progress transactions.
 > - `mongoac_client_destroy()`: spawns a background task to execute an `endSessions` command.
 >
-> These background tasks can only make progress by a call to `mongoac_runtime_block_on*()` (with any unrelated future)
->   or `mongoac_runtime_make_progress*()` (independent of any future).
-> Users must allow enough time and calls to `make_progress*()` during cleanup routines for these background tasks to
->   complete execution.
+> To ensure these background tasks are able to run to completion, `mongoac_client_shutdown*()` may be used to block on
+>   these background tasks.
 
 ##### Make Progress
 
@@ -946,8 +944,8 @@ The Rust Driver may internally spawn background tasks which have no visible mech
 These background tasks include CMAP workers, SDAM monitors, and cleanup routines when dropping certain objects (e.g. a
   background `killCursors` command for `mongoac_cursor_t`, a background `endSessions` command for `mongoac_client_t`,
   etc.).
-On shutdown, the worker thread must keep the runtime alive and invoke `make_progress()` "for a little while" to ensure
-  these background tasks can complete successfully.
+To ensure these background tasks are able to run to completion, `mongoac_client_shutdown*()` may be used to block on
+  these background tasks.
 
 <a id="why-defer-cancellation"></a>
 #### Why defer cancellation?
