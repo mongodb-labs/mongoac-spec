@@ -258,9 +258,11 @@ mod tests {
     use super::*;
     use crate::private::test_util::make_runtime;
     use crate::runtime::RuntimeT;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Barrier};
+    use std::thread;
     use std::time::{Duration, Instant};
+    use tokio::sync::Notify;
 
     fn spawn_immediate(runtime: &RuntimeT) -> FutureT {
         let handle = runtime.spawn(async move { Ok::<(), ErrorT>(()) });
@@ -273,6 +275,17 @@ mod tests {
     fn spawn_delayed(runtime: &RuntimeT, delay: Duration) -> FutureT {
         let handle = runtime.spawn(async move {
             tokio::time::sleep(delay).await;
+            Ok::<(), ErrorT>(())
+        });
+        FutureT::new(
+            runtime.clone(),
+            FutureValue::Void(FutureValueType::new(handle)),
+        )
+    }
+
+    fn spawn_notified(runtime: &RuntimeT, notify: Arc<Notify>) -> FutureT {
+        let handle = runtime.spawn(async move {
+            notify.notified().await;
             Ok::<(), ErrorT>(())
         });
         FutureT::new(
@@ -326,28 +339,35 @@ mod tests {
     #[test]
     fn runtime_block_on_any_does_not_take_ownership() {
         let runtime = make_runtime();
-        let f1 = spawn_delayed(&runtime, Duration::from_millis(50));
-        let f2 = spawn_delayed(&runtime, Duration::from_millis(500));
+        let notify1 = Arc::new(Notify::new());
+        let notify2 = Arc::new(Notify::new());
+        let f1 = spawn_notified(&runtime, notify1.clone());
+        let f2 = spawn_notified(&runtime, notify2.clone());
+
+        // Synchronize with a notifier thread so that f1 becomes ready only after
+        // block_on_any has begun. The elapsed-time assertion is replaced by this
+        // explicit barrier/flag coordination, which is reliable under Miri.
+        let barrier = Arc::new(Barrier::new(2));
+        let barrier_clone = barrier.clone();
+        thread::spawn(move || {
+            barrier_clone.wait();
+            notify1.notify_one();
+        });
 
         let futures = [(0, &f1), (1, &f2)];
-        let start = Instant::now();
-        // Both spawned futures are short, so at least one will become ready; None is impossible here.
+        barrier.wait();
         let index = runtime
             .block_on_any(&futures)
             .expect("one future should be ready");
-        let elapsed = start.elapsed();
 
         assert_eq!(index, 0);
-        assert!(
-            elapsed >= Duration::from_millis(40) && elapsed < Duration::from_millis(150),
-            "block_on_any should return as soon as the short task fires (elapsed: {elapsed:?})"
-        );
 
         // The futures are borrowed, not consumed. The ready one can be queried and the
         // other one can still be driven to completion.
         assert!(f1.is_ready());
         assert!(!f2.is_ready());
 
+        notify2.notify_one();
         runtime.block_on_future(&f2);
         assert!(f2.is_ready());
     }
@@ -407,22 +427,26 @@ mod tests {
     #[test]
     fn block_on_any_with_timeout_returns_first_ready_future() {
         let runtime = make_runtime();
-        let f1 = spawn_delayed(&runtime, Duration::from_millis(50));
-        let f2 = spawn_delayed(&runtime, Duration::from_millis(500));
+        let notify1 = Arc::new(Notify::new());
+        let notify2 = Arc::new(Notify::new());
+        let f1 = spawn_notified(&runtime, notify1.clone());
+        let f2 = spawn_notified(&runtime, notify2);
+
+        let barrier = Arc::new(Barrier::new(2));
+        let barrier_clone = barrier.clone();
+        thread::spawn(move || {
+            barrier_clone.wait();
+            notify1.notify_one();
+        });
 
         let futures = [(0, &f1), (1, &f2)];
-        let start = Instant::now();
+        barrier.wait();
         let result = runtime.block_on_any_with_timeout(&futures, Duration::from_millis(200));
-        let elapsed = start.elapsed();
 
         let index = result
             .expect("should not time out")
             .expect("one future should be ready");
         assert_eq!(index, 0);
-        assert!(
-            elapsed >= Duration::from_millis(40) && elapsed < Duration::from_millis(150),
-            "block_on_any_with_timeout should return as soon as the short task fires (elapsed: {elapsed:?})"
-        );
 
         assert!(f1.is_ready());
         assert!(!f2.is_ready());

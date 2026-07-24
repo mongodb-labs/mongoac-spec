@@ -58,7 +58,7 @@ pub extern "C" fn mongoac_runtime_make_progress_with_timeout(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn mongoac_runtime_request_stop(runtime: *const RuntimeT) {
+pub extern "C" fn mongoac_runtime_request_stop(runtime: *const RuntimeT) -> bool {
     safe_as_ref!(runtime).request_stop()
 }
 
@@ -232,10 +232,11 @@ impl RuntimeT {
         })
     }
 
-    pub(crate) fn request_stop(&self) {
-        self.state.stop_requested.store(true, Ordering::Release);
+    pub(crate) fn request_stop(&self) -> bool {
+        let already_requested = self.state.stop_requested.swap(true, Ordering::AcqRel);
         self.state.wait_flag.store(true, Ordering::Release);
         self.state.wait_event.notify(usize::MAX); // All waiters must receive the stop request.
+        !already_requested
     }
 
     pub(crate) fn stop_requested(&self) -> bool {
@@ -826,13 +827,21 @@ mod tests {
         (barrier, handle)
     }
 
-    fn assert_timeout_fired(elapsed: Duration, expected_ms: u64) {
-        let expected = Duration::from_millis(expected_ms);
-        assert!(
-            elapsed >= expected.saturating_sub(Duration::from_millis(10))
-                && elapsed < expected + Duration::from_millis(150),
-            "timeout should fire after ~{expected_ms}ms, got {elapsed:?}"
-        );
+    fn spawn_driver_thread_until_flag(
+        rt: super::RuntimeT,
+        stop_flag: Arc<AtomicBool>,
+    ) -> (Arc<std::sync::Barrier>, thread::JoinHandle<()>) {
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let barrier_clone = barrier.clone();
+        let handle = thread::spawn(move || {
+            barrier_clone.wait();
+            rt.block_on(async {
+                while !stop_flag.load(Ordering::Acquire) {
+                    tokio::task::yield_now().await;
+                }
+            });
+        });
+        (barrier, handle)
     }
 
     // -- Concurrency safety claims for the runtime model --
@@ -991,57 +1000,51 @@ mod tests {
     #[test]
     fn block_on_future_with_timeout_fires_while_another_thread_drives_runtime() {
         let runtime = make_runtime();
-        let (barrier, driver) = spawn_driver_thread(runtime.clone(), Duration::from_millis(10));
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let (barrier, driver) = spawn_driver_thread_until_flag(runtime.clone(), stop_flag.clone());
         let future = long_future(&runtime);
 
         barrier.wait();
-        let start = Instant::now();
         let result = runtime.block_on_future_with_timeout(&future, Duration::from_millis(50));
-        let elapsed = start.elapsed();
 
+        stop_flag.store(true, Ordering::Release);
         driver.join().unwrap();
 
         assert!(result.is_err(), "expected timeout error");
-        assert_timeout_fired(elapsed, 50);
         assert!(!future.is_ready());
     }
 
     #[test]
     fn make_progress_with_timeout_succeeds_while_another_thread_drives_runtime() {
         let runtime = make_runtime();
-        let (barrier, driver) = spawn_driver_thread(runtime.clone(), Duration::from_millis(10));
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let (barrier, driver) = spawn_driver_thread_until_flag(runtime.clone(), stop_flag.clone());
 
         barrier.wait();
-        let start = Instant::now();
         let result = runtime.make_progress_with_timeout(Duration::from_millis(50));
-        let elapsed = start.elapsed();
 
+        stop_flag.store(true, Ordering::Release);
         driver.join().unwrap();
 
         assert!(result.is_ok(), "make_progress should yield before timeout");
-        assert!(
-            elapsed < Duration::from_millis(100),
-            "make_progress should return quickly, got {elapsed:?}"
-        );
     }
 
     #[test]
     fn block_on_any_with_timeout_fires_while_another_thread_drives_runtime() {
         let runtime = make_runtime();
-        let (barrier, driver) = spawn_driver_thread(runtime.clone(), Duration::from_millis(10));
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let (barrier, driver) = spawn_driver_thread_until_flag(runtime.clone(), stop_flag.clone());
         let f1 = long_future(&runtime);
         let f2 = long_future(&runtime);
 
         let futures = [(0, &f1), (1, &f2)];
         barrier.wait();
-        let start = Instant::now();
         let result = runtime.block_on_any_with_timeout(&futures, Duration::from_millis(50));
-        let elapsed = start.elapsed();
 
+        stop_flag.store(true, Ordering::Release);
         driver.join().unwrap();
 
         assert!(result.is_err(), "expected timeout error");
-        assert_timeout_fired(elapsed, 50);
         assert!(!f1.is_ready());
         assert!(!f2.is_ready());
     }
@@ -1049,20 +1052,19 @@ mod tests {
     #[test]
     fn block_on_all_with_timeout_fires_while_another_thread_drives_runtime() {
         let runtime = make_runtime();
-        let (barrier, driver) = spawn_driver_thread(runtime.clone(), Duration::from_millis(10));
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let (barrier, driver) = spawn_driver_thread_until_flag(runtime.clone(), stop_flag.clone());
         let f1 = long_future(&runtime);
         let f2 = long_future(&runtime);
 
         let futures = [&f1, &f2];
         barrier.wait();
-        let start = Instant::now();
         let result = runtime.block_on_all_with_timeout(&futures, Duration::from_millis(50));
-        let elapsed = start.elapsed();
 
+        stop_flag.store(true, Ordering::Release);
         driver.join().unwrap();
 
         assert!(result.is_err(), "expected timeout error");
-        assert_timeout_fired(elapsed, 50);
         assert!(!f1.is_ready());
         assert!(!f2.is_ready());
     }

@@ -329,3 +329,41 @@ TEST_CASE("shutdown_async", "[mongoac][client]")
       mongoac_error_destroy(error);
    }
 }
+
+TEST_CASE("post shutdown reuse returns error", "[mongoac][client]")
+{
+   auto const client = mongoac_client_new("mongodb://localhost:27017", nullptr);
+   REQUIRE(client != nullptr);
+
+   auto const error = mongoac_error_new();
+
+   mongoac_client_shutdown(client, error);
+   CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_NONE);
+   CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_OK);
+
+   auto const result = mongoac_client_list_databases(client, nullptr, nullptr, error);
+   CHECK(result == nullptr);
+   CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_RUST);
+   CHECK(mongoac_error_code(error) != MONGOAC_ERROR_CODE_OK);
+   CHECK_THAT(mongoac_error_message(error), Catch::Matchers::ContainsSubstring("shut down"));
+
+   mongoac_client_destroy(client);
+   mongoac_error_destroy(error);
+}
+
+TEST_CASE("runtime outlives client", "[mongoac][client]")
+{
+   auto const client = mongoac_client_new("mongodb://localhost:27017", nullptr);
+   REQUIRE(client != nullptr);
+
+   auto const runtime = mongoac_client_get_runtime(client);
+   REQUIRE(runtime != nullptr);
+
+   mongoac_client_destroy(client);
+
+   CHECK(!mongoac_runtime_stop_requested(runtime));
+   CHECK(mongoac_runtime_request_stop(runtime));
+   CHECK(mongoac_runtime_stop_requested(runtime));
+
+   mongoac_runtime_destroy(runtime);
+}
