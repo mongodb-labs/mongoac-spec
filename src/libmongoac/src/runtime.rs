@@ -1,16 +1,16 @@
 use crate::error::{ErrorCodeT, ErrorT};
-use crate::future::FutureT;
+use crate::future::{FutureExt, FutureT};
 use crate::safe_drop;
 use crate::safe_optional_as_ref;
 use crate::safe_optional_error_as_mut;
 use crate::{safe_as_ref, safe_error};
 
 use event_listener::{Event, Listener};
+use futures_util::stream::{FuturesUnordered, StreamExt};
 use parking_lot::Mutex;
-use std::future::{Future, poll_fn};
+use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::task::Poll;
 use std::time::Duration;
 
 #[macro_export]
@@ -216,7 +216,7 @@ impl RuntimeT {
 
     pub(crate) fn make_progress(&self) -> bool {
         self.try_with_progress_lock(|runtime| {
-            runtime.block_on(async { tokio::task::yield_now().await });
+            runtime.block_on(tokio::task::yield_now());
         })
     }
 
@@ -253,16 +253,8 @@ impl RuntimeT {
 
     pub(crate) fn block_on_future(&self, future: &FutureT) {
         self.with_progress_lock(
-            || if future.is_ready() { Some(()) } else { None },
-            |runtime| {
-                runtime.block_on(poll_fn(|ctx| {
-                    if future.poll_with_context(ctx) {
-                        Poll::Ready(())
-                    } else {
-                        Poll::Pending
-                    }
-                }))
-            },
+            || future.is_ready().then_some(()),
+            |runtime| runtime.block_on(future.poll()),
         );
     }
 
@@ -272,52 +264,34 @@ impl RuntimeT {
         timeout: Duration,
     ) -> Result<(), ErrorT> {
         self.with_progress_lock(
-            || {
-                if future.is_ready() {
-                    Some(Ok(()))
-                } else {
-                    None
-                }
-            },
+            || future.is_ready().then_some(Ok(())),
             |runtime| {
                 runtime.block_on(async {
-                    tokio::time::timeout(
-                        timeout,
-                        poll_fn(|ctx| {
-                            if future.poll_with_context(ctx) {
-                                Poll::Ready(())
-                            } else {
-                                Poll::Pending
-                            }
-                        }),
-                    )
-                    .await
-                    .map_err(|_| {
-                        ErrorT::from_mongoac(ErrorCodeT::Timeout, "block_on_future_with_timeout")
-                    })
+                    tokio::time::timeout(timeout, future.poll())
+                        .await
+                        .map_err(|_| {
+                            ErrorT::from_mongoac(
+                                ErrorCodeT::Timeout,
+                                "block_on_future_with_timeout",
+                            )
+                        })
                 })
             },
         )
     }
 
     pub(crate) fn block_on_any<'a>(&self, futures: &'a [(usize, &'a FutureT)]) -> Option<usize> {
-        // TODO: investigate making this more efficient by using something like FuturesUnordered instead of iteration.
-        self.with_progress_lock(
-            || {
-                futures
-                    .iter()
-                    .find(|(_, f)| f.is_ready())
-                    .map(|(i, _)| Some(*i))
-            },
-            |runtime| {
-                runtime.block_on(poll_fn(|ctx| {
-                    if let Some((i, _)) = futures.iter().find(|(_, f)| f.poll_with_context(ctx)) {
-                        return Poll::Ready(Some(*i));
-                    }
-                    Poll::Pending
-                }))
-            },
-        )
+        // Skip double-checked lock: futures are expected to be pending.
+        let _guard = self.state.progress_lock.lock();
+
+        // Check for completion before executing `block_on()`.
+        if let Some(i) = any_ready(futures) {
+            return Some(i);
+        }
+
+        self.state
+            .runtime
+            .block_on(async { futures_unordered_for_any(futures).next().await })
     }
 
     pub(crate) fn block_on_any_with_timeout<'a>(
@@ -325,63 +299,34 @@ impl RuntimeT {
         futures: &'a [(usize, &'a FutureT)],
         timeout: Duration,
     ) -> Result<Option<usize>, ErrorT> {
-        self.with_progress_lock(
-            || {
-                futures
-                    .iter()
-                    .find(|(_, f)| f.is_ready())
-                    .map(|(i, _)| Ok(Some(*i)))
-            },
-            |runtime| {
-                runtime.block_on(async {
-                    tokio::time::timeout(
-                        timeout,
-                        poll_fn(|ctx| {
-                            if let Some((i, _)) =
-                                futures.iter().find(|(_, f)| f.poll_with_context(ctx))
-                            {
-                                return Poll::Ready(Some(*i));
-                            }
-                            Poll::Pending
-                        }),
-                    )
-                    .await
-                    .map_err(|_| {
-                        ErrorT::from_mongoac(ErrorCodeT::Timeout, "block_on_any_with_timeout")
-                    })
-                })
-            },
-        )
+        // Skip double-checked lock: futures are expected to be pending.
+        let _guard = self.state.progress_lock.lock();
+
+        // Check for completion before executing `block_on()`.
+        if let Some(i) = any_ready(futures) {
+            return Ok(Some(i));
+        }
+
+        self.state.runtime.block_on(async {
+            tokio::time::timeout(timeout, futures_unordered_for_any(futures).next())
+                .await
+                .map_err(|_| ErrorT::from_mongoac(ErrorCodeT::Timeout, "block_on_any_with_timeout"))
+        })
     }
 
     pub(crate) fn block_on_all(&self, futures: &[&FutureT]) {
-        // TODO: investigate making this more efficient by using something like FuturesUnordered instead of iteration.
-        self.with_progress_lock(
-            || {
-                if futures.iter().all(|f| f.is_ready()) {
-                    Some(())
-                } else {
-                    None
-                }
-            },
-            |runtime| {
-                runtime.block_on(poll_fn(|ctx| {
-                    let mut is_pending = false;
+        // Skip double-checked lock: futures are expected to be pending.
+        let _guard = self.state.progress_lock.lock();
 
-                    for f in futures.iter() {
-                        if !f.poll_with_context(ctx) {
-                            is_pending = true;
-                        }
-                    }
+        // Check for completion before executing `block_on()`.
+        if all_ready(futures) {
+            return;
+        }
 
-                    if is_pending {
-                        Poll::Pending
-                    } else {
-                        Poll::Ready(())
-                    }
-                }))
-            },
-        );
+        self.state.runtime.block_on(async {
+            let mut fut_set = futures_unordered_for_all(futures);
+            while fut_set.next().await.is_some() {}
+        });
     }
 
     pub(crate) fn block_on_all_with_timeout(
@@ -389,41 +334,20 @@ impl RuntimeT {
         futures: &[&FutureT],
         timeout: Duration,
     ) -> Result<(), ErrorT> {
-        self.with_progress_lock(
-            || {
-                if futures.iter().all(|f| f.is_ready()) {
-                    Some(Ok(()))
-                } else {
-                    None
-                }
-            },
-            |runtime| {
-                runtime.block_on(async {
-                    tokio::time::timeout(
-                        timeout,
-                        poll_fn(|ctx| {
-                            let mut is_pending = false;
+        // Skip double-checked lock: futures are expected to be pending.
+        let _guard = self.state.progress_lock.lock();
 
-                            for f in futures.iter() {
-                                if !f.poll_with_context(ctx) {
-                                    is_pending = true;
-                                }
-                            }
+        // Check for completion before executing `block_on()`.
+        if all_ready(futures) {
+            return Ok(());
+        }
 
-                            if is_pending {
-                                Poll::Pending
-                            } else {
-                                Poll::Ready(())
-                            }
-                        }),
-                    )
-                    .await
-                    .map_err(|_| {
-                        ErrorT::from_mongoac(ErrorCodeT::Timeout, "block_on_all_with_timeout")
-                    })
-                })
-            },
-        )
+        self.state.runtime.block_on(async {
+            let mut fut_set = futures_unordered_for_all(futures);
+            tokio::time::timeout(timeout, async { while fut_set.next().await.is_some() {} })
+                .await
+                .map_err(|_| ErrorT::from_mongoac(ErrorCodeT::Timeout, "block_on_all_with_timeout"))
+        })
     }
 
     pub(crate) fn from_raw(runtime: tokio::runtime::Runtime) -> Self {
@@ -528,6 +452,27 @@ impl RuntimeState {
             wait_event: Event::new(),
         }
     }
+}
+
+fn futures_unordered_for_any<'a>(
+    futures: &'a [(usize, &'a FutureT)],
+) -> FuturesUnordered<FutureExt<'a>> {
+    futures
+        .iter()
+        .map(|(i, f)| FutureExt::new_with_index(f, *i))
+        .collect()
+}
+
+fn futures_unordered_for_all<'a>(futures: &'a [&'a FutureT]) -> FuturesUnordered<FutureExt<'a>> {
+    futures.iter().map(|f| FutureExt::new(f)).collect()
+}
+
+fn any_ready(futures: &[(usize, &FutureT)]) -> Option<usize> {
+    futures.iter().find(|(_, f)| f.is_ready()).map(|(i, _)| *i)
+}
+
+fn all_ready(futures: &[&FutureT]) -> bool {
+    futures.iter().all(|f| f.is_ready())
 }
 
 fn futures_as_refs_for_any<'a>(

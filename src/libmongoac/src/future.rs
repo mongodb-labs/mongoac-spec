@@ -9,7 +9,7 @@ use crate::{
 
 use parking_lot::Mutex;
 
-use std::future::Future;
+use std::future::{Future, poll_fn};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -73,9 +73,6 @@ pub(crate) enum FutureValue {
     Void(FutureValueType<()>),
 }
 
-/// Applies `$e` to the typed payload inside every `FutureValue` variant.
-/// The match arms are ordered identically to the `FutureValue` enum so that
-/// exhaustiveness is easy to verify by inspection.
 macro_rules! future_value_op {
     ($value:expr, $v:ident => $e:expr) => {
         match &*$value {
@@ -85,6 +82,17 @@ macro_rules! future_value_op {
             FutureValue::Cursor($v) => $e,
             FutureValue::Int32($v) => $e,
             FutureValue::Void($v) => $e,
+        }
+    };
+}
+
+macro_rules! future_value_result {
+    ($self:expr, $variant:ident, $name:literal) => {
+        match &*$self.value {
+            FutureValue::$variant(fvt) => fvt.result(),
+            _ => Err(
+                mongodb::error::Error::custom(concat!("future does not return a ", $name)).into(),
+            ),
         }
     };
 }
@@ -105,68 +113,42 @@ impl FutureT {
         future_value_op!(self.value, v => v.is_ready())
     }
 
+    pub(crate) fn get_int32(&self) -> Result<&i32, ErrorT> {
+        future_value_result!(self, Int32, "int32")
+    }
+
+    pub(crate) fn get_bool(&self) -> Result<&bool, ErrorT> {
+        future_value_result!(self, Bool, "bool")
+    }
+
+    pub(crate) fn get_bson(&self) -> Result<&mongodb::bson::RawDocumentBuf, ErrorT> {
+        future_value_result!(self, Bson, "bson")
+    }
+
+    pub(crate) fn get_client_session(&self) -> Result<&ClientSessionT, ErrorT> {
+        future_value_result!(self, ClientSession, "client session")
+    }
+
+    pub(crate) fn get_void(&self) -> Result<&(), ErrorT> {
+        future_value_result!(self, Void, "void")
+    }
+
+    pub(crate) fn get_cursor(&self) -> Result<&CursorT, ErrorT> {
+        future_value_result!(self, Cursor, "cursor")
+    }
+
     pub(crate) fn poll_with_context(&self, ctx: &mut Context<'_>) -> bool {
         future_value_op!(self.value, v => v.poll_with_context(ctx))
     }
 
-    pub(crate) fn get_int32(&self) -> Result<&i32, ErrorT> {
-        match &*self.value {
-            FutureValue::Int32(fvt) => fvt.result(),
-            _ => Err(mongodb::error::Error::custom(
-                "called mismatched int32 getter on non-int32 future",
-            )
-            .into()),
-        }
-    }
-
-    pub(crate) fn get_bool(&self) -> Result<&bool, ErrorT> {
-        match &*self.value {
-            FutureValue::Bool(fvt) => fvt.result(),
-            _ => Err(mongodb::error::Error::custom(
-                "called mismatched bool getter on non-bool future",
-            )
-            .into()),
-        }
-    }
-
-    pub(crate) fn get_bson(&self) -> Result<&mongodb::bson::RawDocumentBuf, ErrorT> {
-        match &*self.value {
-            FutureValue::Bson(fvt) => fvt.result(),
-            _ => Err(mongodb::error::Error::custom(
-                "called mismatched bson getter on non-bson future",
-            )
-            .into()),
-        }
-    }
-
-    pub(crate) fn get_client_session(&self) -> Result<&ClientSessionT, ErrorT> {
-        match &*self.value {
-            FutureValue::ClientSession(fvt) => fvt.result(),
-            _ => Err(mongodb::error::Error::custom(
-                "called mismatched client session getter on non-client session future",
-            )
-            .into()),
-        }
-    }
-
-    pub(crate) fn get_void(&self) -> Result<&(), ErrorT> {
-        match &*self.value {
-            FutureValue::Void(fvt) => fvt.result(),
-            _ => Err(mongodb::error::Error::custom(
-                "called mismatched void getter on non-void future",
-            )
-            .into()),
-        }
-    }
-
-    pub(crate) fn get_cursor(&self) -> Result<&CursorT, ErrorT> {
-        match &*self.value {
-            FutureValue::Cursor(fvt) => fvt.result(),
-            _ => Err(mongodb::error::Error::custom(
-                "called mismatched cursor getter on non-cursor future",
-            )
-            .into()),
-        }
+    pub(crate) fn poll(&self) -> impl Future<Output = ()> + '_ {
+        poll_fn(|ctx| {
+            if self.poll_with_context(ctx) {
+                Poll::Ready(())
+            } else {
+                Poll::Pending
+            }
+        })
     }
 }
 
@@ -242,6 +224,35 @@ macro_rules! spawn {
             $crate::future::FutureValue::$value_type($crate::future::FutureValueType::new(handle)),
         )
     }};
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct FutureExt<'a> {
+    pub(crate) future: &'a FutureT,
+    pub(crate) index: usize,
+}
+
+impl<'a> FutureExt<'a> {
+    pub(crate) fn new(future: &'a FutureT) -> Self {
+        Self { future, index: 0 }
+    }
+
+    pub(crate) fn new_with_index(future: &'a FutureT, index: usize) -> Self {
+        Self { future, index }
+    }
+}
+
+impl<'a> Future for FutureExt<'a> {
+    type Output = usize;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        if this.future.poll_with_context(cx) {
+            Poll::Ready(this.index)
+        } else {
+            Poll::Pending
+        }
+    }
 }
 
 #[cfg(test)]
