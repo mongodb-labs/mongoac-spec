@@ -525,7 +525,7 @@ mod tests {
     fn get_int32_not_ready() {
         let runtime = make_runtime();
         let handle = runtime.spawn(async move {
-            tokio::time::sleep(Duration::from_secs(60)).await;
+            tokio::time::sleep(Duration::from_secs(10)).await;
             Ok::<i32, ErrorT>(42)
         });
         let future = FutureT::new(

@@ -410,8 +410,7 @@ The concurrency model used by mongoac uses an "executor + task handle + manual p
 
 All async tasks make progress by an explicit call to either `mongoac_runtime_make_progress*()` or
   `mongoac_runtime_block_on*()`.
-Any thread may drive the runtime, and futures may be passed to and queried by any thread.
-However, only one thread can make progress on a given runtime at a time.
+Any thread may drive the runtime, and futures may be passed to and queried from any thread.
 Both the runtime and pending futures may also be used on a single thread.
 
 ##### Runtime
@@ -420,15 +419,16 @@ Every `mongoac_client_t` contains an associated `mongoac_runtime_t` which may be
   `mongoac_client_get_runtime()`.
 The `mongoac_runtime_t` is ref-counted, cheap to clone, and may outlive the `mongoac_client_t`.
 However, any tasks spawned using the associated client MAY NOT be executed using the runtime of another client.
-The caller must ensure that only one thread at a time calls `make_progress*()` or `block_on*()` on a given runtime.
+Any thread may call `make_progress*()` or `block_on*()` on a given runtime; parallel progress is coordinated by Tokio's
+  `current_thread` scheduler such that only one thread has ownership of the runtime and making progress at a time.
 
 > [!NOTE]
 > In terms of C++26 Execution, `mongoac_runtime_t` is similar to a "Scheduler" in how it behaves like a handle to an
 >   execution resource.
 > However, instead of being a lightweight, non-owning factory for lazy senders which does not itself drive execution,
 >   `mongoac_runtime_t` also behaves as a single-threaded executor: the thread which invokes `make_progress*()` or
->   `block_on*()` becomes the executor for the duration of the invocation.
-> It is also comparable to a single-threaded `io_context` in Boost ASIO or an event loop in Python's `asyncio`.
+    `block_on*()` and obtains exclusive ownership of the runtime becomes the executor for the duration of the invocation.
+> It is comparable to an `io_context` in Boost ASIO or an event loop in Python's `asyncio`.
 
 ##### Futures
 
@@ -440,8 +440,7 @@ When the result is a return value, `mongoac_error_code(error)` equals `MONGOAC_E
 
 All async operations in the mongoac API return a `mongoac_future_t`, even when the return value is `void` (e.g.
   `mongoac_collection_drop_async()`).
-A given future may only make progress by a call to `block_on*()` on its associated runtime while the runtime is not
-  already being driven by another thread.
+A given future may make progress by a call to `block_on*()` on its associated runtime.
 
 > [!NOTE]
 > In terms of C++26 Execution, `mongoac_future_t` is not like a lazy "Sender" (the task is already spawned) or a oneshot
@@ -965,24 +964,6 @@ Cancellation is deferred because opaque handles allow it to be added later as an
 
 > [!TIP]
 > - [Why not borrowed references?](#rejected-borrowed-references)
-
-<a id="why-non-const-make-progress"></a>
-#### Why is runtime driver access exclusive-by-contract?
-
-Tokio's `current_thread` runtime does not support thread-safety.
-Adding thread-safety on top of the runtime unnecessarily complicates the implementation (e.g. use of an internal
-  `progress_lock` mutex to serialize calls to `make_progress*()` and `block_on*()`) in order to support a use-case that
-  is arguably an anti-pattern (attempting to simultaneously make progress on a runtime from multiple threads).
-Users who need to support this scenario can choose to synchronize access to the runtime themselves according to their
-  needs.
-However, the underlying runtime would still only be able to make progress on one thread at a time.
-For parallel progress of asynchronous tasks, multiple client objects (each with their own independent runtime) is
-  required.
-
-Some functions are still thread-safe to invoke in parallel.
-These include `clone()`, `request_stop()` and `stop_requested()`, and `wait*()`.
-These functions accept a `const mongoac_runtime_t *` for logical const-correctness; all other non-thread-safe functions
-  require a non-const `mongoac_runtime_t *`.
 
 <a id="why-single-cursor-type"></a>
 #### Why a single `mongoac_cursor_t` type?

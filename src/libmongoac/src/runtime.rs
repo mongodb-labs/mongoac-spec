@@ -44,13 +44,13 @@ pub extern "C" fn mongoac_runtime_clone(runtime: *const RuntimeT) -> *mut Runtim
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn mongoac_runtime_make_progress(runtime: *mut RuntimeT) {
+pub extern "C" fn mongoac_runtime_make_progress(runtime: *const RuntimeT) {
     safe_as_ref!(runtime).make_progress()
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_runtime_make_progress_with_timeout(
-    runtime: *mut RuntimeT,
+    runtime: *const RuntimeT,
     timeout_ms: u64,
 ) -> bool {
     safe_as_ref!(runtime).make_progress_with_timeout(Duration::from_millis(timeout_ms))
@@ -81,7 +81,7 @@ pub extern "C" fn mongoac_runtime_wait_with_timeout(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_runtime_block_on(
-    runtime: *mut RuntimeT,
+    runtime: *const RuntimeT,
     future: *const FutureT,
     error: *mut ErrorT,
 ) {
@@ -94,7 +94,7 @@ pub extern "C" fn mongoac_runtime_block_on(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_runtime_block_on_with_timeout(
-    runtime: *mut RuntimeT,
+    runtime: *const RuntimeT,
     future: *const FutureT,
     timeout_ms: u64,
     error: *mut ErrorT,
@@ -112,7 +112,7 @@ pub extern "C" fn mongoac_runtime_block_on_with_timeout(
 #[unsafe(no_mangle)]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn mongoac_runtime_block_on_any(
-    runtime: *mut RuntimeT,
+    runtime: *const RuntimeT,
     futures: *const *const FutureT,
     count: usize,
     error: *mut ErrorT,
@@ -134,7 +134,7 @@ pub extern "C" fn mongoac_runtime_block_on_any(
 #[unsafe(no_mangle)]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn mongoac_runtime_block_on_any_with_timeout(
-    runtime: *mut RuntimeT,
+    runtime: *const RuntimeT,
     futures: *const *const FutureT,
     count: usize,
     timeout_ms: u64,
@@ -159,7 +159,7 @@ pub extern "C" fn mongoac_runtime_block_on_any_with_timeout(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_runtime_block_on_all(
-    runtime: *mut RuntimeT,
+    runtime: *const RuntimeT,
     futures: *const *const FutureT,
     count: usize,
     error: *mut ErrorT,
@@ -177,7 +177,7 @@ pub extern "C" fn mongoac_runtime_block_on_all(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_runtime_block_on_all_with_timeout(
-    runtime: *mut RuntimeT,
+    runtime: *const RuntimeT,
     futures: *const *const FutureT,
     count: usize,
     timeout_ms: u64,
@@ -495,9 +495,11 @@ fn futures_as_refs<'a>(
 
 #[cfg(test)]
 mod tests {
+    use crate::error::ErrorT;
+    use crate::future::{FutureT, FutureValue, FutureValueType};
     use crate::private::test_util::make_runtime;
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::thread;
     use std::time::{Duration, Instant};
 
@@ -770,5 +772,273 @@ mod tests {
             long_done.load(Ordering::Acquire),
             "the long task should eventually complete after the runtime is driven"
         );
+    }
+
+    // Helpers for the concurrency tests below.
+
+    fn long_future(runtime: &super::RuntimeT) -> FutureT {
+        FutureT::new(
+            runtime.clone(),
+            FutureValue::Void(FutureValueType::new(runtime.spawn(async move {
+                tokio::time::sleep(Duration::from_secs(10)).await;
+                Ok::<(), ErrorT>(())
+            }))),
+        )
+    }
+
+    fn spawn_driver_thread(
+        rt: super::RuntimeT,
+        duration: Duration,
+    ) -> (Arc<std::sync::Barrier>, thread::JoinHandle<()>) {
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let barrier_clone = barrier.clone();
+        let handle = thread::spawn(move || {
+            barrier_clone.wait();
+            rt.block_on(async {
+                tokio::time::sleep(duration).await;
+            });
+        });
+        (barrier, handle)
+    }
+
+    fn assert_timeout_fired(elapsed: Duration, expected_ms: u64) {
+        let expected = Duration::from_millis(expected_ms);
+        assert!(
+            elapsed >= expected.saturating_sub(Duration::from_millis(10))
+                && elapsed < expected + Duration::from_millis(150),
+            "timeout should fire after ~{expected_ms}ms, got {elapsed:?}"
+        );
+    }
+
+    // -- Concurrency safety claims for the runtime model --
+
+    #[test]
+    fn spawn_is_safe_while_runtime_is_driven() {
+        let runtime = make_runtime();
+        let rt = runtime.clone();
+        let spawned_count = Arc::new(AtomicUsize::new(0));
+        let completed_count = Arc::new(AtomicUsize::new(0));
+        let all_spawned = Arc::new(AtomicBool::new(false));
+        let spawned_count_clone = spawned_count.clone();
+        let completed_count_clone = completed_count.clone();
+        let all_spawned_clone = all_spawned.clone();
+
+        let handle = thread::spawn(move || {
+            for _ in 0..10 {
+                let completed = completed_count_clone.clone();
+                rt.spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                    completed.fetch_add(1, Ordering::Release);
+                });
+                spawned_count_clone.fetch_add(1, Ordering::Release);
+            }
+            all_spawned_clone.store(true, Ordering::Release);
+        });
+
+        // Drive the runtime until the secondary thread has spawned all tasks
+        // and those tasks have had a chance to run. The yield loop is robust
+        // under Miri's deterministic scheduler because each yield point gives
+        // Miri an opportunity to switch threads.
+        runtime.block_on(async {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while spawned_count.load(Ordering::Acquire) < 10 && Instant::now() < deadline {
+                tokio::task::yield_now().await;
+            }
+            while completed_count.load(Ordering::Acquire) < 10 && Instant::now() < deadline {
+                tokio::task::yield_now().await;
+            }
+            assert_eq!(
+                spawned_count.load(Ordering::Acquire),
+                10,
+                "secondary thread should spawn all tasks while runtime is driven"
+            );
+            assert_eq!(
+                completed_count.load(Ordering::Acquire),
+                10,
+                "all spawned tasks should complete while runtime is driven"
+            );
+        });
+
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn future_is_ready_and_clone_are_safe_while_runtime_is_driven() {
+        let runtime = make_runtime();
+        let future = FutureT::new(
+            runtime.clone(),
+            FutureValue::Void(FutureValueType::new(runtime.spawn(async move {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                Ok::<(), ErrorT>(())
+            }))),
+        );
+
+        let future_for_thread = future.clone();
+        let handle = thread::spawn(move || {
+            let start = Instant::now();
+            while start.elapsed() < Duration::from_millis(100) {
+                let _ = future_for_thread.is_ready();
+                let _ = future_for_thread.clone();
+                thread::sleep(Duration::from_millis(1));
+            }
+        });
+
+        runtime.block_on_future(&future);
+        handle.join().unwrap();
+        assert!(future.is_ready());
+    }
+
+    #[test]
+    fn request_stop_and_stop_requested_are_safe_while_runtime_is_driven() {
+        let runtime = make_runtime();
+        let rt = runtime.clone();
+
+        let handle = thread::spawn(move || {
+            let start = Instant::now();
+            while start.elapsed() < Duration::from_millis(100) {
+                rt.request_stop();
+                let _ = rt.stop_requested();
+                rt.request_stop();
+                thread::sleep(Duration::from_millis(5));
+            }
+        });
+
+        runtime.block_on(async {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        });
+
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn wait_is_safe_while_runtime_is_driven() {
+        let runtime = make_runtime();
+        let rt = runtime.clone();
+
+        let handle = thread::spawn(move || {
+            let start = Instant::now();
+            while start.elapsed() < Duration::from_millis(100) {
+                let _ = rt.wait_with_timeout(Duration::from_millis(1));
+                thread::sleep(Duration::from_millis(1));
+            }
+        });
+
+        runtime.block_on(async {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        });
+
+        handle.join().unwrap();
+    }
+
+    // -- Tokio-current_thread behavior: concurrent progress-driving is allowed --
+    //
+    // Multiple threads may call `Runtime::block_on` / `make_progress` on the
+    // same current_thread runtime. Tokio coordinates driver ownership and
+    // stealing between threads. The tests below document and guard that
+    // supported behavior.
+
+    #[test]
+    fn concurrent_make_progress_is_allowed_by_tokio() {
+        let runtime = make_runtime();
+        let (barrier, driver) = spawn_driver_thread(runtime.clone(), Duration::from_millis(100));
+
+        barrier.wait();
+        runtime.make_progress();
+
+        driver.join().unwrap();
+    }
+
+    #[test]
+    fn concurrent_block_on_is_allowed_by_tokio() {
+        let runtime = make_runtime();
+        let (barrier, driver) = spawn_driver_thread(runtime.clone(), Duration::from_millis(100));
+
+        barrier.wait();
+        runtime.block_on(async {
+            tokio::task::yield_now().await;
+        });
+
+        driver.join().unwrap();
+    }
+
+    // -- Timeout API correctness under concurrent runtime driving --
+
+    #[test]
+    fn block_on_future_with_timeout_fires_while_another_thread_drives_runtime() {
+        let runtime = make_runtime();
+        let (barrier, driver) = spawn_driver_thread(runtime.clone(), Duration::from_millis(10));
+        let future = long_future(&runtime);
+
+        barrier.wait();
+        let start = Instant::now();
+        let result = runtime.block_on_future_with_timeout(&future, Duration::from_millis(50));
+        let elapsed = start.elapsed();
+
+        driver.join().unwrap();
+
+        assert!(result.is_err(), "expected timeout error");
+        assert_timeout_fired(elapsed, 50);
+        assert!(!future.is_ready());
+    }
+
+    #[test]
+    fn make_progress_with_timeout_succeeds_while_another_thread_drives_runtime() {
+        let runtime = make_runtime();
+        let (barrier, driver) = spawn_driver_thread(runtime.clone(), Duration::from_millis(10));
+
+        barrier.wait();
+        let start = Instant::now();
+        let result = runtime.make_progress_with_timeout(Duration::from_millis(50));
+        let elapsed = start.elapsed();
+
+        driver.join().unwrap();
+
+        assert!(result, "make_progress should yield before timeout");
+        assert!(
+            elapsed < Duration::from_millis(100),
+            "make_progress should return quickly, got {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn block_on_any_with_timeout_fires_while_another_thread_drives_runtime() {
+        let runtime = make_runtime();
+        let (barrier, driver) = spawn_driver_thread(runtime.clone(), Duration::from_millis(10));
+        let f1 = long_future(&runtime);
+        let f2 = long_future(&runtime);
+
+        let futures = [(0, &f1), (1, &f2)];
+        barrier.wait();
+        let start = Instant::now();
+        let result = runtime.block_on_any_with_timeout(&futures, Duration::from_millis(50));
+        let elapsed = start.elapsed();
+
+        driver.join().unwrap();
+
+        assert!(result.is_err(), "expected timeout error");
+        assert_timeout_fired(elapsed, 50);
+        assert!(!f1.is_ready());
+        assert!(!f2.is_ready());
+    }
+
+    #[test]
+    fn block_on_all_with_timeout_fires_while_another_thread_drives_runtime() {
+        let runtime = make_runtime();
+        let (barrier, driver) = spawn_driver_thread(runtime.clone(), Duration::from_millis(10));
+        let f1 = long_future(&runtime);
+        let f2 = long_future(&runtime);
+
+        let futures = [&f1, &f2];
+        barrier.wait();
+        let start = Instant::now();
+        let result = runtime.block_on_all_with_timeout(&futures, Duration::from_millis(50));
+        let elapsed = start.elapsed();
+
+        driver.join().unwrap();
+
+        assert!(result.is_err(), "expected timeout error");
+        assert_timeout_fired(elapsed, 50);
+        assert!(!f1.is_ready());
+        assert!(!f2.is_ready());
     }
 }
