@@ -75,6 +75,7 @@ fn generate_config_crate() {
 }
 
 fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
+    // Rename structs from `ExampleT` to `mongoac_example_t`.
     for (from, to) in [
         ("ClientOptionsT", "mongoac_client_options_t"),
         ("ClientSessionT", "mongoac_client_session_t"),
@@ -92,6 +93,7 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
             .insert(from.to_string(), to.to_string());
     }
 
+    // List include directives needed by each crate header.
     config.sys_includes = match name {
         "sanity_check" => includes!["mongoac/export.h", "stdint.h"],
         "client" => includes![
@@ -152,43 +154,46 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
             "stdbool.h",
             "stdint.h",
         ],
-        // Per-crate overrides go here.
         _ => vec![],
     };
     config
 }
 
-fn generate_crate_header(path: &Path, src_root: &Path, include_dir: &Path) {
-    let file_stem = path
+fn generate_crate_header(crate_path: &Path, src_dir: &Path, include_dir: &Path) {
+    let file_stem = crate_path
         .file_stem()
         .and_then(|s| s.to_str())
         .expect("invalid UTF-8");
 
+    // These crates must not generate a header.
     const SKIP_CARGO_HEADERS: &[&str] = &["lib", "mod", "version"];
     if SKIP_CARGO_HEADERS.contains(&file_stem) {
         return;
     }
 
-    let rel_path = path
-        .strip_prefix(src_root)
+    // `src/libmongoac/src/path/to/crate.rs` -> `path/to/crate`
+    let rel_path = crate_path
+        .strip_prefix(src_dir)
         .expect("file not under src root");
     let rel_stem = rel_path.with_extension("");
     let rel_str = rel_stem.to_str().expect("invalid UTF-8");
 
-    println!("cargo:rerun-if-changed={}", path.display());
-
+    // `path/to/crate` -> `MONGOAC_PATH_TO_CRATE_H`
     let include_guard = format!(
         "MONGOAC_{}_H",
         rel_str
             .replace(std::path::MAIN_SEPARATOR, "_")
             .to_uppercase()
     );
-    let output_path = include_dir.join(&rel_stem).with_extension("h");
 
-    if let Some(parent) = output_path.parent() {
-        std::fs::create_dir_all(parent).expect("failed to create output directory");
+    // `<path/to/crate` -> `<include_dir>/path/to/crate.h`
+    let header_path = include_dir.join(&rel_stem).with_extension("h");
+    if let Some(parent) = header_path.parent() {
+        std::fs::create_dir_all(parent)
+            .unwrap_or_else(|_| panic!("failed to create include directory: {}", parent.display()));
     }
 
+    // Default cbindgen configuration for all crates.
     let config = cbindgen::Config {
         language: cbindgen::Language::C,
         style: cbindgen::Style::Type,
@@ -208,31 +213,37 @@ fn generate_crate_header(path: &Path, src_root: &Path, include_dir: &Path) {
         ..Default::default()
     };
 
+    // Apply per-crate configuration options.
     let config = configure(rel_str, config);
 
+    // Generate the crate header.
     cbindgen::Builder::new()
         .with_config(config)
         .with_include_guard(&include_guard)
-        .with_src(path)
+        .with_src(crate_path)
         .generate()
         .expect("cbindgen failed")
-        .write_to_file(&output_path);
+        .write_to_file(&header_path);
 
-    // Tell Cargo to rerun build.rs if this generated header is deleted or modified.
-    println!("cargo:rerun-if-changed={}", output_path.display());
+    println!("cargo:rerun-if-changed={}", crate_path.display());
+    println!("cargo:rerun-if-changed={}", header_path.display());
 }
 
-fn collect_files(dir: &Path, files: &mut Vec<std::path::PathBuf>) {
-    for entry in std::fs::read_dir(dir).expect("failed to read directory") {
-        let entry = entry.expect("failed to read directory entry");
-        let path = entry.path();
+// Recursively find all mongoac crates under `src/libmongoac/src` which need a header.
+fn find_crates(dir: &Path, files: &mut Vec<std::path::PathBuf>) {
+    for entry in std::fs::read_dir(dir)
+        .unwrap_or_else(|_| panic!("failed to read directory: {}", dir.display()))
+    {
+        let path = entry
+            .map(|e| e.path())
+            .unwrap_or_else(|_| panic!("failed to read directory entry in: {}", dir.display()));
 
         if path.is_dir() {
             if path.file_name().is_some_and(|name| name == "private") {
-                continue;
+                continue; // Private crates do not need headers.
             }
 
-            collect_files(&path, files);
+            find_crates(&path, files);
         } else if path.extension().is_some_and(|e| e == "rs") {
             files.push(path);
         }
@@ -292,17 +303,18 @@ fn main() {
         }
     };
 
-    let src_root = Path::new("src");
+    let src_path = Path::new("src");
     let mut files = Vec::new();
-    collect_files(src_root, &mut files);
+    find_crates(src_path, &mut files);
 
     // Generate crate headers in parallel.
     let mut handles = Vec::new();
     for path in files {
         let include_dir = include_dir.clone();
-        let src_root = src_root.to_path_buf();
-        handles.push(std::thread::spawn(move || {
-            generate_crate_header(&path, &src_root, &include_dir);
+        handles.push(std::thread::spawn({
+            move || {
+                generate_crate_header(&path, src_path, &include_dir);
+            }
         }));
     }
     for handle in handles {
