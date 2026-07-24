@@ -20,6 +20,24 @@ TEST_CASE("make_progress_with_timeout", "[mongoac][runtime]")
    }
 }
 
+TEST_CASE("make_progress_for", "[mongoac][runtime]")
+{
+   SECTION("null")
+   {
+      mongoac_runtime_make_progress_for(nullptr, 0);
+      SUCCEED();
+   }
+}
+
+TEST_CASE("make_progress_for_with_timeout", "[mongoac][runtime]")
+{
+   SECTION("null")
+   {
+      mongoac_runtime_make_progress_for_with_timeout(nullptr, 0, 0, nullptr);
+      SUCCEED();
+   }
+}
+
 TEST_CASE("wait", "[mongoac][runtime]")
 {
    SECTION("null")

@@ -467,7 +467,7 @@ All async tasks must "make progress" by invoking one of the following `mongoac_r
 - `block_on*()`: block until the given future(s) are ready.
 - `make_progress*()`: make progress on all scheduled tasks without indefinitely blocking the current thread.
 
-The `make_progress*()` function is also required to make progress on
+The `make_progress*()` functions are also required to make progress on
   [background tasks](#why-runtime-wait-and-make-progress) which may have no corresponding `mongoac_future_t`.
 These have no C++26 Execution equivalents; instead, they are comparable to `io_context::poll_one()` from Boost ASIO,
   `uv_run(loop, UV_RUN_NOWAIT)` from libuv, or `loop._run_once()` from Python's `asyncio`.
@@ -957,6 +957,8 @@ Without a `wait*()` function, the worker thread will need to spin-loop or spin-s
   meaningful work can be done.
 The condvar-backed `wait*()` allows the worker thread to more efficiently suspend the thread until new work is made
   available by an async operation spawning a new task in the associated runtime.
+The `make_progress_for*()` variants also the worker thread or event loop to efficiently make progress for *at least*
+  a given duration without spin-looping, and for *at most* the timeout given by `make_progress_for_with_timeout()`.
 
 Unfortunately, `wait*()` can only wait for tasks spawned through `RuntimeT::spawn()` (or a stop request).
 The Rust Driver may internally spawn background tasks which have no visible mechanism to query their in-progress state.

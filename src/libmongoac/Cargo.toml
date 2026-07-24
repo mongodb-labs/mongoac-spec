@@ -27,7 +27,7 @@ mongodb = {
 }
 tokio = {
   version = "1.52.0",
-  features = ["rt", "macros", "parking_lot", "sync"],
+  features = ["rt", "macros", "parking_lot", "sync", "time"],
 }
 serde = {
   version = "1",

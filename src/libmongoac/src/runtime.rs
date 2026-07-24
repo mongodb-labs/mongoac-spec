@@ -58,6 +58,27 @@ pub extern "C" fn mongoac_runtime_make_progress_with_timeout(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn mongoac_runtime_make_progress_for(runtime: *const RuntimeT, duration_ms: u64) {
+    safe_as_ref!(runtime).make_progress_for(Duration::from_millis(duration_ms))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_runtime_make_progress_for_with_timeout(
+    runtime: *const RuntimeT,
+    duration_ms: u64,
+    timeout_ms: u64,
+    error: *mut ErrorT,
+) {
+    safe_error!(
+        safe_as_ref!(runtime).make_progress_for_with_timeout(
+            Duration::from_millis(duration_ms),
+            Duration::from_millis(timeout_ms),
+        ),
+        safe_optional_error_as_mut!(error)
+    )
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn mongoac_runtime_request_stop(runtime: *const RuntimeT) -> bool {
     safe_as_ref!(runtime).request_stop()
 }
@@ -226,8 +247,34 @@ impl RuntimeT {
     }
 
     pub(crate) fn make_progress_with_timeout(&self, timeout: Duration) -> Result<(), ErrorT> {
+        let deadline = tokio::time::Instant::now() + timeout;
+
         self.state.runtime.block_on(async {
-            tokio::time::timeout(timeout, tokio::task::yield_now()).await?;
+            tokio::time::timeout_at(deadline, tokio::task::yield_now()).await?;
+            Ok(())
+        })
+    }
+
+    pub(crate) fn make_progress_for(&self, duration: Duration) {
+        let deadline = tokio::time::Instant::now() + duration;
+
+        self.state
+            .runtime
+            .block_on(async { tokio::time::sleep_until(deadline).await })
+    }
+
+    pub(crate) fn make_progress_for_with_timeout(
+        &self,
+        duration: Duration,
+        timeout: Duration,
+    ) -> Result<(), ErrorT> {
+        let now = tokio::time::Instant::now();
+        let sleep_deadline = now + duration;
+        let timeout_deadline = now + timeout;
+
+        self.state.runtime.block_on(async {
+            tokio::time::timeout_at(timeout_deadline, tokio::time::sleep_until(sleep_deadline))
+                .await?;
             Ok(())
         })
     }
@@ -268,12 +315,14 @@ impl RuntimeT {
         future: &FutureT,
         timeout: Duration,
     ) -> Result<(), ErrorT> {
+        let deadline = tokio::time::Instant::now() + timeout;
+
         if future.is_ready() {
             return Ok(()); // No work to do.
         }
 
         self.state.runtime.block_on(async {
-            tokio::time::timeout(timeout, future.poll()).await?;
+            tokio::time::timeout_at(deadline, future.poll()).await?;
             Ok(())
         })
     }
@@ -294,13 +343,18 @@ impl RuntimeT {
         futures: &'a [(usize, &'a FutureT)],
         timeout: Duration,
     ) -> Result<Option<usize>, ErrorT> {
+        let deadline = tokio::time::Instant::now() + timeout;
+
         // Check for completion before executing `block_on()`.
         if let Some(i) = any_ready(futures) {
             return Ok(Some(i));
         }
 
         self.state.runtime.block_on(async {
-            Ok(tokio::time::timeout(timeout, futures_unordered_for_any(futures).next()).await?)
+            Ok(
+                tokio::time::timeout_at(deadline, futures_unordered_for_any(futures).next())
+                    .await?,
+            )
         })
     }
 
@@ -321,6 +375,8 @@ impl RuntimeT {
         futures: &[&FutureT],
         timeout: Duration,
     ) -> Result<(), ErrorT> {
+        let deadline = tokio::time::Instant::now() + timeout;
+
         // Check for completion before executing `block_on()`.
         if all_ready(futures) {
             return Ok(());
@@ -328,7 +384,7 @@ impl RuntimeT {
 
         self.state.runtime.block_on(async {
             let mut fut_set = futures_unordered_for_all(futures);
-            tokio::time::timeout(timeout, async { while fut_set.next().await.is_some() {} })
+            tokio::time::timeout_at(deadline, async { while fut_set.next().await.is_some() {} })
                 .await?;
             Ok(())
         })
@@ -540,6 +596,77 @@ mod tests {
         assert!(
             elapsed < Duration::from_millis(75),
             "expected near-immediate return, but call took {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn make_progress_for_blocks_for_at_least_duration() {
+        let runtime = make_runtime();
+
+        let t0 = Instant::now();
+        runtime.make_progress_for(Duration::from_millis(50));
+        let elapsed = t0.elapsed();
+
+        assert!(
+            elapsed >= Duration::from_millis(45) && elapsed < Duration::from_millis(150),
+            "expected at least 50ms of runtime driving, but call took {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn make_progress_for_drives_background_task() {
+        let runtime = make_runtime();
+        let done = Arc::new(AtomicBool::new(false));
+        let done_clone = done.clone();
+
+        runtime.spawn(async move {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            done_clone.store(true, Ordering::Release);
+        });
+
+        runtime.make_progress_for(Duration::from_millis(100));
+
+        assert!(
+            done.load(Ordering::Acquire),
+            "background task should complete while the runtime is driven"
+        );
+    }
+
+    #[test]
+    fn make_progress_for_with_timeout_succeeds_when_deadline_exceeds_duration() {
+        let runtime = make_runtime();
+
+        let t0 = Instant::now();
+        let result = runtime
+            .make_progress_for_with_timeout(Duration::from_millis(50), Duration::from_millis(200));
+        let elapsed = t0.elapsed();
+
+        assert!(
+            result.is_ok(),
+            "call should succeed when timeout exceeds duration"
+        );
+        assert!(
+            elapsed >= Duration::from_millis(45) && elapsed < Duration::from_millis(150),
+            "expected at least 50ms of runtime driving, but call took {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn make_progress_for_with_timeout_times_out_when_deadline_is_shorter_than_duration() {
+        let runtime = make_runtime();
+
+        let t0 = Instant::now();
+        let result = runtime
+            .make_progress_for_with_timeout(Duration::from_millis(200), Duration::from_millis(50));
+        let elapsed = t0.elapsed();
+
+        assert!(
+            result.is_err(),
+            "call should time out when the runtime cannot sleep for the full duration before the deadline"
+        );
+        assert!(
+            elapsed < Duration::from_millis(100),
+            "expected near-immediate timeout, but call took {elapsed:?}"
         );
     }
 
