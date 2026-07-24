@@ -52,8 +52,12 @@ pub extern "C" fn mongoac_runtime_make_progress(runtime: *const RuntimeT) {
 pub extern "C" fn mongoac_runtime_make_progress_with_timeout(
     runtime: *const RuntimeT,
     timeout_ms: u64,
-) -> bool {
-    safe_as_ref!(runtime).make_progress_with_timeout(Duration::from_millis(timeout_ms))
+    error: *mut ErrorT,
+) {
+    safe_error!(
+        safe_as_ref!(runtime).make_progress_with_timeout(Duration::from_millis(timeout_ms)),
+        safe_optional_error_as_mut!(error)
+    )
 }
 
 #[unsafe(no_mangle)]
@@ -75,8 +79,12 @@ pub extern "C" fn mongoac_runtime_wait(runtime: *const RuntimeT) {
 pub extern "C" fn mongoac_runtime_wait_with_timeout(
     runtime: *const RuntimeT,
     timeout_ms: u64,
-) -> bool {
-    safe_as_ref!(runtime).wait_with_timeout(Duration::from_millis(timeout_ms))
+    error: *mut ErrorT,
+) {
+    safe_error!(
+        safe_as_ref!(runtime).wait_with_timeout(Duration::from_millis(timeout_ms)),
+        safe_optional_error_as_mut!(error)
+    )
 }
 
 #[unsafe(no_mangle)]
@@ -220,11 +228,10 @@ impl RuntimeT {
         self.state.runtime.block_on(tokio::task::yield_now())
     }
 
-    pub(crate) fn make_progress_with_timeout(&self, timeout: Duration) -> bool {
+    pub(crate) fn make_progress_with_timeout(&self, timeout: Duration) -> Result<(), ErrorT> {
         self.state.runtime.block_on(async {
-            tokio::time::timeout(timeout, tokio::task::yield_now())
-                .await
-                .is_ok()
+            tokio::time::timeout(timeout, tokio::task::yield_now()).await?;
+            Ok(())
         })
     }
 
@@ -242,7 +249,7 @@ impl RuntimeT {
         let _ = self.wait_impl(None);
     }
 
-    pub(crate) fn wait_with_timeout(&self, timeout: Duration) -> bool {
+    pub(crate) fn wait_with_timeout(&self, timeout: Duration) -> Result<(), ErrorT> {
         self.wait_impl(Some(timeout))
     }
 
@@ -350,29 +357,34 @@ impl RuntimeT {
         handle
     }
 
-    fn wait_impl(&self, timeout: Option<Duration>) -> bool {
+    fn wait_impl(&self, timeout: Option<Duration>) -> Result<(), ErrorT> {
         // Double-checked predicate against listener registration.
-        if self.state.stop_requested.load(Ordering::Acquire)
-            || self.state.wait_flag.swap(false, Ordering::Acquire)
-        {
-            return true;
+        if self.state.consume_wake() {
+            return Ok(());
         }
 
         let listener = self.state.wait_event.listen();
 
         // Double-checked predicate against listener registration.
-        if self.state.stop_requested.load(Ordering::Acquire)
-            || self.state.wait_flag.swap(false, Ordering::Acquire)
-        {
-            return true;
+        if self.state.consume_wake() {
+            return Ok(());
         }
 
         match timeout {
             None => {
                 listener.wait();
-                true
+                Ok(())
             }
-            Some(timeout) => listener.wait_timeout(timeout).is_some(),
+            Some(timeout) => {
+                if listener.wait_timeout(timeout).is_some() {
+                    Ok(())
+                } else {
+                    Err(ErrorT::from_mongoac(
+                        ErrorCodeT::Timeout,
+                        "runtime wait timed out",
+                    ))
+                }
+            }
         }
     }
 }
@@ -395,6 +407,12 @@ impl RuntimeState {
             wait_flag: AtomicBool::new(false),
             wait_event: Event::new(),
         }
+    }
+
+    // Return true when the runtime has been requested to stop or when a new wake notification is received.
+    // The wake notification is consumed by this call.
+    fn consume_wake(&self) -> bool {
+        self.stop_requested.load(Ordering::Acquire) || self.wait_flag.swap(false, Ordering::Acquire)
     }
 }
 
@@ -504,9 +522,13 @@ mod tests {
     use std::time::{Duration, Instant};
 
     #[test]
-    fn make_progress_with_timeout_returns_true() {
+    fn make_progress_with_timeout_returns_ok() {
         let runtime = make_runtime();
-        assert!(runtime.make_progress_with_timeout(Duration::from_millis(50)));
+        assert!(
+            runtime
+                .make_progress_with_timeout(Duration::from_millis(50))
+                .is_ok()
+        );
     }
 
     #[test]
@@ -563,11 +585,15 @@ mod tests {
     }
 
     #[test]
-    fn wait_with_timeout_returns_false_when_no_work() {
+    fn wait_with_timeout_returns_err_when_no_work() {
         let runtime = make_runtime();
 
         let t0 = Instant::now();
-        assert!(!runtime.wait_with_timeout(Duration::from_millis(10)));
+        assert!(
+            runtime
+                .wait_with_timeout(Duration::from_millis(10))
+                .is_err()
+        );
         let elapsed = t0.elapsed();
 
         assert!(
@@ -577,13 +603,13 @@ mod tests {
     }
 
     #[test]
-    fn wait_with_timeout_returns_true_when_work_is_spawned() {
+    fn wait_with_timeout_returns_ok_when_work_is_spawned() {
         let runtime = make_runtime();
 
         let worker = thread::spawn({
             let runtime = runtime.clone();
             move || {
-                assert!(runtime.wait_with_timeout(Duration::from_secs(10)));
+                assert!(runtime.wait_with_timeout(Duration::from_secs(10)).is_ok());
             }
         });
 
@@ -660,12 +686,12 @@ mod tests {
     }
 
     #[test]
-    fn request_stop_makes_wait_with_timeout_return_true() {
+    fn request_stop_makes_wait_with_timeout_return_ok() {
         let runtime = make_runtime();
 
         runtime.request_stop();
         let t0 = Instant::now();
-        assert!(runtime.wait_with_timeout(Duration::from_secs(10)));
+        assert!(runtime.wait_with_timeout(Duration::from_secs(10)).is_ok());
         let elapsed = t0.elapsed();
 
         assert!(
@@ -693,7 +719,9 @@ mod tests {
         // current_thread runtime is not being driven, so the timer cannot fire.
         let start = Instant::now();
         assert!(
-            !runtime.wait_with_timeout(Duration::from_millis(200)),
+            runtime
+                .wait_with_timeout(Duration::from_millis(200))
+                .is_err(),
             "wait should time out because no new task was spawned"
         );
         let elapsed = start.elapsed();
@@ -993,7 +1021,7 @@ mod tests {
 
         driver.join().unwrap();
 
-        assert!(result, "make_progress should yield before timeout");
+        assert!(result.is_ok(), "make_progress should yield before timeout");
         assert!(
             elapsed < Duration::from_millis(100),
             "make_progress should return quickly, got {elapsed:?}"

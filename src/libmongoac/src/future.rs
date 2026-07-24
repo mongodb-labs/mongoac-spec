@@ -234,7 +234,7 @@ pub(crate) struct FutureExt<'a> {
 
 impl<'a> FutureExt<'a> {
     pub(crate) fn new(future: &'a FutureT) -> Self {
-        Self { future, index: 0 }
+        Self::new_with_index(future, 0)
     }
 
     pub(crate) fn new_with_index(future: &'a FutureT, index: usize) -> Self {
