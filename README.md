@@ -957,8 +957,8 @@ Without a `wait*()` function, the worker thread will need to spin-loop or spin-s
   meaningful work can be done.
 The condvar-backed `wait*()` allows the worker thread to more efficiently suspend the thread until new work is made
   available by an async operation spawning a new task in the associated runtime.
-The `make_progress_for*()` variants also the worker thread or event loop to efficiently make progress for *at least*
-  a given duration without spin-looping, and for *at most* the timeout given by `make_progress_for_with_timeout()`.
+The `make_progress_for*()` variants also allows the worker thread or event loop to efficiently make progress for
+  *at least* a given duration without spin-looping.
 
 Unfortunately, `wait*()` can only wait for tasks spawned through `RuntimeT::spawn()` (or a stop request).
 The Rust Driver may internally spawn background tasks which have no visible mechanism to query their in-progress state.
