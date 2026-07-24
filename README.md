@@ -487,7 +487,7 @@ However, only async tasks explicitly spawned by the mongoac library (or a stop r
 > It is also comparable to a single-threaded `io_context::run()` and `io_context::run_one()` from Boost ASIO or to
 >   `loop.run_until_complete()` from Python's `asyncio`.
 
-> ![IMPORTANT]
+> [!IMPORTANT]
 > The Tokio `current_thread` runtime drives I/O and timers once every `event_interval` (default: `61`) polls of
 >   scheduled tasks.
 > A non-yielding task may block the current thread, preventing the timer from advancing until the task completes.
@@ -495,6 +495,26 @@ However, only async tasks explicitly spawned by the mongoac library (or a stop r
 >   time.
 > If the default value of `61` is not fast enough, `mongoac_client_t` may need to expose a configuration option to
 >   control this parameter.
+
+> [!IMPORTANT]
+> The `current_thread` runtime is cooperative: when no thread calls `make_progress*()` or `block_on*()` for an
+>   indefinite period of time, no background tasks associated with the runtime make any progress during that time.
+> This may lead to latency and staleness on the first operation executed after a long idle period, such as:
+>
+> - Stale topology: the next operation may use an outdated server topology or wait for a fresh heartbeat to complete.
+> - Stale SRV hosts: the mongos list may be outdated until the next SRV poll is executed.
+> - Slow connection pool: the first operation may need to drop idle connections and establish new connections,
+>     potentially causing a latency spike.
+> - Late timers: operation timeouts may exceed the expected wall-clock deadline when the runtime is suspended while the
+>     deadline passes by.
+>
+> Some tips and suggestions to mitigate the above issues include:
+>
+> - Periodically call `make_progress*()` on a worker thread or event loop.
+> - Tune URI options such as `maxIdleTimeMS`, `serverSelectionTimeoutMS`, and `heartbeatFrequencyMS` to accomodate the
+>     possibility of idle runtimes.
+> - Avoid scheduling urgent operations immediately after a long idle period; allow background tasks to warmup first
+>     using `make_progress*()` or scheduling a non-urgent `block_on*()`.
 
 > [!TIP]
 > - [Why runtime wait and make_progress?](#why-runtime-wait-and-make-progress)
