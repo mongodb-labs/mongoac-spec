@@ -27,7 +27,7 @@ impl InnerCursor {
             InnerCursor::Plain(c) => c.advance().await,
             InnerCursor::Session { cursor, session } => {
                 let mut guard = session.lock().await;
-                cursor.advance(&mut *guard).await
+                cursor.advance(&mut guard).await
             }
         }
     }
@@ -120,7 +120,7 @@ pub extern "C" fn mongoac_cursor_get_document(
     let error = safe_optional_error_as_mut!(error);
     let cursor = safe_as_ref_with_error!(cursor, error);
 
-    safe_error!(BsonT::try_from(&cursor.get_document_bson()).into(), error).into()
+    safe_error!(BsonT::try_from(&cursor.get_document_bson()), error).into()
 }
 
 #[unsafe(no_mangle)]

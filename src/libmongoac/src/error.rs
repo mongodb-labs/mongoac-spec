@@ -1,4 +1,5 @@
 use crate::safe_as_ref;
+use crate::safe_cstr_from_ptr;
 use crate::safe_drop;
 use std::ffi::CString;
 use strum::EnumMessage;
@@ -62,8 +63,9 @@ impl ErrorCodeT {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub enum ErrorT {
+    #[default]
     None,
     MongoAC {
         code: ErrorCodeT,
@@ -71,12 +73,6 @@ pub enum ErrorT {
     },
     Bson(mongodb::bson::error::Error, Option<CString>),
     Rust(mongodb::error::Error, Option<CString>),
-}
-
-impl Default for ErrorT {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 impl ErrorT {
@@ -159,22 +155,19 @@ pub extern "C" fn mongoac_error_destroy(error: *mut ErrorT) {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_error_category(error: *const ErrorT) -> i32 {
-    let error = safe_as_ref!(error);
-    error.category().into()
+    safe_as_ref!(error).category().into()
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_error_code(error: *const ErrorT) -> i32 {
-    let error = safe_as_ref!(error);
-    error.code().into()
+    safe_as_ref!(error).code().into()
 }
 
 static EMPTY_MSG: [u8; 1] = [0];
 
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_error_message(error: *const ErrorT) -> *const std::ffi::c_char {
-    let error = safe_as_ref!(error);
-    error
+    safe_as_ref!(error)
         .message()
         .map_or(EMPTY_MSG.as_ptr() as *const std::ffi::c_char, |m| {
             m.as_ptr()
@@ -186,19 +179,5 @@ pub extern "C" fn mongoac_error_has_label(
     error: *const ErrorT,
     label: *const std::ffi::c_char,
 ) -> bool {
-    let error = match unsafe { error.as_ref() } {
-        Some(e) => e,
-        None => return false,
-    };
-
-    if label.is_null() {
-        return false;
-    }
-
-    let label = match unsafe { std::ffi::CStr::from_ptr(label) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return false,
-    };
-
-    error.has_label(label)
+    safe_as_ref!(error).has_label(&safe_cstr_from_ptr!(label))
 }

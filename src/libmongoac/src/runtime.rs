@@ -17,7 +17,7 @@ use std::time::Duration;
 macro_rules! safe_from_runtime_with_error {
     ($future:expr, $runtime:expr, $error:expr) => {{
         let future = $future;
-        if !future.from_runtime($runtime) {
+        if !future.is_from_runtime($runtime) {
             $crate::private::safety::invalid_argument(
                 $error,
                 "future is not associated with the given runtime",
@@ -110,6 +110,7 @@ pub extern "C" fn mongoac_runtime_block_on_with_timeout(
 }
 
 #[unsafe(no_mangle)]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn mongoac_runtime_block_on_any(
     runtime: *mut RuntimeT,
     futures: *const *const FutureT,
@@ -131,6 +132,7 @@ pub extern "C" fn mongoac_runtime_block_on_any(
 }
 
 #[unsafe(no_mangle)]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn mongoac_runtime_block_on_any_with_timeout(
     runtime: *mut RuntimeT,
     futures: *const *const FutureT,
@@ -534,7 +536,7 @@ fn futures_as_refs<'a>(
             ));
         };
 
-        if !future.from_runtime(runtime) {
+        if !future.is_from_runtime(runtime) {
             return Err(ErrorT::from_mongoac(
                 ErrorCodeT::InvalidArgument,
                 &format!(
