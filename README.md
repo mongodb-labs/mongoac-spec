@@ -501,18 +501,17 @@ However, only async tasks explicitly spawned by the mongoac library (or a stop r
 >   indefinite period of time, no background tasks associated with the runtime make any progress during that time.
 > This may lead to latency and staleness on the first operation executed after a long idle period, such as:
 >
-> - Stale topology: the next operation may use an outdated server topology or wait for a fresh heartbeat to complete.
-> - Stale SRV hosts: the mongos list may be outdated until the next SRV poll is executed.
-> - Slow connection pool: the first operation may need to drop idle connections and establish new connections,
->     potentially causing a latency spike.
-> - Late timers: operation timeouts may exceed the expected wall-clock deadline when the runtime is suspended while the
+> - Server Topology: the next operation may use an outdated server topology or wait for a fresh heartbeat to complete.
+> - SRV Hosts: the mongos list may be outdated until the next SRV poll is executed.
+> - Connection Pool: the operation may need to wait for idle connections to be dropped and new connections to be
+>     established.
+> - Timers and Deadlines: operation timeouts may exceed the expected deadline when the runtime is suspended while the
 >     deadline passes by.
 >
-> Some tips and suggestions to mitigate the above issues include:
+> Some tips to mitigate the above issues include:
 >
 > - Periodically call `make_progress*()` on a worker thread or event loop.
-> - Tune URI options such as `maxIdleTimeMS`, `serverSelectionTimeoutMS`, and `heartbeatFrequencyMS` to accomodate the
->     possibility of idle runtimes.
+> - Tune URI options such as `maxIdleTimeMS`, `serverSelectionTimeoutMS`, and `heartbeatFrequencyMS`.
 > - Avoid scheduling urgent operations immediately after a long idle period; allow background tasks to warmup first
 >     using `make_progress*()` or scheduling a non-urgent `block_on*()`.
 
