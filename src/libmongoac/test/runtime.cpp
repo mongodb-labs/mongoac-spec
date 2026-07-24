@@ -6,7 +6,8 @@ TEST_CASE("make_progress", "[mongoac][runtime]")
 {
    SECTION("null")
    {
-      CHECK(!mongoac_runtime_make_progress(nullptr));
+      mongoac_runtime_make_progress(nullptr);
+      SUCCEED();
    }
 }
 

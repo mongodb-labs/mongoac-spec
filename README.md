@@ -410,8 +410,8 @@ The concurrency model used by mongoac uses an "executor + task handle + manual p
 
 All async tasks make progress by an explicit call to either `mongoac_runtime_make_progress*()` or
   `mongoac_runtime_block_on*()`.
-Only one thread may make progress on a given runtime and its associated tasks at a time.
-However, the runtime may make progress on any thread, and futures may be passed to and queried by any thread.
+Any thread may drive the runtime, and futures may be passed to and queried by any thread.
+However, only one thread can make progress on a given runtime at a time.
 Both the runtime and pending futures may also be used on a single thread.
 
 ##### Runtime
@@ -420,16 +420,14 @@ Every `mongoac_client_t` contains an associated `mongoac_runtime_t` which may be
   `mongoac_client_get_runtime()`.
 The `mongoac_runtime_t` is ref-counted, cheap to clone, and may outlive the `mongoac_client_t`.
 However, any tasks spawned using the associated client MAY NOT be executed using the runtime of another client.
-Although multiple threads may attempt to call `make_progress*()` or `block_on*()`, only one thread will be able to make
-  progress at a time.
+The caller must ensure that only one thread at a time calls `make_progress*()` or `block_on*()` on a given runtime.
 
 > [!NOTE]
 > In terms of C++26 Execution, `mongoac_runtime_t` is similar to a "Scheduler" in how it behaves like a handle to an
 >   execution resource.
 > However, instead of being a lightweight, non-owning factory for lazy senders which does not itself drive execution,
 >   `mongoac_runtime_t` also behaves as a single-threaded executor: the thread which invokes `make_progress*()` or
->   `block_on*()` becomes the executor for the duration of the invocation (when it acquires the underlying `progress_lock`
->   serializing progress on the runtime).
+>   `block_on*()` becomes the executor for the duration of the invocation.
 > It is also comparable to a single-threaded `io_context` in Boost ASIO or an event loop in Python's `asyncio`.
 
 ##### Futures
@@ -442,7 +440,8 @@ When the result is a return value, `mongoac_error_code(error)` equals `MONGOAC_E
 
 All async operations in the mongoac API return a `mongoac_future_t`, even when the return value is `void` (e.g.
   `mongoac_collection_drop_async()`).
-A given future may only make progress by a call to `block_on*()` by one thread at a time.
+A given future may only make progress by a call to `block_on*()` on its associated runtime while the runtime is not
+  already being driven by another thread.
 
 > [!NOTE]
 > In terms of C++26 Execution, `mongoac_future_t` is not like a lazy "Sender" (the task is already spawned) or a oneshot
@@ -501,8 +500,7 @@ However, only async tasks explicitly spawned by the mongoac library (or a stop r
 >   control this parameter.
 
 > [!TIP]
-> - [Why runtime wait and make_progress?](#why-runtime-wait-make-progress)
-> - [Why timeout granularity?](#why-timeout-granularity)
+> - [Why runtime wait and make_progress?](#why-runtime-wait-and-make-progress)
 > - [Why defer cancellation?](#why-defer-cancellation)
 
 <!-- Audit Progress -->
@@ -708,9 +706,6 @@ Contracts: non-retryable; no `readConcern`/`writeConcern`; read preference follo
 
 The cursor is backed by the Rust driver's `Cursor<T>` (implicit session) or `SessionCursor<T>` (explicit session), wrapped in the `mongoac`-internal `CursorT`. `advance()` has a fast path (buffer has documents — resolves in a single poll with no yield) and a slow path (buffer empty — issues a `getMore` command, yielding at the TCP send/receive boundary). Alternative first-yield points include server topology changes, connection pool wait, or registered event handlers.
 
-> [!TIP]
-> - [Why timeout granularity?](#why-timeout-granularity)
-
 #### Collation
 
 > [!NOTE]
@@ -759,7 +754,7 @@ Every CRUD operation accepting an explicit session will take a nullable `mongoac
 
 Transaction support will follow the [Driver Transactions specification](https://github.com/mongodb/specifications/blob/master/source/transactions/transactions.rst). Transactions build on Driver Sessions (minimum server 4.0 for replica sets, 4.2 for sharded clusters).
 
-Each transaction operation (`start_transaction`, `commit_transaction`, `abort_transaction`) will be provided in two forms: async (`*_async()`) returning a `mongoac_future_t*`, and sync (no suffix) blocking via `runtime.block_on()` with `progress_lock`. The sync variants must not be called from within a `make_progress()` context, matching the sync session accessor convention.
+Each transaction operation (`start_transaction`, `commit_transaction`, `abort_transaction`) will be provided in two forms: async (`*_async()`) returning a `mongoac_future_t*`, and sync (no suffix) blocking via `runtime.block_on()`. The sync variants must not be called from within a `make_progress()` context, matching the sync session accessor convention.
 
 `TransactionOptions` will use the standard BSON deserialization pattern, supporting `readConcern`, `writeConcern`, `readPreference` (as a `SelectionCriteria` sub-document), and `maxCommitTimeMS` (`timeoutMS` is [deferred](#deferred-transaction-timeoutms)). `NULL` for options uses session-level defaults set via `defaultTransactionOptions` at session creation; per-call options override those defaults — the Rust driver handles the inheritance chain.
 
@@ -966,10 +961,28 @@ Cancellation is deferred because opaque handles allow it to be added later as an
 <a id="why-arc-runtime"></a>
 #### Why Arc<Runtime> instead of borrowed references?
 
-`RuntimeT` encapsulates an `Arc<Runtime>` (and `Arc<Mutex<()>>` for `progress_lock`), so both handles reference-count the same underlying allocations. C callers do not understand Rust borrow semantics. A `RuntimeT` must remain valid even if the originating `ClientT` is destroyed, so `Arc<Runtime>` is required.
+`RuntimeT` encapsulates an `Arc<RuntimeState>`, so handles reference-count the same underlying allocations. C callers do not understand Rust borrow semantics. A `RuntimeT` must remain valid even if the originating `ClientT` is destroyed, so `Arc<RuntimeState>` is required.
 
 > [!TIP]
 > - [Why not borrowed references?](#rejected-borrowed-references)
+
+<a id="why-non-const-make-progress"></a>
+#### Why is runtime driver access exclusive-by-contract?
+
+Tokio's `current_thread` runtime does not support thread-safety.
+Adding thread-safety on top of the runtime unnecessarily complicates the implementation (e.g. use of an internal
+  `progress_lock` mutex to serialize calls to `make_progress*()` and `block_on*()`) in order to support a use-case that
+  is arguably an anti-pattern (attempting to simultaneously make progress on a runtime from multiple threads).
+Users who need to support this scenario can choose to synchronize access to the runtime themselves according to their
+  needs.
+However, the underlying runtime would still only be able to make progress on one thread at a time.
+For parallel progress of asynchronous tasks, multiple client objects (each with their own independent runtime) is
+  required.
+
+Some functions are still thread-safe to invoke in parallel.
+These include `clone()`, `request_stop()` and `stop_requested()`, and `wait*()`.
+These functions accept a `const mongoac_runtime_t *` for logical const-correctness; all other non-thread-safe functions
+  require a non-const `mongoac_runtime_t *`.
 
 <a id="why-single-cursor-type"></a>
 #### Why a single `mongoac_cursor_t` type?
@@ -1111,11 +1124,6 @@ The Rust driver uses `OP_MSG` exclusively — the opcode-based restriction is in
 
 The Rust driver's action builders consume `&mut ClientSession` for the operation's full duration. There is no intermediate point to release the lock before `.await` completes.
 
-<a id="why-progress-lock-extended"></a>
-##### Why extend `progress_lock` to guard synchronous `block_on()` calls?
-
-`RuntimeT::block_on()` acquires `progress_lock` internally before every `runtime.block_on()` call, so callers do not need to manage the lock manually. On `current_thread` runtimes, the IO/timer driver `Core` is single-owner (`AtomicCell`). Two threads cannot enter `block_on()` simultaneously without one losing driver access. The shared lock prevents this.
-
 <a id="why-session-accessors-block-on-mutex"></a>
 ##### Why do synchronous session accessors block on the mutex instead of using `try_lock()`?
 
@@ -1155,7 +1163,7 @@ The upstream Rust driver's executor gates `afterClusterTime` injection on `op.re
 <a id="why-both-async-sync-transaction"></a>
 ##### Why both async and sync transaction variants?
 
-Transaction operations are typically called in sequence by a single thread with no concurrent work to drive — forcing every call through the future poll loop adds boilerplate without concurrency benefit. The sync variant uses `runtime.block_on()` with `progress_lock`, matching the existing pattern of `mongoac_client_start_session()` and synchronous cursor iteration. Callers who need non-blocking I/O use the `*_async()` variants.
+Transaction operations are typically called in sequence by a single thread with no concurrent work to drive — forcing every call through the future poll loop adds boilerplate without concurrency benefit. The sync variant uses `runtime.block_on()`, matching the existing pattern of `mongoac_client_start_session()` and synchronous cursor iteration. Callers who need non-blocking I/O use the `*_async()` variants.
 
 <a id="why-rust-transaction-state"></a>
 ##### Why rely on Rust for transaction state validation?
@@ -1259,7 +1267,7 @@ Cooperative cancellation requires wiring an `AbortHandle` or oneshot channel int
 <a id="rejected-borrowed-references"></a>
 #### Borrowed `&'r Runtime` references in RuntimeT
 
-Borrowed references are sufficient when Rust controls lifetimes and callers are single-threaded. C callers do not understand borrow semantics, and a `RuntimeT` may outlive its originating `ClientT`, so `Arc<Runtime>` inside `RuntimeT` is the only safe choice. `RuntimeT` stores `Arc<Runtime>` and `Arc<Mutex<()>>` (for `progress_lock`), and is `Clone`-derived so callers can cheaply share handles.
+Borrowed references are sufficient when Rust controls lifetimes and callers are single-threaded. C callers do not understand borrow semantics, and a `RuntimeT` may outlive its originating `ClientT`, so `Arc<RuntimeState>` inside `RuntimeT` is the only safe choice. `RuntimeT` is `Clone`-derived so callers can cheaply share handles.
 
 <a id="rejected-temporary-runtime"></a>
 ##### Temporary runtime for URI parse

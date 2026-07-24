@@ -7,7 +7,6 @@ use crate::{safe_as_ref, safe_error};
 
 use event_listener::{Event, Listener};
 use futures_util::stream::{FuturesUnordered, StreamExt};
-use parking_lot::Mutex;
 use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -45,7 +44,7 @@ pub extern "C" fn mongoac_runtime_clone(runtime: *const RuntimeT) -> *mut Runtim
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn mongoac_runtime_make_progress(runtime: *mut RuntimeT) -> bool {
+pub extern "C" fn mongoac_runtime_make_progress(runtime: *mut RuntimeT) {
     safe_as_ref!(runtime).make_progress()
 }
 
@@ -58,7 +57,7 @@ pub extern "C" fn mongoac_runtime_make_progress_with_timeout(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn mongoac_runtime_request_stop(runtime: *mut RuntimeT) {
+pub extern "C" fn mongoac_runtime_request_stop(runtime: *const RuntimeT) {
     safe_as_ref!(runtime).request_stop()
 }
 
@@ -68,13 +67,13 @@ pub extern "C" fn mongoac_runtime_stop_requested(runtime: *const RuntimeT) -> bo
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn mongoac_runtime_wait(runtime: *mut RuntimeT) {
+pub extern "C" fn mongoac_runtime_wait(runtime: *const RuntimeT) {
     safe_as_ref!(runtime).wait();
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_runtime_wait_with_timeout(
-    runtime: *mut RuntimeT,
+    runtime: *const RuntimeT,
     timeout_ms: u64,
 ) -> bool {
     safe_as_ref!(runtime).wait_with_timeout(Duration::from_millis(timeout_ms))
@@ -217,24 +216,22 @@ impl RuntimeT {
         })
     }
 
-    pub(crate) fn make_progress(&self) -> bool {
-        self.try_with_progress_lock(|runtime| {
-            runtime.block_on(tokio::task::yield_now());
-        })
+    pub(crate) fn make_progress(&self) {
+        self.state.runtime.block_on(tokio::task::yield_now())
     }
 
     pub(crate) fn make_progress_with_timeout(&self, timeout: Duration) -> bool {
-        self.try_with_progress_lock(|runtime| {
-            runtime.block_on(async {
-                let _ = tokio::time::timeout(timeout, tokio::task::yield_now()).await;
-            });
+        self.state.runtime.block_on(async {
+            tokio::time::timeout(timeout, tokio::task::yield_now())
+                .await
+                .is_ok()
         })
     }
 
     pub(crate) fn request_stop(&self) {
         self.state.stop_requested.store(true, Ordering::Release);
         self.state.wait_flag.store(true, Ordering::Release);
-        self.state.wait_event.notify(usize::MAX);
+        self.state.wait_event.notify(usize::MAX); // All waiters must receive the stop request.
     }
 
     pub(crate) fn stop_requested(&self) -> bool {
@@ -250,15 +247,15 @@ impl RuntimeT {
     }
 
     pub(crate) fn block_on<F: Future>(&self, future: F) -> F::Output {
-        let _guard = self.state.progress_lock.lock();
         self.state.runtime.block_on(future)
     }
 
     pub(crate) fn block_on_future(&self, future: &FutureT) {
-        self.with_progress_lock(
-            || future.is_ready().then_some(()),
-            |runtime| runtime.block_on(future.poll()),
-        );
+        if future.is_ready() {
+            return; // No work to do.
+        }
+
+        self.state.runtime.block_on(future.poll());
     }
 
     pub(crate) fn block_on_future_with_timeout(
@@ -266,27 +263,17 @@ impl RuntimeT {
         future: &FutureT,
         timeout: Duration,
     ) -> Result<(), ErrorT> {
-        self.with_progress_lock(
-            || future.is_ready().then_some(Ok(())),
-            |runtime| {
-                runtime.block_on(async {
-                    tokio::time::timeout(timeout, future.poll())
-                        .await
-                        .map_err(|_| {
-                            ErrorT::from_mongoac(
-                                ErrorCodeT::Timeout,
-                                "block_on_future_with_timeout",
-                            )
-                        })
-                })
-            },
-        )
+        if future.is_ready() {
+            return Ok(()); // No work to do.
+        }
+
+        self.state.runtime.block_on(async {
+            tokio::time::timeout(timeout, future.poll()).await?;
+            Ok(())
+        })
     }
 
     pub(crate) fn block_on_any<'a>(&self, futures: &'a [(usize, &'a FutureT)]) -> Option<usize> {
-        // Skip double-checked lock: futures are expected to be pending.
-        let _guard = self.state.progress_lock.lock();
-
         // Check for completion before executing `block_on()`.
         if let Some(i) = any_ready(futures) {
             return Some(i);
@@ -294,7 +281,7 @@ impl RuntimeT {
 
         self.state
             .runtime
-            .block_on(async { futures_unordered_for_any(futures).next().await })
+            .block_on(futures_unordered_for_any(futures).next())
     }
 
     pub(crate) fn block_on_any_with_timeout<'a>(
@@ -302,25 +289,17 @@ impl RuntimeT {
         futures: &'a [(usize, &'a FutureT)],
         timeout: Duration,
     ) -> Result<Option<usize>, ErrorT> {
-        // Skip double-checked lock: futures are expected to be pending.
-        let _guard = self.state.progress_lock.lock();
-
         // Check for completion before executing `block_on()`.
         if let Some(i) = any_ready(futures) {
             return Ok(Some(i));
         }
 
         self.state.runtime.block_on(async {
-            tokio::time::timeout(timeout, futures_unordered_for_any(futures).next())
-                .await
-                .map_err(|_| ErrorT::from_mongoac(ErrorCodeT::Timeout, "block_on_any_with_timeout"))
+            Ok(tokio::time::timeout(timeout, futures_unordered_for_any(futures).next()).await?)
         })
     }
 
     pub(crate) fn block_on_all(&self, futures: &[&FutureT]) {
-        // Skip double-checked lock: futures are expected to be pending.
-        let _guard = self.state.progress_lock.lock();
-
         // Check for completion before executing `block_on()`.
         if all_ready(futures) {
             return;
@@ -337,9 +316,6 @@ impl RuntimeT {
         futures: &[&FutureT],
         timeout: Duration,
     ) -> Result<(), ErrorT> {
-        // Skip double-checked lock: futures are expected to be pending.
-        let _guard = self.state.progress_lock.lock();
-
         // Check for completion before executing `block_on()`.
         if all_ready(futures) {
             return Ok(());
@@ -348,8 +324,8 @@ impl RuntimeT {
         self.state.runtime.block_on(async {
             let mut fut_set = futures_unordered_for_all(futures);
             tokio::time::timeout(timeout, async { while fut_set.next().await.is_some() {} })
-                .await
-                .map_err(|_| ErrorT::from_mongoac(ErrorCodeT::Timeout, "block_on_all_with_timeout"))
+                .await?;
+            Ok(())
         })
     }
 
@@ -370,40 +346,8 @@ impl RuntimeT {
     {
         let handle = self.state.runtime.spawn(future);
         self.state.wait_flag.store(true, Ordering::Release);
-        self.state.wait_event.notify(usize::MAX);
+        self.state.wait_event.notify(usize::MAX); // All waiters must be notified even when only one can make progress.
         handle
-    }
-
-    fn with_progress_lock<R>(
-        &self,
-        mut cond: impl FnMut() -> Option<R>,
-        run: impl FnOnce(&tokio::runtime::Runtime) -> R,
-    ) -> R {
-        // Double-checked lock.
-        if let Some(result) = cond() {
-            return result;
-        }
-
-        let _guard = self.state.progress_lock.lock();
-
-        // Double-checked lock.
-        if let Some(result) = cond() {
-            return result;
-        }
-
-        run(&self.state.runtime)
-    }
-
-    fn try_with_progress_lock<Op>(&self, op: Op) -> bool
-    where
-        Op: FnOnce(&tokio::runtime::Runtime),
-    {
-        let Some(_guard) = self.state.progress_lock.try_lock() else {
-            return false;
-        };
-
-        op(&self.state.runtime);
-        true
     }
 
     fn wait_impl(&self, timeout: Option<Duration>) -> bool {
@@ -435,8 +379,6 @@ impl RuntimeT {
 
 struct RuntimeState {
     runtime: tokio::runtime::Runtime,
-    // Only one thread can `block_on*()` or `make_progress*()` at a time.
-    progress_lock: Mutex<()>,
     // Used to signal waiting threads that no more work should be done.
     stop_requested: AtomicBool,
     // Used to signal waiting threads when work is available.
@@ -449,7 +391,6 @@ impl RuntimeState {
     fn new(runtime: tokio::runtime::Runtime) -> Self {
         Self {
             runtime,
-            progress_lock: Mutex::new(()),
             stop_requested: AtomicBool::new(false),
             wait_flag: AtomicBool::new(false),
             wait_event: Event::new(),
@@ -561,19 +502,13 @@ mod tests {
     use std::time::{Duration, Instant};
 
     #[test]
-    fn make_progress_returns_true_when_lock_available() {
-        let runtime = make_runtime();
-        assert!(runtime.make_progress());
-    }
-
-    #[test]
-    fn make_progress_with_timeout_returns_true_when_lock_available() {
+    fn make_progress_with_timeout_returns_true() {
         let runtime = make_runtime();
         assert!(runtime.make_progress_with_timeout(Duration::from_millis(50)));
     }
 
     #[test]
-    fn make_progress_with_timeout_returns_immediately_without_contention() {
+    fn make_progress_with_timeout_returns_immediately() {
         let runtime = make_runtime();
 
         let t0 = Instant::now();
@@ -587,33 +522,9 @@ mod tests {
     }
 
     #[test]
-    fn make_progress_with_timeout_returns_early_with_contention() {
-        let runtime = make_runtime();
-
-        for _ in 0..100 {
-            runtime.get_runtime().spawn(async {
-                let t = Instant::now() + Duration::from_millis(1);
-                while Instant::now() < t {
-                    std::hint::spin_loop();
-                }
-                tokio::task::yield_now().await;
-            });
-        }
-
-        let started = Instant::now();
-        let _ = runtime.make_progress_with_timeout(Duration::from_millis(50));
-        let elapsed = started.elapsed();
-
-        assert!(
-            elapsed < Duration::from_millis(75),
-            "expected timeout to bound block_on, but call took {elapsed:?}"
-        );
-    }
-
-    #[test]
     fn wait_returns_immediately_when_work_already_available() {
         let runtime = make_runtime();
-        runtime.spawn(async { tokio::task::yield_now().await });
+        runtime.spawn(tokio::task::yield_now());
 
         let t0 = Instant::now();
         runtime.wait();
@@ -643,7 +554,7 @@ mod tests {
         thread::sleep(Duration::from_millis(10));
         assert!(!ready.load(Ordering::Acquire));
 
-        runtime.spawn(async { tokio::task::yield_now().await });
+        runtime.spawn(tokio::task::yield_now());
         worker.join().unwrap();
 
         assert!(ready.load(Ordering::Acquire));
@@ -675,7 +586,7 @@ mod tests {
         });
 
         thread::sleep(Duration::from_millis(10));
-        runtime.spawn(async { tokio::task::yield_now().await });
+        runtime.spawn(tokio::task::yield_now());
 
         worker.join().unwrap();
     }
@@ -691,7 +602,7 @@ mod tests {
             });
 
             thread::sleep(Duration::from_millis(1));
-            runtime.spawn(async { tokio::task::yield_now().await });
+            runtime.spawn(tokio::task::yield_now());
 
             worker.join().unwrap();
         }

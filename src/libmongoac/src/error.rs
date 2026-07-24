@@ -1,6 +1,4 @@
-use crate::safe_as_ref;
-use crate::safe_cstr_from_ptr;
-use crate::safe_drop;
+use crate::{safe_as_ref, safe_cstr_from_ptr, safe_drop};
 use std::ffi::CString;
 use strum::EnumMessage;
 
@@ -57,6 +55,43 @@ pub enum ErrorCodeT {
     Unknown(i32),
 }
 
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_error_new() -> *mut ErrorT {
+    Box::into_raw(Box::new(ErrorT::new()))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_error_destroy(error: *mut ErrorT) {
+    safe_drop!(error);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_error_category(error: *const ErrorT) -> i32 {
+    safe_as_ref!(error).category().into()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_error_code(error: *const ErrorT) -> i32 {
+    safe_as_ref!(error).code().into()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_error_message(error: *const ErrorT) -> *const std::ffi::c_char {
+    safe_as_ref!(error)
+        .message()
+        .map_or(EMPTY_MSG.as_ptr() as *const std::ffi::c_char, |m| {
+            m.as_ptr()
+        })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_error_has_label(
+    error: *const ErrorT,
+    label: *const std::ffi::c_char,
+) -> bool {
+    safe_as_ref!(error).has_label(&safe_cstr_from_ptr!(label))
+}
+
 impl ErrorCodeT {
     pub fn message(self) -> &'static str {
         self.get_message().unwrap_or("unknown mongoac error")
@@ -90,23 +125,7 @@ impl ErrorT {
     pub fn clear(&mut self) {
         *self = Self::None;
     }
-}
 
-impl From<mongodb::bson::error::Error> for ErrorT {
-    fn from(err: mongodb::bson::error::Error) -> Self {
-        let msg = CString::new(err.to_string()).ok();
-        Self::Bson(err, msg)
-    }
-}
-
-impl From<mongodb::error::Error> for ErrorT {
-    fn from(err: mongodb::error::Error) -> Self {
-        let msg = CString::new(err.to_string()).ok();
-        Self::Rust(err, msg)
-    }
-}
-
-impl ErrorT {
     pub fn category(&self) -> ErrorCategoryT {
         match self {
             Self::None => ErrorCategoryT::None,
@@ -143,41 +162,28 @@ impl ErrorT {
     }
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn mongoac_error_new() -> *mut ErrorT {
-    Box::into_raw(Box::new(ErrorT::new()))
+impl From<mongodb::bson::error::Error> for ErrorT {
+    fn from(err: mongodb::bson::error::Error) -> Self {
+        let msg = CString::new(err.to_string()).ok();
+        Self::Bson(err, msg)
+    }
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn mongoac_error_destroy(error: *mut ErrorT) {
-    safe_drop!(error);
+impl From<mongodb::error::Error> for ErrorT {
+    fn from(err: mongodb::error::Error) -> Self {
+        let msg = CString::new(err.to_string()).ok();
+        Self::Rust(err, msg)
+    }
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn mongoac_error_category(error: *const ErrorT) -> i32 {
-    safe_as_ref!(error).category().into()
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn mongoac_error_code(error: *const ErrorT) -> i32 {
-    safe_as_ref!(error).code().into()
+impl From<tokio::time::error::Elapsed> for ErrorT {
+    fn from(error: tokio::time::error::Elapsed) -> Self {
+        let msg = CString::new(error.to_string()).ok();
+        Self::MongoAC {
+            code: ErrorCodeT::Timeout,
+            message: msg,
+        }
+    }
 }
 
 static EMPTY_MSG: [u8; 1] = [0];
-
-#[unsafe(no_mangle)]
-pub extern "C" fn mongoac_error_message(error: *const ErrorT) -> *const std::ffi::c_char {
-    safe_as_ref!(error)
-        .message()
-        .map_or(EMPTY_MSG.as_ptr() as *const std::ffi::c_char, |m| {
-            m.as_ptr()
-        })
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn mongoac_error_has_label(
-    error: *const ErrorT,
-    label: *const std::ffi::c_char,
-) -> bool {
-    safe_as_ref!(error).has_label(&safe_cstr_from_ptr!(label))
-}

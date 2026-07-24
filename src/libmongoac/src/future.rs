@@ -262,11 +262,10 @@ mod tests {
     use crate::runtime::RuntimeT;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::thread;
     use std::time::{Duration, Instant};
 
     fn spawn_immediate(runtime: &RuntimeT) -> FutureT {
-        let handle = runtime.spawn(async { Ok::<(), ErrorT>(()) });
+        let handle = runtime.spawn(async move { Ok::<(), ErrorT>(()) });
         FutureT::new(
             runtime.clone(),
             FutureValue::Void(FutureValueType::new(handle)),
@@ -309,18 +308,6 @@ mod tests {
         runtime.block_on_future(&future);
         runtime.block_on_future(&future);
         assert!(future.is_ready());
-    }
-
-    #[test]
-    fn block_on_holds_progress_lock() {
-        let runtime = make_runtime();
-        let future = spawn_delayed(&runtime, Duration::from_millis(20));
-        let rt = runtime.clone();
-        let blocker = thread::spawn(move || {
-            assert!(!rt.make_progress());
-        });
-        runtime.block_on_future(&future);
-        blocker.join().unwrap();
     }
 
     #[test]
@@ -520,7 +507,7 @@ mod tests {
     #[test]
     fn get_int32_ready() {
         let runtime = make_runtime();
-        let handle = runtime.spawn(async { Ok::<i32, ErrorT>(42) });
+        let handle = runtime.spawn(async move { Ok::<i32, ErrorT>(42) });
         let future = FutureT::new(
             runtime.clone(),
             FutureValue::Int32(FutureValueType::new(handle)),
@@ -537,7 +524,7 @@ mod tests {
     #[test]
     fn get_int32_not_ready() {
         let runtime = make_runtime();
-        let handle = runtime.spawn(async {
+        let handle = runtime.spawn(async move {
             tokio::time::sleep(Duration::from_secs(60)).await;
             Ok::<i32, ErrorT>(42)
         });
