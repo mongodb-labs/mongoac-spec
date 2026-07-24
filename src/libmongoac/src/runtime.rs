@@ -40,11 +40,22 @@ pub extern "C" fn mongoac_runtime_clone(runtime: *const RuntimeT) -> *mut Runtim
     Box::into_raw(Box::new(safe_as_ref!(runtime).clone()))
 }
 
+// Make progress on all tasks scheduled on this runtime.
+//
+// Use this function to make *some* progress on all scheduled tasks without blocking the current thread for an extended
+// period of time (conceptually, a "single pass" through the task queue), such as in an event loop or between other work
+// on a worker thread.
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_runtime_make_progress(runtime: *const RuntimeT) {
     safe_as_ref!(runtime).make_progress()
 }
 
+// Like `make_progress()`, but (soft) upper-bounded by `timeout_ms`.
+//
+// Returns a timeout error when the runtime is unable to finish making progress on all scheduled tasks (conceptually, a
+// "single pass" through the task queue) before the timeout deadline.
+//
+// Use this function when a (soft) upper-bound is required on the time spent potentially blocked on `make_progress()`.
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_runtime_make_progress_with_timeout(
     runtime: *const RuntimeT,
@@ -57,11 +68,19 @@ pub extern "C" fn mongoac_runtime_make_progress_with_timeout(
     )
 }
 
+// Like `make_progress()`, but lower-bounded by `duration_ms`.
+//
+// Use this function when a worker thread or event loop can budget a minimum amount of time spent making progress on
+// scheduled tasks (conceptually, repeatedly making a "single pass" through the task queue).
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_runtime_make_progress_for(runtime: *const RuntimeT, duration_ms: u64) {
     safe_as_ref!(runtime).make_progress_for(Duration::from_millis(duration_ms))
 }
 
+// Like `make_progress_for()`, but (soft) upper-bounded by `timeout_ms`
+//
+// Use this function when a (soft) upper bound is required on the time spent potentially blocked on
+// `make_progress_for()`.
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_runtime_make_progress_for_with_timeout(
     runtime: *const RuntimeT,
@@ -78,21 +97,33 @@ pub extern "C" fn mongoac_runtime_make_progress_for_with_timeout(
     )
 }
 
+// Issues a stop request to the runtime.
+//
+// All threads waiting on the runtime are notified; all subsequent calls to `wait*()` return immediately.
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_runtime_request_stop(runtime: *const RuntimeT) -> bool {
     safe_as_ref!(runtime).request_stop()
 }
 
+// Return true when a stop has been requested.
+//
+// Use this function to check when an event loop or worker thread should stop making progress on this runtime.
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_runtime_stop_requested(runtime: *const RuntimeT) -> bool {
     safe_as_ref!(runtime).stop_requested()
 }
 
+// Suspend the current thread until a new asynchronous task is spawned on this runtime (or a stop is requested).
+//
+// Use this function in an event loop or worker thread to avoid spin-looping while the runtime is idle.
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_runtime_wait(runtime: *const RuntimeT) {
     safe_as_ref!(runtime).wait();
 }
 
+// Like wait(), but (soft) upper-bounded by `timeout_ms`.
+//
+// Use this function when a (soft) upper bound is required on the time spent potentially blocked on `wait()`.
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_runtime_wait_with_timeout(
     runtime: *const RuntimeT,
@@ -105,6 +136,9 @@ pub extern "C" fn mongoac_runtime_wait_with_timeout(
     )
 }
 
+// Block the current thread by making progress until the `future` is ready.
+//
+// Use this function when the current thread can make progress on all scheduled tasks until the `future` is ready.
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_runtime_block_on(
     runtime: *const RuntimeT,
@@ -118,6 +152,9 @@ pub extern "C" fn mongoac_runtime_block_on(
     runtime.block_on_future(future);
 }
 
+// Like `block_on()`, but (soft) upper-bounded by `timeout_ms`.
+//
+// Use this function when a (soft) upper bound is required on the time spent potentially blocked on `block_on()`.
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_runtime_block_on_with_timeout(
     runtime: *const RuntimeT,
@@ -135,6 +172,12 @@ pub extern "C" fn mongoac_runtime_block_on_with_timeout(
     );
 }
 
+// Like `block_on()`, but returns when *any* future is ready.
+//
+// Returns a pointer to the element in `futures` that is ready.
+//
+// Use this function when the current thread can make progress on all scheduled tasks until *any* of the given futures
+// is ready.
 #[unsafe(no_mangle)]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn mongoac_runtime_block_on_any(
@@ -157,6 +200,9 @@ pub extern "C" fn mongoac_runtime_block_on_any(
     }
 }
 
+// Like `block_on_any()``, but (soft) upper-bounded by `timeout_ms`.
+//
+// Use this function when a (soft) upper bound is required on the time spent potentially blocked on `block_on_any()`.
 #[unsafe(no_mangle)]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn mongoac_runtime_block_on_any_with_timeout(
@@ -183,6 +229,10 @@ pub extern "C" fn mongoac_runtime_block_on_any_with_timeout(
     }
 }
 
+// Like `block_on()`, but returns when *all* futures are ready.
+//
+// Use this function when the current thread can make progress on all scheduled tasks until *all* of the given futures
+// are ready.
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_runtime_block_on_all(
     runtime: *const RuntimeT,
@@ -201,6 +251,9 @@ pub extern "C" fn mongoac_runtime_block_on_all(
     runtime.block_on_all(&refs);
 }
 
+// Like `block_on_all()`, but (soft) upper-bounded by `timeout_ms`.
+//
+// Use this function when a (soft) upper bound is required on the time spent potentially blocked on `block_on_all()`.
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_runtime_block_on_all_with_timeout(
     runtime: *const RuntimeT,
