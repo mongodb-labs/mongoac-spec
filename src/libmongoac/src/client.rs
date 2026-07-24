@@ -1,8 +1,4 @@
-use crate::{
-    safe_as_mut, safe_as_ref, safe_as_ref_with_error, safe_cstr_from_ptr_with_error, safe_drop,
-    safe_error, safe_optional_as_mut, safe_optional_as_ref, safe_optional_const_bson,
-    safe_optional_cstr_from_ptr_with_error, safe_optional_error_as_mut,
-};
+use crate::private::macros::*;
 
 use crate::client_options::ClientOptionsT;
 use crate::client_session::ClientSessionT;

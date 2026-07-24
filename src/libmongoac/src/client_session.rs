@@ -2,10 +2,9 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
-use crate::{
-    error::ErrorT, future::FutureT, safe_as_ref_with_error, safe_drop, safe_error,
-    safe_optional_error_as_mut,
-};
+use crate::error::ErrorT;
+use crate::future::FutureT;
+use crate::private::macros::*;
 
 #[derive(Clone)]
 pub struct ClientSessionT {

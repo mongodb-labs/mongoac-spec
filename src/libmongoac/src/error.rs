@@ -1,4 +1,4 @@
-use crate::{safe_as_ref, safe_cstr_from_ptr, safe_drop};
+use crate::private::macros::*;
 use std::ffi::CString;
 use strum::EnumMessage;
 

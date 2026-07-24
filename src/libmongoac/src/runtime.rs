@@ -1,9 +1,6 @@
 use crate::error::{ErrorCodeT, ErrorT};
 use crate::future::{FutureExt, FutureT};
-use crate::safe_drop;
-use crate::safe_optional_as_ref;
-use crate::safe_optional_error_as_mut;
-use crate::{safe_as_ref, safe_error};
+use crate::private::macros::*;
 
 use event_listener::{Event, Listener};
 use futures_util::stream::{FuturesUnordered, StreamExt};

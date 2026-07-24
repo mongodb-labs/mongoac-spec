@@ -2,10 +2,8 @@ use crate::client_session::ClientSessionT;
 use crate::cursor::CursorT;
 use crate::error::{ErrorCodeT, ErrorT};
 use crate::private::bson::{BsonT, bson_t};
+use crate::private::macros::*;
 use crate::runtime::RuntimeT;
-use crate::{
-    safe_as_ref, safe_as_ref_with_error, safe_drop, safe_error, safe_optional_error_as_mut,
-};
 
 use parking_lot::Mutex;
 

@@ -1,12 +1,9 @@
 use crate::error::ErrorT;
 use crate::future::FutureT;
 use crate::private::bson::{BsonT, bson_t};
+use crate::private::macros::*;
 use crate::runtime::RuntimeT;
 use crate::spawn;
-use crate::{
-    safe_as_mut_with_error, safe_as_ref_with_error, safe_drop, safe_error,
-    safe_optional_error_as_mut,
-};
 
 use mongodb::ClientSession;
 use mongodb::bson::{RawDocument, RawDocumentBuf};
