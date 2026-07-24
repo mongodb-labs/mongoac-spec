@@ -105,8 +105,8 @@ impl FutureT {
         }
     }
 
-    pub(crate) fn is_from_runtime(&self, runtime: &RuntimeT) -> bool {
-        runtime == &self.runtime
+    pub(crate) fn get_runtime(&self) -> &RuntimeT {
+        &self.runtime
     }
 
     pub(crate) fn is_ready(&self) -> bool {

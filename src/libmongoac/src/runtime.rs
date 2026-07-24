@@ -17,7 +17,8 @@ use std::time::Duration;
 macro_rules! safe_from_runtime_with_error {
     ($future:expr, $runtime:expr, $error:expr) => {{
         let future = $future;
-        if !future.is_from_runtime($runtime) {
+        let runtime = $runtime;
+        if future.get_runtime() != runtime {
             $crate::private::safety::invalid_argument(
                 $error,
                 "future is not associated with the given runtime",
@@ -536,7 +537,7 @@ fn futures_as_refs<'a>(
             ));
         };
 
-        if !future.is_from_runtime(runtime) {
+        if future.get_runtime() != runtime {
             return Err(ErrorT::from_mongoac(
                 ErrorCodeT::InvalidArgument,
                 &format!(
