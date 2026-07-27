@@ -1,5 +1,4 @@
-use std::ffi::c_char;
-
+use crate::client_session::ClientSessionT;
 use crate::database::DatabaseT;
 use crate::error::ErrorT;
 use crate::future::FutureT;
@@ -7,8 +6,12 @@ use crate::private::bson::bson_t;
 use crate::private::macros::*;
 use crate::runtime::RuntimeT;
 use crate::spawn;
+
 use mongodb::Collection;
 use mongodb::bson::RawDocumentBuf;
+use mongodb::options::DropCollectionOptions;
+
+use std::ffi::c_char;
 
 pub struct CollectionT {
     inner: Collection<RawDocumentBuf>,
@@ -36,14 +39,39 @@ pub extern "C" fn mongoac_collection_destroy(collection: *mut CollectionT) {
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_collection_drop_async(
     collection: *const CollectionT,
+    session: *mut ClientSessionT,
     _options: *const bson_t,
     error: *mut ErrorT,
 ) -> *mut FutureT {
     let error = safe_optional_error_as_mut!(error);
     let collection = safe_as_ref_with_error!(collection, error);
+    let session = safe_optional_as_mut!(session);
 
-    let future = collection.drop_async();
-    Box::into_raw(Box::new(future))
+    // let options = safe_optional_bson_opts_with_error!(DropCollectionOptions, options, error);
+    //  - write_concern: serde(skip_serializing)
+    //  - encrypted_fields: serde(skip_serializing)
+    let options = None;
+
+    Box::into_raw(Box::new(collection.drop_async(session, options)))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_collection_drop(
+    collection: *const CollectionT,
+    session: *mut ClientSessionT,
+    _options: *const bson_t,
+    error: *mut ErrorT,
+) {
+    let error = safe_optional_error_as_mut!(error);
+    let collection = safe_as_ref_with_error!(collection, error);
+    let session = safe_optional_as_mut!(session);
+
+    // let options = safe_optional_bson_opts_with_error!(DropCollectionOptions, options, error);
+    //  - write_concern: serde(skip_serializing)
+    //  - encrypted_fields: serde(skip_serializing)
+    let options = None;
+
+    safe_error!(collection.drop(session, options), error);
 }
 
 impl CollectionT {
@@ -56,8 +84,46 @@ impl CollectionT {
         }
     }
 
-    fn drop_async(&self) -> FutureT {
+    fn drop_async(
+        &self,
+        session: Option<&mut ClientSessionT>,
+        options: Option<DropCollectionOptions>,
+    ) -> FutureT {
         let coll = self.inner.clone();
-        spawn!(self, Void, async move { coll.drop().await })
+        let session = session.map(|s| s.clone());
+
+        spawn!(self, Void, async move {
+            let op = coll.drop().with_options(options);
+
+            match session {
+                Some(session) => {
+                    let mut guard = session.state().lock().await;
+                    op.session(&mut *guard).await?
+                }
+                None => op.await?,
+            }
+
+            Ok::<(), ErrorT>(())
+        })
+    }
+
+    fn drop(
+        &self,
+        session: Option<&mut ClientSessionT>,
+        options: Option<DropCollectionOptions>,
+    ) -> Result<(), ErrorT> {
+        self.runtime.block_on(async {
+            let op = self.inner.drop().with_options(options);
+
+            match session {
+                Some(session) => {
+                    let mut guard = session.state().lock().await;
+                    op.session(&mut *guard).await?
+                }
+                None => op.await?,
+            }
+
+            Ok::<(), ErrorT>(())
+        })
     }
 }
