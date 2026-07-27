@@ -902,11 +902,10 @@ The API may be extended as-needed in the future to support typed options structs
 This pattern is also consistent with the Rust API's use of `*_with_options()` functions.
 
 > [!IMPORTANT]
-> BSON deserialization via serde automatically handles mapping `camelCase` BSON document fields to `snake_case` fields
->   in options structs.
-> However, as a notable exception, `DatabaseOptions` is currently missing `#[serde(rename_all = "camelCase")]`.
-> The Rust FFI will need to implement its own support for mapping `camelCase` BSON document fields to `DatabaseOptions`
->   fields for consistency.
+> Though the `Deserialize` trait is implemented on many Rust API types, the Rust driver does not intend to continue this pattern. Quoting [RUST-2022](https://jira.mongodb.org/browse/RUST-2022):
+> > The presence of Deserialize on those structs is something of an accident of implementation of our automated testing and something we're avoiding going forward.
+> The FFI can use wrapper structs for types that do not implement `Deserialize` as expected.
+
 
 <a id="why-typed-client-options"></a>
 #### Why typed `ClientOptionsT` when operation options use `bson_t`?
