@@ -109,7 +109,7 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
             "stdint.h",
         ],
         "client_session" => includes!["mongoac/export.h", "mongoac/future.h"],
-        "error" => includes!["mongoac/export.h", "stdint.h"],
+        "error" => includes!["mongoac/export.h", "stdbool.h", "stdint.h"],
         "future" => includes![
             "mongoac/export.h",
             "mongoac/error.h",
@@ -132,6 +132,7 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
             "mongoac/export.h",
             "mongoac/client.h",
             "mongoac/client_session.h",
+            "mongoac/cursor.h",
             "mongoac/error.h",
             "mongoac/future.h",
             "bson/bson_t.h",
@@ -140,6 +141,7 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
         ],
         "collection" => includes![
             "mongoac/export.h",
+            "mongoac/database.h",
             "mongoac/error.h",
             "mongoac/future.h",
             "bson/bson_t.h",

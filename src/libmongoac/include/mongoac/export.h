@@ -1,6 +1,9 @@
 #ifndef MONGOAC_EXPORT_H
 #define MONGOAC_EXPORT_H
 
+// Avoid -Wempty-translation-unit warnings.
+#include <stddef.h>
+
 #ifdef MONGOAC_STATIC
 #define MONGOAC_API
 #elif defined(_WIN32)
