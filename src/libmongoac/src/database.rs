@@ -12,7 +12,9 @@ use mongodb::Database;
 use mongodb::bson::RawDocumentBuf;
 use mongodb::options::{
     CreateCollectionOptions, DatabaseOptions, DropDatabaseOptions, ListCollectionsOptions,
+    ReadConcern, ReadPreference, SelectionCriteria, WriteConcern,
 };
+use serde::Deserialize;
 use std::ffi::c_char;
 
 pub struct DatabaseT {
@@ -30,7 +32,7 @@ pub extern "C" fn mongoac_client_get_database(
     let error = safe_optional_error_as_mut!(error);
     let client = safe_as_ref_with_error!(client, error);
     let name = safe_cstr_from_ptr_with_error!(name, error);
-    let opts = safe_optional_bson_opts_with_error!(DatabaseOptions, options, error);
+    let opts = safe_optional_bson_opts_with_error!(DatabaseOptionsT, options, error);
 
     let db = safe_error!(DatabaseT::new(client, name, opts), error);
     Box::into_raw(Box::new(db))
@@ -183,10 +185,10 @@ impl DatabaseT {
     fn new(
         client: &ClientT,
         name: String,
-        options: Option<DatabaseOptions>,
+        options: Option<DatabaseOptionsT>,
     ) -> Result<Self, mongodb::bson::error::Error> {
         let db = match options {
-            Some(opts) => client.inner().database_with_options(&name, opts),
+            Some(opts) => client.inner().database_with_options(&name, opts.into()),
             None => client.inner().database(&name),
         };
 
@@ -385,5 +387,30 @@ impl DatabaseT {
 
             strings_to_bson(&res)
         })
+    }
+}
+
+#[derive(Deserialize)]
+struct DatabaseOptionsT {
+    #[serde(alias = "readConcern")]
+    read_concern: Option<ReadConcern>,
+
+    #[serde(alias = "readPreference")]
+    read_preference: Option<ReadPreference>,
+
+    #[serde(alias = "writeConcern")]
+    write_concern: Option<WriteConcern>,
+}
+
+impl From<DatabaseOptionsT> for DatabaseOptions {
+    fn from(opts: DatabaseOptionsT) -> Self {
+        DatabaseOptions::builder()
+            .read_concern(opts.read_concern)
+            .selection_criteria(
+                opts.read_preference
+                    .map(SelectionCriteria::ReadPreference),
+            )
+            .write_concern(opts.write_concern)
+            .build()
     }
 }
