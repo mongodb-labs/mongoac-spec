@@ -752,7 +752,7 @@ Mongoac provides async create and drop operations for collection lifecycle manag
 > [!NOTE]
 > Partially implemented in the current proof-of-concept. Only `mongoac_client_start_session()`, `mongoac_client_start_session_async()`, and `mongoac_client_session_destroy()` are exposed. Sessions can be passed to `list_databases` and `list_database_names`, but transaction accessors and causal-consistency accessors are not yet implemented.
 
-Session support follows the [Driver Sessions specification](https://github.com/mongodb/specifications/blob/master/source/sessions/driver-sessions.rst). The Rust driver manages server session lifetime internally; the FFI layer exposes explicit session handles for C callers.
+Session support follows the [Driver Sessions specification](https://github.com/mongodb/specifications/blob/master/source/sessions/driver-sessions.md). The Rust driver manages server session lifetime internally; the FFI layer exposes explicit session handles for C callers.
 
 `mongoac_client_start_session()` (synchronous, via `block_on()`) creates a session and returns the handle directly. An async variant `mongoac_client_start_session_async()` is also provided as part of the public API. Session options are deserialized via the [standard BSON option pattern](#why-bson-options) into Rust's `SessionOptions`. Validation (`causal_consistency` + `snapshot` conflict) is delegated to the Rust driver. Sessions are destroyed with `mongoac_client_session_destroy()`, dropping the backing `ClientSession` which returns the server session to the pool. If a transaction is in-progress at destroy time, the Rust driver's `Drop` impl fires an async abort task unawaited (matching Rust driver conventions).
 
@@ -768,7 +768,7 @@ Every CRUD operation accepting an explicit session will take a nullable `mongoac
 > [!NOTE]
 > Not yet implemented in the current proof-of-concept. No transaction functions are exposed.
 
-Transaction support will follow the [Driver Transactions specification](https://github.com/mongodb/specifications/blob/master/source/transactions/transactions.rst). Transactions build on Driver Sessions (minimum server 4.0 for replica sets, 4.2 for sharded clusters).
+Transaction support will follow the [Driver Transactions specification](https://github.com/mongodb/specifications/blob/master/source/transactions/transactions.md). Transactions build on Driver Sessions (minimum server 4.0 for replica sets, 4.2 for sharded clusters).
 
 Each transaction operation (`start_transaction`, `commit_transaction`, `abort_transaction`) will be provided in two forms: async (`*_async()`) returning a `mongoac_future_t*`, and sync (no suffix) blocking via `runtime.block_on()`. The sync variants must not be called from within a `make_progress()` context, matching the sync session accessor convention.
 
@@ -784,14 +784,11 @@ The Rust driver's `and_run()` retry-loop convenience will not be exposed; C call
 > [!NOTE]
 > Not yet implemented in the current proof-of-concept. No session accessors are exposed.
 
-Causal consistency will follow the [Driver Causal Consistency specification](https://github.com/mongodb/specifications/blob/master/source/causal-consistency/causal-consistency.rst). It is **enabled by default** for explicit sessions (via `causalConsistency: true` in session options) and **not available** for implicit sessions. Causal consistency and snapshot reads are mutually exclusive — validation is delegated to the Rust driver.
+Causal consistency will follow the [Driver Causal Consistency specification](https://github.com/mongodb/specifications/blob/master/source/causal-consistency/causal-consistency.md). It is **enabled by default** for explicit sessions (via `causalConsistency: true` in session options) and **not available** for implicit sessions. Causal consistency and snapshot reads are mutually exclusive — validation is delegated to the Rust driver.
 
 The Rust driver tracks `operationTime` from every server response (including errors) and injects `afterClusterTime` into the `readConcern` of subsequent causally-consistent commands. Cluster time (`$clusterTime`) gossipping is fully automatic.
 
 Synchronous accessors (`get_operation_time`, `advance_operation_time`, `get_cluster_time`, `advance_cluster_time`, `get_causal_consistency`) will exist for cross-session token propagation and acquire the session mutex via `blocking_lock()`.
-
-> [!NOTE]
-> **Known upstream limitation for `get_causal_consistency`:** `ClientSession::causal_consistency()` is `pub(crate)` in the Rust driver — a historical accident, not deliberate. Implementation will require either an upstream PR to make the getter `pub`, or storing the resolved value at session creation time. The other four accessors delegate to already-public `ClientSession` methods.
 
 > [!NOTE]
 > **Known limitation:** Due to an upstream Rust driver gap, `afterClusterTime` is not sent on write commands in causally-consistent sessions outside transactions. The `operationTime` from write responses is still captured, so subsequent reads carry the correct value, but the server cannot enforce causal ordering via oplog waiting on writes. This cannot be fixed in the FFI layer.
