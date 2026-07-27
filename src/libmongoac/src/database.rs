@@ -6,7 +6,7 @@ use crate::runtime::RuntimeT;
 use crate::spawn;
 
 use crate::client::ClientT;
-use mongodb::options::DatabaseOptions;
+use mongodb::options::{CreateCollectionOptions, DatabaseOptions};
 use std::ffi::c_char;
 
 pub struct DatabaseT {
@@ -70,15 +70,7 @@ pub extern "C" fn mongoac_client_get_database(
     let error = safe_optional_error_as_mut!(error);
     let client = safe_as_ref_with_error!(client, error);
     let name = safe_cstr_from_ptr_with_error!(name, error);
-    let options = safe_optional_const_bson!(options);
-
-    let opts = match options {
-        Some(ref opts) => Some(safe_error!(
-            mongodb::bson::deserialize_from_slice(opts.as_bytes()),
-            error
-        )),
-        None => None,
-    };
+    let opts = safe_optional_bson_options!(options, error, DatabaseOptions);
 
     let db = safe_error!(DatabaseT::new(client, name, opts), error);
     Box::into_raw(Box::new(db))
@@ -99,14 +91,7 @@ pub extern "C" fn mongoac_database_create_collection_async(
     let error = safe_optional_error_as_mut!(error);
     let database = safe_as_ref_with_error!(database, error);
     let name = safe_cstr_from_ptr_with_error!(name, error);
-    let options = safe_optional_const_bson!(options);
-    let create_opts = match options {
-        Some(ref bson) => Some(safe_error!(
-            mongodb::bson::deserialize_from_slice(bson.as_bytes()),
-            error
-        )),
-        None => None,
-    };
+    let create_opts = safe_optional_bson_options!(options, error, CreateCollectionOptions);
 
     let future = database.create_collection_async(name, create_opts);
     Box::into_raw(Box::new(future))

@@ -488,15 +488,7 @@ pub extern "C" fn mongoac_client_list_databases_async(
     let error = safe_optional_error_as_mut!(error);
     let client = safe_as_ref_with_error!(client, error);
     let session = safe_optional_as_mut!(session);
-    let options = safe_optional_const_bson!(options);
-
-    let opts = match options {
-        Some(ref opts) => Some(safe_error!(
-            mongodb::bson::deserialize_from_slice(opts.as_bytes()),
-            error
-        )),
-        None => None,
-    };
+    let opts = safe_optional_bson_options!(options, error, mongodb::options::ListDatabasesOptions);
 
     let future = client.list_databases_async(session, opts);
     Box::into_raw(Box::new(future))
@@ -512,15 +504,7 @@ pub extern "C" fn mongoac_client_list_databases(
     let error = safe_optional_error_as_mut!(error);
     let client = safe_as_ref_with_error!(client, error);
     let session = safe_optional_as_mut!(session);
-    let options = safe_optional_const_bson!(options);
-
-    let opts = match options {
-        Some(ref opts) => Some(safe_error!(
-            mongodb::bson::deserialize_from_slice(opts.as_bytes()),
-            error
-        )),
-        None => None,
-    };
+    let opts = safe_optional_bson_options!(options, error, mongodb::options::ListDatabasesOptions);
 
     let docs = safe_error!(client.list_databases(session, opts), error);
     safe_error!(BsonT::try_from(&docs), error).into_raw()
@@ -536,15 +520,7 @@ pub extern "C" fn mongoac_client_list_database_names_async(
     let error = safe_optional_error_as_mut!(error);
     let client = safe_as_ref_with_error!(client, error);
     let session = safe_optional_as_mut!(session);
-    let options = safe_optional_const_bson!(options);
-
-    let opts = match options {
-        Some(ref opts) => Some(safe_error!(
-            mongodb::bson::deserialize_from_slice(opts.as_bytes()),
-            error
-        )),
-        None => None,
-    };
+    let opts = safe_optional_bson_options!(options, error, mongodb::options::ListDatabasesOptions);
 
     let future = client.list_database_names_async(session, opts);
     Box::into_raw(Box::new(future))
@@ -560,15 +536,7 @@ pub extern "C" fn mongoac_client_list_database_names(
     let error = safe_optional_error_as_mut!(error);
     let client = safe_as_ref_with_error!(client, error);
     let session = safe_optional_as_mut!(session);
-    let options = safe_optional_const_bson!(options);
-
-    let opts = match options {
-        Some(ref opts) => Some(safe_error!(
-            mongodb::bson::deserialize_from_slice(opts.as_bytes()),
-            error
-        )),
-        None => None,
-    };
+    let opts = safe_optional_bson_options!(options, error, mongodb::options::ListDatabasesOptions);
 
     let names = safe_error!(client.list_database_names(session, opts), error);
     safe_error!(BsonT::try_from(&names), error).into_raw()

@@ -164,25 +164,14 @@ macro_rules! safe_optional_cstr_from_ptr_with_error {
 }
 
 #[macro_export]
-macro_rules! safe_bson {
-    ($ptr:expr, $error:expr) => {{
-        if $ptr.is_null() {
-            $crate::private::safety::invalid_argument(
-                $error,
-                concat!(stringify!($ptr), ": must not be null"),
-            );
-            return Default::default();
-        }
-        $crate::private::bson::BsonT::from($ptr)
-    }};
-}
-
-#[macro_export]
-macro_rules! safe_optional_bson {
-    ($ptr:expr) => {{
-        let ptr = $ptr;
-        match unsafe { ptr.as_mut() } {
-            Some(r) => Some($crate::private::bson::BsonT::from(r)),
+macro_rules! safe_optional_bson_options {
+    ($options:expr, $error:expr, $target:ty) => {{
+        let options = safe_optional_const_bson!($options);
+        match options {
+            Some(ref opts) => Some($crate::safe_error!(
+                ::mongodb::bson::deserialize_from_slice::<$target>(opts.as_bytes()),
+                $error
+            )),
             None => None,
         }
     }};
@@ -191,14 +180,17 @@ macro_rules! safe_optional_bson {
 #[macro_export]
 macro_rules! safe_const_bson {
     ($ptr:expr, $error:expr) => {{
-        if $ptr.is_null() {
-            $crate::private::safety::invalid_argument(
-                $error,
-                concat!(stringify!($ptr), ": must not be null"),
-            );
-            return Default::default();
+        let ptr = $ptr;
+        match unsafe { ptr.as_ref() } {
+            Some(r) => $crate::private::bson::ConstBsonT::from(r),
+            None => {
+                $crate::private::safety::invalid_argument(
+                    $error,
+                    concat!(stringify!($ptr), ": must not be null"),
+                );
+                return Default::default();
+            }
         }
-        $crate::private::bson::ConstBsonT::from($ptr)
     }};
 }
 
