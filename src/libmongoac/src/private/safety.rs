@@ -164,8 +164,8 @@ macro_rules! safe_optional_cstr_from_ptr_with_error {
 }
 
 #[macro_export]
-macro_rules! safe_optional_bson_options {
-    ($options:expr, $error:expr, $target:ty) => {{
+macro_rules! safe_optional_bson_opts_with_error {
+    ($target:ty, $options:expr, $error:expr) => {{
         let options = safe_optional_const_bson!($options);
         match options {
             Some(ref opts) => Some($crate::safe_error!(

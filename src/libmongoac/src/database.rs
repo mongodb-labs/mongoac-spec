@@ -70,7 +70,7 @@ pub extern "C" fn mongoac_client_get_database(
     let error = safe_optional_error_as_mut!(error);
     let client = safe_as_ref_with_error!(client, error);
     let name = safe_cstr_from_ptr_with_error!(name, error);
-    let opts = safe_optional_bson_options!(options, error, DatabaseOptions);
+    let opts = safe_optional_bson_opts_with_error!(DatabaseOptions, options, error);
 
     let db = safe_error!(DatabaseT::new(client, name, opts), error);
     Box::into_raw(Box::new(db))
@@ -91,7 +91,7 @@ pub extern "C" fn mongoac_database_create_collection_async(
     let error = safe_optional_error_as_mut!(error);
     let database = safe_as_ref_with_error!(database, error);
     let name = safe_cstr_from_ptr_with_error!(name, error);
-    let create_opts = safe_optional_bson_options!(options, error, CreateCollectionOptions);
+    let create_opts = safe_optional_bson_opts_with_error!(CreateCollectionOptions, options, error);
 
     let future = database.create_collection_async(name, create_opts);
     Box::into_raw(Box::new(future))

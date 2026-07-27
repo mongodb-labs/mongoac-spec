@@ -92,15 +92,7 @@ pub extern "C" fn mongoac_client_options_set_server_api(
 ) {
     let error = safe_optional_error_as_mut!(error);
     let options = safe_as_mut_with_error!(options, error);
-    let api = safe_optional_const_bson!(api);
+    let api = safe_optional_bson_opts_with_error!(ServerApi, api, error);
 
-    let server_api = match api {
-        Some(ref bson) => Some(safe_error!(
-            mongodb::bson::deserialize_from_slice(bson.as_bytes()),
-            error
-        )),
-        None => None,
-    };
-
-    options.set_server_api(server_api)
+    options.set_server_api(api)
 }
