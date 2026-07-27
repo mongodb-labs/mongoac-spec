@@ -191,7 +191,7 @@ The Rust FFI uses a two-layer architectural design:
     is needed to enforce FFI safety (e.g. null pointer checks, UTF-8 validation, etc.) and translating return values (or
     errors) into their C representations (e.g. `Box::into_raw()`, `safe_error!()`, etc.).
   This layer is tested by Catch2 tests.
-- **Layer 2 (Internal Rust):**: safe Rust implementations of corresponding public API symbols.
+- **Layer 2 (Internal Rust):** safe Rust implementations of corresponding public API symbols.
   Functions are defined as methods of the corresponding `struct` being operated on.
   No `unsafe` blocks are present in Layer 2: all unsafe input validation and C representation conversions are handled by
     Layer 1.
@@ -313,10 +313,10 @@ impl ExampleT {
 
 The mongoac library deliberately reuses the existing BSON C library (`bson2`) in its API.
 
-Unfortunately, `unsafe` blocksc are required when invoking bson API (currently the only expected use of `unsafe` that
+Unfortunately, `unsafe` blocks are required when invoking bson API (currently the only expected use of `unsafe` that
   is not in Layer 1).
 A zero-sized opaque `bson_t` is required, as otherwise reimplementing the `bson_t` struct definition may lead to many
-  undesirable complications such as One Definition Rule violations, redefinitions errors in cbindgen-generated headers,
+  undesirable complications such as One Definition Rule violations, redefinition errors in cbindgen-generated headers,
   complex special-casing in `build.rs`, and more.
 Instead, `u32::from_le_bytes()` and `from_raw_parts()` are used to extract the length data member (due to the lack of
   a `bson_get_len()` function); all other features are utilized using public C API functions.
@@ -954,7 +954,7 @@ Without a `wait*()` function, the worker thread will need to spin-loop or spin-s
   meaningful work can be done.
 The condvar-backed `wait*()` allows the worker thread to more efficiently suspend the thread until new work is made
   available by an async operation spawning a new task in the associated runtime.
-The `make_progress_for*()` variants also allows the worker thread or event loop to efficiently make progress for
+The `make_progress_for*()` variants also allow the worker thread or event loop to efficiently make progress for
   *at least* a given duration without spin-looping.
 
 Unfortunately, `wait*()` can only wait for tasks spawned through `RuntimeT::spawn()` (or a stop request).
@@ -1436,7 +1436,7 @@ Deferred to a later phase. The existing CMake + `uv` + Cargo workflow is suffici
 <a id="deferred-full-uri-type"></a>
 ##### Full mongoac_uri_t with typed getters and setters
 
-A full URI type would require a parallel option store because `ClientOptions` is read-only after construction. This creates maintenance coupling with the `mongodb` crate's `#[non-exhaustive]` fields.
+A full URI type would require a parallel option store because `ClientOptions` is read-only after construction. This creates maintenance coupling with the `mongodb` crate's `#[non_exhaustive]` fields.
 
 <a id="deferred-read-only-uri-type"></a>
 ##### Read-only mongoac_uri_t with getters only
