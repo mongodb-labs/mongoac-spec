@@ -25,315 +25,6 @@ pub struct ClientT {
     command_events: Option<Arc<Mutex<VecDeque<mongodb::event::command::CommandEvent>>>>,
 }
 
-impl ClientT {
-    fn new(conn_str: String) -> Result<ClientT, ErrorT> {
-        let runtime = RuntimeT::new().map_err(|e| {
-            ErrorT::from_mongoac(
-                crate::error::ErrorCodeT::RuntimeError,
-                &format!("runtime creation failed: {e}"),
-            )
-        })?;
-
-        let command_events: Arc<Mutex<VecDeque<mongodb::event::command::CommandEvent>>> =
-            Arc::new(Mutex::new(VecDeque::new()));
-        let events_for_handler = Arc::clone(&command_events);
-
-        let client = runtime.block_on(async move {
-            let mut opts = mongodb::options::ClientOptions::parse(conn_str).await?;
-
-            opts.driver_info = Some(
-                mongodb::options::DriverInfo::builder()
-                    .name("mongoac".to_string())
-                    .version(MONGOAC_VERSION_FULL.to_string())
-                    .platform(MONGOAC_BUILD_PLATFORM.to_string())
-                    .build(),
-            );
-
-            opts.command_event_handler = Some(mongodb::event::EventHandler::callback(
-                move |ev: mongodb::event::command::CommandEvent| {
-                    events_for_handler.lock().push_back(ev);
-                },
-            ));
-
-            mongodb::Client::with_options(opts)
-        })?;
-
-        Ok(ClientT {
-            runtime,
-            inner: client,
-            command_events: Some(command_events),
-        })
-    }
-
-    fn new_with_options(
-        conn_str: String,
-        options: Option<&ClientOptionsT>,
-    ) -> Result<ClientT, ErrorT> {
-        let options = match options {
-            Some(o) => o,
-            None => return Self::new(conn_str),
-        };
-
-        let runtime = RuntimeT::new().map_err(|e| {
-            ErrorT::from_mongoac(
-                crate::error::ErrorCodeT::RuntimeError,
-                &format!("runtime creation failed: {e}"),
-            )
-        })?;
-
-        let command_events: Option<Arc<Mutex<VecDeque<mongodb::event::command::CommandEvent>>>> =
-            if options.capture_command_events() {
-                Some(Arc::new(Mutex::new(VecDeque::new())))
-            } else {
-                None
-            };
-
-        let events_for_handler = command_events.as_ref().map(Arc::clone);
-
-        let client = runtime.block_on(async move {
-            let mut opts = mongodb::options::ClientOptions::parse(conn_str).await?;
-
-            opts.driver_info = Some(
-                mongodb::options::DriverInfo::builder()
-                    .name("mongoac".to_string())
-                    .version(MONGOAC_VERSION_FULL.to_string())
-                    .platform(MONGOAC_BUILD_PLATFORM.to_string())
-                    .build(),
-            );
-
-            if let Some(handler) = events_for_handler {
-                opts.command_event_handler = Some(mongodb::event::EventHandler::callback(
-                    move |ev: mongodb::event::command::CommandEvent| {
-                        handler.lock().push_back(ev);
-                    },
-                ));
-            }
-
-            if let Some(server_api) = options.server_api() {
-                opts.server_api = Some(server_api.clone());
-            }
-
-            mongodb::Client::with_options(opts)
-        })?;
-
-        Ok(ClientT {
-            runtime,
-            inner: client,
-            command_events,
-        })
-    }
-
-    fn append_metadata(
-        &self,
-        name: String,
-        version: Option<String>,
-        platform: Option<String>,
-    ) -> Result<(), mongodb::error::Error> {
-        let driver_info = mongodb::options::DriverInfo::builder()
-            .name(name)
-            .version(version)
-            .platform(platform)
-            .build();
-
-        self.inner.append_metadata(driver_info)
-    }
-
-    pub(crate) fn get_runtime(&self) -> RuntimeT {
-        self.runtime.clone()
-    }
-
-    pub(crate) fn inner(&self) -> &mongodb::Client {
-        &self.inner
-    }
-
-    fn count_command_events(&self) -> usize {
-        self.command_events.as_ref().map_or(0, |q| q.lock().len())
-    }
-
-    fn get_command_event(&self, index: usize) -> Option<RawDocumentBuf> {
-        let guard = self.command_events.as_ref()?;
-        let ev = guard.lock().get(index).cloned()?;
-        mongodb::bson::serialize_to_raw_document_buf(&ev).ok()
-    }
-
-    fn clear_command_events(&mut self, n: usize) {
-        if let Some(q) = &self.command_events {
-            let mut guard = q.lock();
-            let count = n.min(guard.len());
-            guard.drain(..count);
-        }
-    }
-
-    fn list_databases_async(
-        &self,
-        session: Option<&mut ClientSessionT>,
-        options: Option<ListDatabasesOptions>,
-    ) -> FutureT {
-        let client = self.inner.clone();
-        let session_arc = session.map(|s| s.inner.clone());
-
-        spawn!(&self, Bson, async move {
-            if let Some(ref session_arc) = session_arc {
-                let mut guard = session_arc.lock().await;
-                let specs = client
-                    .list_databases()
-                    .with_options(options)
-                    .session(&mut *guard)
-                    .await?;
-                specs_to_bson_array(&specs)
-            } else {
-                let specs = client.list_databases().with_options(options).await?;
-                specs_to_bson_array(&specs)
-            }
-        })
-    }
-
-    fn list_databases(
-        &self,
-        session: Option<&mut ClientSessionT>,
-        options: Option<ListDatabasesOptions>,
-    ) -> Result<RawDocumentBuf, ErrorT> {
-        let session_arc = session.map(|s| s.inner.clone());
-        self.runtime.block_on(async move {
-            if let Some(ref session_arc) = session_arc {
-                let mut guard = session_arc.lock().await;
-                let specs = self
-                    .inner
-                    .list_databases()
-                    .with_options(options)
-                    .session(&mut *guard)
-                    .await?;
-                specs_to_bson_array(&specs)
-            } else {
-                let specs = self.inner.list_databases().with_options(options).await?;
-                specs_to_bson_array(&specs)
-            }
-        })
-    }
-
-    fn list_database_names_async(
-        &self,
-        session: Option<&mut ClientSessionT>,
-        options: Option<ListDatabasesOptions>,
-    ) -> FutureT {
-        let client = self.inner.clone();
-        let session_arc = session.map(|s| s.inner.clone());
-
-        spawn!(&self, Bson, async move {
-            if let Some(ref session_arc) = session_arc {
-                let mut guard = session_arc.lock().await;
-                let names = client
-                    .list_database_names()
-                    .with_options(options)
-                    .session(&mut *guard)
-                    .await?;
-                names_to_bson_array(&names)
-            } else {
-                let names = client.list_database_names().with_options(options).await?;
-                names_to_bson_array(&names)
-            }
-        })
-    }
-
-    fn list_database_names(
-        &self,
-        session: Option<&mut ClientSessionT>,
-        options: Option<ListDatabasesOptions>,
-    ) -> Result<RawDocumentBuf, ErrorT> {
-        let session_arc = session.map(|s| s.inner.clone());
-        self.runtime.block_on(async move {
-            if let Some(ref session_arc) = session_arc {
-                let mut guard = session_arc.lock().await;
-                let names = self
-                    .inner
-                    .list_database_names()
-                    .with_options(options)
-                    .session(&mut *guard)
-                    .await?;
-                names_to_bson_array(&names)
-            } else {
-                let names = self
-                    .inner
-                    .list_database_names()
-                    .with_options(options)
-                    .await?;
-                names_to_bson_array(&names)
-            }
-        })
-    }
-
-    fn start_session_async(&self, options: Option<mongodb::options::SessionOptions>) -> FutureT {
-        let client = self.inner.clone();
-
-        spawn!(&self, ClientSession, async move {
-            let mut builder = client.start_session();
-            if let Some(opts) = options {
-                builder = builder.with_options(opts);
-            }
-            builder.await.map(ClientSessionT::new)
-        })
-    }
-
-    fn start_session(
-        &self,
-        options: Option<mongodb::options::SessionOptions>,
-    ) -> Result<ClientSessionT, mongodb::error::Error> {
-        self.runtime.block_on(async {
-            let mut builder = self.inner.start_session();
-            if let Some(opts) = options {
-                builder = builder.with_options(opts);
-            }
-            let session = builder.await?;
-            Ok(ClientSessionT::new(session))
-        })
-    }
-
-    fn shutdown_async(&self) -> FutureT {
-        let client = self.inner.clone();
-
-        spawn!(&self, Void, async move {
-            client.shutdown().await;
-            Ok::<(), ErrorT>(())
-        })
-    }
-
-    fn shutdown(&self) -> Result<(), ErrorT> {
-        let client = self.inner.clone();
-
-        self.runtime.block_on({
-            async {
-                client.shutdown().await;
-                Ok(())
-            }
-        })
-    }
-}
-
-fn specs_to_bson_array(
-    specs: &[mongodb::results::DatabaseSpecification],
-) -> Result<RawDocumentBuf, ErrorT> {
-    let mut doc = Document::new();
-
-    for (i, spec) in specs.iter().enumerate() {
-        doc.insert(
-            i.to_string(),
-            Bson::Document(bson::serialize_to_document(spec)?),
-        );
-    }
-
-    RawDocumentBuf::try_from(doc).map_err(Into::into)
-}
-
-fn names_to_bson_array(names: &[String]) -> Result<RawDocumentBuf, ErrorT> {
-    let mut doc = Document::new();
-
-    for (i, name) in names.iter().enumerate() {
-        doc.insert(i.to_string(), name);
-    }
-
-    RawDocumentBuf::try_from(doc).map_err(Into::into)
-}
-
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_client_new(conn_str: *const c_char, error: *mut ErrorT) -> *mut ClientT {
     let error = safe_optional_error_as_mut!(error);
@@ -544,4 +235,313 @@ pub extern "C" fn mongoac_client_list_database_names(
 
     let names = safe_error!(client.list_database_names(session, opts), error);
     safe_error!(BsonT::try_from(&names), error).into_raw()
+}
+
+impl ClientT {
+    fn new(conn_str: String) -> Result<ClientT, ErrorT> {
+        let runtime = RuntimeT::new().map_err(|e| {
+            ErrorT::from_mongoac(
+                crate::error::ErrorCodeT::RuntimeError,
+                &format!("runtime creation failed: {e}"),
+            )
+        })?;
+
+        let command_events: Arc<Mutex<VecDeque<mongodb::event::command::CommandEvent>>> =
+            Arc::new(Mutex::new(VecDeque::new()));
+        let events_for_handler = Arc::clone(&command_events);
+
+        let client = runtime.block_on(async move {
+            let mut opts = mongodb::options::ClientOptions::parse(conn_str).await?;
+
+            opts.driver_info = Some(
+                mongodb::options::DriverInfo::builder()
+                    .name("mongoac".to_string())
+                    .version(MONGOAC_VERSION_FULL.to_string())
+                    .platform(MONGOAC_BUILD_PLATFORM.to_string())
+                    .build(),
+            );
+
+            opts.command_event_handler = Some(mongodb::event::EventHandler::callback(
+                move |ev: mongodb::event::command::CommandEvent| {
+                    events_for_handler.lock().push_back(ev);
+                },
+            ));
+
+            mongodb::Client::with_options(opts)
+        })?;
+
+        Ok(ClientT {
+            runtime,
+            inner: client,
+            command_events: Some(command_events),
+        })
+    }
+
+    fn new_with_options(
+        conn_str: String,
+        options: Option<&ClientOptionsT>,
+    ) -> Result<ClientT, ErrorT> {
+        let options = match options {
+            Some(o) => o,
+            None => return Self::new(conn_str),
+        };
+
+        let runtime = RuntimeT::new().map_err(|e| {
+            ErrorT::from_mongoac(
+                crate::error::ErrorCodeT::RuntimeError,
+                &format!("runtime creation failed: {e}"),
+            )
+        })?;
+
+        let command_events: Option<Arc<Mutex<VecDeque<mongodb::event::command::CommandEvent>>>> =
+            if options.capture_command_events() {
+                Some(Arc::new(Mutex::new(VecDeque::new())))
+            } else {
+                None
+            };
+
+        let events_for_handler = command_events.as_ref().map(Arc::clone);
+
+        let client = runtime.block_on(async move {
+            let mut opts = mongodb::options::ClientOptions::parse(conn_str).await?;
+
+            opts.driver_info = Some(
+                mongodb::options::DriverInfo::builder()
+                    .name("mongoac".to_string())
+                    .version(MONGOAC_VERSION_FULL.to_string())
+                    .platform(MONGOAC_BUILD_PLATFORM.to_string())
+                    .build(),
+            );
+
+            if let Some(handler) = events_for_handler {
+                opts.command_event_handler = Some(mongodb::event::EventHandler::callback(
+                    move |ev: mongodb::event::command::CommandEvent| {
+                        handler.lock().push_back(ev);
+                    },
+                ));
+            }
+
+            if let Some(server_api) = options.server_api() {
+                opts.server_api = Some(server_api.clone());
+            }
+
+            mongodb::Client::with_options(opts)
+        })?;
+
+        Ok(ClientT {
+            runtime,
+            inner: client,
+            command_events,
+        })
+    }
+
+    fn append_metadata(
+        &self,
+        name: String,
+        version: Option<String>,
+        platform: Option<String>,
+    ) -> Result<(), mongodb::error::Error> {
+        let driver_info = mongodb::options::DriverInfo::builder()
+            .name(name)
+            .version(version)
+            .platform(platform)
+            .build();
+
+        self.inner.append_metadata(driver_info)
+    }
+
+    pub(crate) fn get_runtime(&self) -> RuntimeT {
+        self.runtime.clone()
+    }
+
+    pub(crate) fn inner(&self) -> &mongodb::Client {
+        &self.inner
+    }
+
+    fn count_command_events(&self) -> usize {
+        self.command_events.as_ref().map_or(0, |q| q.lock().len())
+    }
+
+    fn get_command_event(&self, index: usize) -> Option<RawDocumentBuf> {
+        let guard = self.command_events.as_ref()?;
+        let ev = guard.lock().get(index).cloned()?;
+        mongodb::bson::serialize_to_raw_document_buf(&ev).ok()
+    }
+
+    fn clear_command_events(&mut self, n: usize) {
+        if let Some(q) = &self.command_events {
+            let mut guard = q.lock();
+            let count = n.min(guard.len());
+            guard.drain(..count);
+        }
+    }
+
+    fn list_databases_async(
+        &self,
+        session: Option<&mut ClientSessionT>,
+        options: Option<ListDatabasesOptions>,
+    ) -> FutureT {
+        let client = self.inner.clone();
+        let session_arc = session.map(|s| s.state.clone());
+
+        spawn!(&self, Bson, async move {
+            if let Some(ref session_arc) = session_arc {
+                let mut guard = session_arc.lock().await;
+                let specs = client
+                    .list_databases()
+                    .with_options(options)
+                    .session(&mut *guard)
+                    .await?;
+                specs_to_bson_array(&specs)
+            } else {
+                let specs = client.list_databases().with_options(options).await?;
+                specs_to_bson_array(&specs)
+            }
+        })
+    }
+
+    fn list_databases(
+        &self,
+        session: Option<&mut ClientSessionT>,
+        options: Option<ListDatabasesOptions>,
+    ) -> Result<RawDocumentBuf, ErrorT> {
+        let session_arc = session.map(|s| s.state.clone());
+        self.runtime.block_on(async move {
+            if let Some(ref session_arc) = session_arc {
+                let mut guard = session_arc.lock().await;
+                let specs = self
+                    .inner
+                    .list_databases()
+                    .with_options(options)
+                    .session(&mut *guard)
+                    .await?;
+                specs_to_bson_array(&specs)
+            } else {
+                let specs = self.inner.list_databases().with_options(options).await?;
+                specs_to_bson_array(&specs)
+            }
+        })
+    }
+
+    fn list_database_names_async(
+        &self,
+        session: Option<&mut ClientSessionT>,
+        options: Option<ListDatabasesOptions>,
+    ) -> FutureT {
+        let client = self.inner.clone();
+        let session_arc = session.map(|s| s.state.clone());
+
+        spawn!(&self, Bson, async move {
+            if let Some(ref session_arc) = session_arc {
+                let mut guard = session_arc.lock().await;
+                let names = client
+                    .list_database_names()
+                    .with_options(options)
+                    .session(&mut *guard)
+                    .await?;
+                strings_to_bson(&names)
+            } else {
+                let names = client.list_database_names().with_options(options).await?;
+                strings_to_bson(&names)
+            }
+        })
+    }
+
+    fn list_database_names(
+        &self,
+        session: Option<&mut ClientSessionT>,
+        options: Option<ListDatabasesOptions>,
+    ) -> Result<RawDocumentBuf, ErrorT> {
+        let session_arc = session.map(|s| s.state.clone());
+        self.runtime.block_on(async move {
+            if let Some(ref session_arc) = session_arc {
+                let mut guard = session_arc.lock().await;
+                let names = self
+                    .inner
+                    .list_database_names()
+                    .with_options(options)
+                    .session(&mut *guard)
+                    .await?;
+                strings_to_bson(&names)
+            } else {
+                let names = self
+                    .inner
+                    .list_database_names()
+                    .with_options(options)
+                    .await?;
+                strings_to_bson(&names)
+            }
+        })
+    }
+
+    fn start_session_async(&self, options: Option<mongodb::options::SessionOptions>) -> FutureT {
+        let client = self.inner.clone();
+
+        spawn!(&self, ClientSession, async move {
+            let mut builder = client.start_session();
+            if let Some(opts) = options {
+                builder = builder.with_options(opts);
+            }
+            builder.await.map(ClientSessionT::new)
+        })
+    }
+
+    fn start_session(
+        &self,
+        options: Option<mongodb::options::SessionOptions>,
+    ) -> Result<ClientSessionT, mongodb::error::Error> {
+        self.runtime.block_on(async {
+            let mut builder = self.inner.start_session();
+            if let Some(opts) = options {
+                builder = builder.with_options(opts);
+            }
+            let session = builder.await?;
+            Ok(ClientSessionT::new(session))
+        })
+    }
+
+    fn shutdown_async(&self) -> FutureT {
+        let client = self.inner.clone();
+
+        spawn!(&self, Void, async move {
+            client.shutdown().await;
+            Ok::<(), ErrorT>(())
+        })
+    }
+
+    fn shutdown(&self) -> Result<(), ErrorT> {
+        let client = self.inner.clone();
+
+        self.runtime.block_on({
+            async {
+                client.shutdown().await;
+                Ok(())
+            }
+        })
+    }
+}
+
+fn specs_to_bson_array(
+    specs: &[mongodb::results::DatabaseSpecification],
+) -> Result<RawDocumentBuf, ErrorT> {
+    let mut doc = Document::new();
+
+    for (i, spec) in specs.iter().enumerate() {
+        doc.insert(
+            i.to_string(),
+            Bson::Document(bson::serialize_to_document(spec)?),
+        );
+    }
+
+    RawDocumentBuf::try_from(doc).map_err(Into::into)
+}
+
+pub(crate) fn strings_to_bson(names: &[String]) -> Result<RawDocumentBuf, ErrorT> {
+    let mut doc = Document::new();
+
+    for (i, name) in names.iter().enumerate() {
+        doc.insert(i.to_string(), name);
+    }
+
+    RawDocumentBuf::try_from(doc).map_err(Into::into)
 }

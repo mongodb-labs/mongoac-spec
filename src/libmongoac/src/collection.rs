@@ -24,8 +24,8 @@ pub extern "C" fn mongoac_database_get_collection(
     let error = safe_optional_error_as_mut!(error);
     let database = safe_as_ref_with_error!(database, error);
     let name = safe_cstr_from_ptr_with_error!(name, error);
-    let coll = CollectionT::new(database, name);
-    Box::into_raw(Box::new(coll))
+
+    Box::into_raw(Box::new(CollectionT::new(database, name)))
 }
 
 #[unsafe(no_mangle)]

@@ -1,3 +1,4 @@
+use crate::client_session::ClientSessionT;
 use crate::error::ErrorT;
 use crate::future::FutureT;
 use crate::private::bson::{BsonT, bson_t};
@@ -5,7 +6,6 @@ use crate::private::macros::*;
 use crate::runtime::RuntimeT;
 use crate::spawn;
 
-use mongodb::ClientSession;
 use mongodb::bson::{RawDocument, RawDocumentBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex as AsyncMutex;
@@ -14,7 +14,7 @@ enum InnerCursor {
     Plain(mongodb::Cursor<RawDocumentBuf>),
     Session {
         cursor: mongodb::SessionCursor<RawDocumentBuf>,
-        session: Arc<AsyncMutex<ClientSession>>,
+        session: ClientSessionT,
     },
 }
 
@@ -23,7 +23,7 @@ impl InnerCursor {
         match self {
             InnerCursor::Plain(c) => c.advance().await,
             InnerCursor::Session { cursor, session } => {
-                let mut guard = session.lock().await;
+                let mut guard = session.state().lock().await;
                 cursor.advance(&mut guard).await
             }
         }
@@ -53,7 +53,7 @@ impl CursorT {
 
     pub(crate) fn new_with_session(
         cursor: mongodb::SessionCursor<RawDocumentBuf>,
-        session: Arc<AsyncMutex<ClientSession>>,
+        session: ClientSessionT,
         runtime: RuntimeT,
     ) -> Self {
         Self {
