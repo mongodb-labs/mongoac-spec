@@ -142,7 +142,7 @@ impl ClientT {
         self.runtime.clone()
     }
 
-    pub(crate) fn client(&self) -> &mongodb::Client {
+    pub(crate) fn inner(&self) -> &mongodb::Client {
         &self.inner
     }
 

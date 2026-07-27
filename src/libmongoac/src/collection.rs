@@ -7,27 +7,12 @@ use crate::private::bson::bson_t;
 use crate::private::macros::*;
 use crate::runtime::RuntimeT;
 use crate::spawn;
+use mongodb::Collection;
 use mongodb::bson::RawDocumentBuf;
 
 pub struct CollectionT {
-    inner: mongodb::Collection<RawDocumentBuf>,
+    inner: Collection<RawDocumentBuf>,
     runtime: RuntimeT,
-}
-
-impl CollectionT {
-    fn new(db: &DatabaseT, name: String) -> Self {
-        let coll = db.database().collection::<RawDocumentBuf>(&name);
-
-        CollectionT {
-            inner: coll,
-            runtime: db.get_runtime(),
-        }
-    }
-
-    fn drop_async(&self) -> FutureT {
-        let coll = self.inner.clone();
-        spawn!(self, Void, async move { coll.drop().await })
-    }
 }
 
 #[unsafe(no_mangle)]
@@ -59,4 +44,20 @@ pub extern "C" fn mongoac_collection_drop_async(
 
     let future = collection.drop_async();
     Box::into_raw(Box::new(future))
+}
+
+impl CollectionT {
+    fn new(db: &DatabaseT, name: String) -> Self {
+        let coll = db.inner().collection::<RawDocumentBuf>(&name);
+
+        CollectionT {
+            inner: coll,
+            runtime: db.get_runtime(),
+        }
+    }
+
+    fn drop_async(&self) -> FutureT {
+        let coll = self.inner.clone();
+        spawn!(self, Void, async move { coll.drop().await })
+    }
 }

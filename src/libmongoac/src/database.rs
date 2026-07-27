@@ -6,58 +6,13 @@ use crate::runtime::RuntimeT;
 use crate::spawn;
 
 use crate::client::ClientT;
+use mongodb::Database;
 use mongodb::options::{CreateCollectionOptions, DatabaseOptions};
 use std::ffi::c_char;
 
 pub struct DatabaseT {
-    inner: mongodb::Database,
+    inner: Database,
     runtime: RuntimeT,
-}
-
-impl DatabaseT {
-    fn new(
-        client: &ClientT,
-        name: String,
-        options: Option<DatabaseOptions>,
-    ) -> Result<Self, mongodb::bson::error::Error> {
-        let db = match options {
-            Some(opts) => client.client().database_with_options(&name, opts),
-            None => client.client().database(&name),
-        };
-
-        Ok(DatabaseT {
-            inner: db,
-            runtime: client.get_runtime(),
-        })
-    }
-
-    pub(crate) fn database(&self) -> &mongodb::Database {
-        &self.inner
-    }
-
-    pub(crate) fn get_runtime(&self) -> RuntimeT {
-        self.runtime.clone()
-    }
-
-    fn create_collection_async(
-        &self,
-        name: String,
-        options: Option<mongodb::options::CreateCollectionOptions>,
-    ) -> FutureT {
-        let db = self.inner.clone();
-        spawn!(self, Void, async move {
-            let mut action = db.create_collection(name);
-            if let Some(opts) = options {
-                action = action.with_options(opts);
-            }
-            action.await
-        })
-    }
-
-    fn drop_async(&self) -> FutureT {
-        let db = self.inner.clone();
-        spawn!(self, Void, async move { db.drop().await })
-    }
 }
 
 #[unsafe(no_mangle)]
@@ -107,4 +62,56 @@ pub extern "C" fn mongoac_database_drop_async(
 
     let future = database.drop_async();
     Box::into_raw(Box::new(future))
+}
+
+impl DatabaseT {
+    fn new(
+        client: &ClientT,
+        name: String,
+        options: Option<DatabaseOptions>,
+    ) -> Result<Self, mongodb::bson::error::Error> {
+        let db = match options {
+            Some(opts) => client.inner().database_with_options(&name, opts),
+            None => client.inner().database(&name),
+        };
+
+        Ok(DatabaseT {
+            inner: db,
+            runtime: client.get_runtime(),
+        })
+    }
+
+    pub(crate) fn inner(&self) -> &Database {
+        &self.inner
+    }
+
+    pub(crate) fn get_runtime(&self) -> RuntimeT {
+        self.runtime.clone()
+    }
+
+    fn create_collection_async(
+        &self,
+        name: String,
+        options: Option<mongodb::options::CreateCollectionOptions>,
+    ) -> FutureT {
+        spawn!(self, Void, {
+            let db = self.inner.clone();
+
+            async move {
+                let mut action = db.create_collection(name);
+                if let Some(opts) = options {
+                    action = action.with_options(opts);
+                }
+                action.await
+            }
+        })
+    }
+
+    fn drop_async(&self) -> FutureT {
+        spawn!(self, Void, {
+            let db = self.inner.clone();
+
+            async move { db.drop().await }
+        })
+    }
 }
