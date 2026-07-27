@@ -79,7 +79,9 @@ impl From<&BsonT> for ConstBsonT {
 
 impl From<BsonT> for *mut bson_t {
     fn from(bson: BsonT) -> Self {
-        bson.0
+        let ptr = bson.0;
+        std::mem::forget(bson); // Transfer ownership to caller.
+        ptr
     }
 }
 

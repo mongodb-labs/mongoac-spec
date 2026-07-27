@@ -5,6 +5,9 @@
 #include <mongoac/client.h>
 #include <mongoac/error.h>
 #include <mongoac/future.h>
+#include <mongoac/runtime.h>
+
+#include <string>
 
 TEST_CASE("list_databases_async", "[mongoac][client]")
 {
@@ -79,4 +82,38 @@ TEST_CASE("list_database_names_async", "[mongoac][client]")
       mongoac_future_destroy(future);
       mongoac_client_destroy(client);
    }
+}
+
+TEST_CASE("list_databases_async returns valid BSON", "[mongoac][client][live-server]")
+{
+   auto const error = mongoac_error_new();
+   auto const client =
+      mongoac_client_new("mongodb://localhost:27017/?serverSelectionTimeoutMS=2000", nullptr);
+   REQUIRE(client != nullptr);
+
+   auto const runtime = mongoac_client_get_runtime(client);
+   REQUIRE(runtime != nullptr);
+
+   auto const future = mongoac_client_list_databases_async(client, nullptr, nullptr, error);
+   REQUIRE(future != nullptr);
+
+   mongoac_runtime_block_on(runtime, future, error);
+   REQUIRE(mongoac_error_code(error) == MONGOAC_ERROR_CODE_OK);
+
+   bson_t *const result = mongoac_future_get_bson(future, error);
+   REQUIRE(mongoac_error_code(error) == MONGOAC_ERROR_CODE_OK);
+   REQUIRE(result != nullptr);
+
+   // Regression test: verify `mongoac_future_get_bson` returns a valid pointer.
+   char *const json = bson_as_relaxed_extended_json(result, nullptr);
+   REQUIRE(json != nullptr);
+   // list_databases returns an indexed array: {"0": { ... }, ...}.
+   CHECK_THAT(std::string(json), Catch::Matchers::ContainsSubstring("\"0\""));
+   bson_free(json);
+
+   bson_destroy(result);
+   mongoac_future_destroy(future);
+   mongoac_runtime_destroy(runtime);
+   mongoac_client_destroy(client);
+   mongoac_error_destroy(error);
 }
