@@ -397,7 +397,7 @@ pub extern "C" fn mongoac_client_get_command_event(
     let client = safe_as_ref!(client);
 
     match client.get_command_event(index) {
-        Some(doc) => safe_error!(BsonT::try_from(&doc), error).into(),
+        Some(doc) => safe_error!(BsonT::try_from(&doc), error).into_raw(),
         None => Default::default(),
     }
 }
@@ -523,7 +523,7 @@ pub extern "C" fn mongoac_client_list_databases(
     };
 
     let docs = safe_error!(client.list_databases(session, opts), error);
-    safe_error!(BsonT::try_from(&docs), error).into()
+    safe_error!(BsonT::try_from(&docs), error).into_raw()
 }
 
 #[unsafe(no_mangle)]
@@ -571,5 +571,5 @@ pub extern "C" fn mongoac_client_list_database_names(
     };
 
     let names = safe_error!(client.list_database_names(session, opts), error);
-    safe_error!(BsonT::try_from(&names), error).into()
+    safe_error!(BsonT::try_from(&names), error).into_raw()
 }

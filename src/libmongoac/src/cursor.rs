@@ -117,7 +117,7 @@ pub extern "C" fn mongoac_cursor_get_document(
     let error = safe_optional_error_as_mut!(error);
     let cursor = safe_as_ref_with_error!(cursor, error);
 
-    safe_error!(BsonT::try_from(&cursor.get_document_bson()), error).into()
+    safe_error!(BsonT::try_from(&cursor.get_document_bson()), error).into_raw()
 }
 
 #[unsafe(no_mangle)]

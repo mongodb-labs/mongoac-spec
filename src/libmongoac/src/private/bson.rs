@@ -59,9 +59,11 @@ impl ConstBsonT {
     }
 }
 
-impl From<&mut bson_t> for BsonT {
-    fn from(bson: &mut bson_t) -> Self {
-        Self(bson)
+impl BsonT {
+    pub(crate) fn into_raw(self) -> *mut bson_t {
+        let ptr = self.0;
+        std::mem::forget(self); // Release ownership.
+        ptr
     }
 }
 
@@ -74,14 +76,6 @@ impl From<&bson_t> for ConstBsonT {
 impl From<&BsonT> for ConstBsonT {
     fn from(bson: &BsonT) -> Self {
         Self(bson.0)
-    }
-}
-
-impl From<BsonT> for *mut bson_t {
-    fn from(bson: BsonT) -> Self {
-        let ptr = bson.0;
-        std::mem::forget(bson); // Transfer ownership to caller.
-        ptr
     }
 }
 

@@ -51,7 +51,7 @@ pub extern "C" fn mongoac_future_get_bson(
     let future = safe_as_ref_with_error!(future, error);
 
     let doc = safe_error!(future.get_bson(), error);
-    safe_error!(BsonT::try_from(doc), error).into()
+    safe_error!(BsonT::try_from(doc), error).into_raw()
 }
 
 #[unsafe(no_mangle)]
