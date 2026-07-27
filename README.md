@@ -791,7 +791,7 @@ The Rust driver tracks `operationTime` from every server response (including err
 Synchronous accessors (`get_operation_time`, `advance_operation_time`, `get_cluster_time`, `advance_cluster_time`, `get_causal_consistency`) will exist for cross-session token propagation and acquire the session mutex via `blocking_lock()`.
 
 > [!NOTE]
-> **Known limitation:** Due to an upstream Rust driver gap, `afterClusterTime` is not sent on write commands in causally-consistent sessions outside transactions. The `operationTime` from write responses is still captured, so subsequent reads carry the correct value, but the server cannot enforce causal ordering via oplog waiting on writes. This cannot be fixed in the FFI layer.
+> **Known limitation:** Until [RUST-2412](https://jira.mongodb.org/browse/RUST-2412) is released, `afterClusterTime` is not sent on write commands in causally-consistent sessions outside transactions. The `operationTime` from write responses is still captured, so subsequent reads carry the correct value, but the server cannot enforce causal ordering via oplog waiting on writes. This cannot be fixed in the FFI layer.
 
 Explicit sessions are required for causal consistency — operations without a session parameter are non-causally-consistent.
 
