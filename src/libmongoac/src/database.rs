@@ -406,10 +406,7 @@ impl From<DatabaseOptionsT> for DatabaseOptions {
     fn from(opts: DatabaseOptionsT) -> Self {
         DatabaseOptions::builder()
             .read_concern(opts.read_concern)
-            .selection_criteria(
-                opts.read_preference
-                    .map(SelectionCriteria::ReadPreference),
-            )
+            .selection_criteria(opts.read_preference.map(SelectionCriteria::ReadPreference))
             .write_concern(opts.write_concern)
             .build()
     }
