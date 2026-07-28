@@ -17,6 +17,7 @@ else ()
 endif ()
 
 add_executable (test-libmongoac)
+target_compile_features (test-libmongoac PRIVATE cxx_std_17)
 target_link_libraries (test-libmongoac PRIVATE "${mongoac_target}" "$<LINK_ONLY:${bson_target}>" Catch2::Catch2WithMain)
 target_include_directories (test-libmongoac
   # Suppress compiler warnings emitted by bson headers.

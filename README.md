@@ -53,14 +53,14 @@ The following executables are **new** required external dependencies or **strict
 - `cbindgen`: 1.85 or newer.
 - `patchelf`: Linux only.
 - C Compiler (header validation only): C99 or newer, see `CMakeLists.txt`.
-- C++ Compiler (tests only): C++14 or newer, see `CMakeLists.txt`.
+- C++ Compiler (tests only): C++17 or newer, see `CMakeLists.txt`.
 
 All Rust crate dependencies are automatically obtained by `cargo`.
 This is similar to how CMake obtains Catch2 and `uv` obtains Python packages.
 
 The C compiler is required for `CMAKE_VERIFY_INTERFACE_HEADERS`, but is not strictly required to build the mongoac
   library (handled entirely by Cargo).
-The C++ compiler is only required to build the Catch2 test suite (same C++14 requirement as in the C++ Driver).
+The C++ compiler is only required to build the Catch2 test suite (with C++17).
 The stricter C/C++ toolchain and CMake version requirements are expected to be acceptable for users given the
   comparatively more-demanding Rust toolchain requirements.
 
