@@ -116,7 +116,7 @@ bson_array_contains_string(const bson_t *array, const char *str)
 
 } // namespace
 
-TEST_CASE("create_collection_async", "[mongoac][database]")
+TEST_CASE("create_collection", "[mongoac][database]")
 {
    auto const client =
       make_owning_ptr(mongoac_client_new("mongodb://localhost:27017", nullptr), &mongoac_client_destroy);
