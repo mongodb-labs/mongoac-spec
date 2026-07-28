@@ -3,6 +3,7 @@ use crate::database::DatabaseT;
 use crate::error::ErrorT;
 use crate::future::FutureT;
 use crate::private::bson::bson_t;
+use crate::private::drop_collection_options::DropCollectionOptionsT;
 use crate::private::macros::*;
 use crate::runtime::RuntimeT;
 use crate::spawn;
@@ -40,38 +41,32 @@ pub extern "C" fn mongoac_collection_destroy(collection: *mut CollectionT) {
 pub extern "C" fn mongoac_collection_drop_async(
     collection: *const CollectionT,
     session: *mut ClientSessionT,
-    _options: *const bson_t,
+    options: *const bson_t,
     error: *mut ErrorT,
 ) -> *mut FutureT {
     let error = safe_optional_error_as_mut!(error);
     let collection = safe_as_ref_with_error!(collection, error);
     let session = safe_optional_as_mut!(session);
+    let options = safe_optional_bson_opts_with_error!(DropCollectionOptionsT, options, error);
 
-    // let options = safe_optional_bson_opts_with_error!(DropCollectionOptions, options, error);
-    //  - write_concern: serde(skip_serializing)
-    //  - encrypted_fields: serde(skip_serializing)
-    let options = None;
-
-    Box::into_raw(Box::new(collection.drop_async(session, options)))
+    Box::into_raw(Box::new(
+        collection.drop_async(session, options.map(Into::into)),
+    ))
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_collection_drop(
     collection: *const CollectionT,
     session: *mut ClientSessionT,
-    _options: *const bson_t,
+    options: *const bson_t,
     error: *mut ErrorT,
 ) {
     let error = safe_optional_error_as_mut!(error);
     let collection = safe_as_ref_with_error!(collection, error);
     let session = safe_optional_as_mut!(session);
+    let options = safe_optional_bson_opts_with_error!(DropCollectionOptionsT, options, error);
 
-    // let options = safe_optional_bson_opts_with_error!(DropCollectionOptions, options, error);
-    //  - write_concern: serde(skip_serializing)
-    //  - encrypted_fields: serde(skip_serializing)
-    let options = None;
-
-    safe_error!(collection.drop(session, options), error);
+    safe_error!(collection.drop(session, options.map(Into::into)), error);
 }
 
 impl CollectionT {
