@@ -39,14 +39,14 @@ impl InnerCursor {
 
 #[derive(Clone)]
 pub struct CursorT {
-    inner: Arc<AsyncMutex<InnerCursor>>,
+    state: Arc<AsyncMutex<InnerCursor>>,
     runtime: RuntimeT,
 }
 
 impl CursorT {
     pub(crate) fn new(cursor: mongodb::Cursor<RawDocumentBuf>, runtime: RuntimeT) -> Self {
         Self {
-            inner: Arc::new(AsyncMutex::new(InnerCursor::Plain(cursor))),
+            state: Arc::new(AsyncMutex::new(InnerCursor::Plain(cursor))),
             runtime,
         }
     }
@@ -57,18 +57,18 @@ impl CursorT {
         runtime: RuntimeT,
     ) -> Self {
         Self {
-            inner: Arc::new(AsyncMutex::new(InnerCursor::Session { cursor, session })),
+            state: Arc::new(AsyncMutex::new(InnerCursor::Session { cursor, session })),
             runtime,
         }
     }
 
     fn next_sync(&self) -> Result<bool, mongodb::error::Error> {
         self.runtime
-            .block_on(async { self.inner.lock().await.advance().await })
+            .block_on(async { self.state.lock().await.advance().await })
     }
 
     fn next_async(&self) -> FutureT {
-        let inner = self.inner.clone();
+        let inner = self.state.clone();
         spawn!(
             self,
             Bool,
@@ -78,7 +78,7 @@ impl CursorT {
 
     fn get_document_bson(&self) -> RawDocumentBuf {
         self.runtime.block_on(async {
-            let cursor = self.inner.lock().await;
+            let cursor = self.state.lock().await;
             cursor.current().to_owned()
         })
     }
