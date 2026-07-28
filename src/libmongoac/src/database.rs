@@ -4,6 +4,7 @@ use crate::error::ErrorT;
 use crate::future::FutureT;
 use crate::private::bson::{BsonT, bson_t};
 use crate::private::database_options::DatabaseOptionsT;
+use crate::private::drop_database_options::DropDatabaseOptionsT;
 use crate::private::macros::*;
 use crate::runtime::RuntimeT;
 use crate::spawn;
@@ -46,36 +47,32 @@ pub extern "C" fn mongoac_database_destroy(database: *mut DatabaseT) {
 pub extern "C" fn mongoac_database_drop_async(
     database: *const DatabaseT,
     session: *mut ClientSessionT,
-    _options: *const bson_t,
+    options: *const bson_t,
     error: *mut ErrorT,
 ) -> *mut FutureT {
     let error = safe_optional_error_as_mut!(error);
     let database = safe_as_ref_with_error!(database, error);
     let session = safe_optional_as_mut!(session);
+    let options = safe_optional_bson_opts_with_error!(DropDatabaseOptionsT, options, error);
 
-    // let options = safe_optional_bson_opts_with_error!(DropDatabaseOptions, options, error);
-    // - write_concern: serde(skip_serializing)
-    let options = None;
-
-    Box::into_raw(Box::new(database.drop_async(session, options)))
+    Box::into_raw(Box::new(
+        database.drop_async(session, options.map(Into::into)),
+    ))
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_database_drop(
     database: *const DatabaseT,
     session: *mut ClientSessionT,
-    _options: *const bson_t,
+    options: *const bson_t,
     error: *mut ErrorT,
 ) {
     let error = safe_optional_error_as_mut!(error);
     let database = safe_as_ref_with_error!(database, error);
     let session = safe_optional_as_mut!(session);
+    let options = safe_optional_bson_opts_with_error!(DropDatabaseOptionsT, options, error);
 
-    // let options = safe_optional_bson_opts_with_error!(DropDatabaseOptions, options, error);
-    // - write_concern: serde(skip_serializing)
-    let options = None;
-
-    safe_error!(database.drop(session, options), error);
+    safe_error!(database.drop(session, options.map(Into::into)), error);
 }
 
 #[unsafe(no_mangle)]
