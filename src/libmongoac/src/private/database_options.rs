@@ -4,7 +4,7 @@ use mongodb::options::{
 use serde::Deserialize;
 
 #[derive(Deserialize)]
-pub(crate) struct DatabaseOptionsT {
+pub struct DatabaseOptionsT {
     #[serde(alias = "readConcern")]
     read_concern: Option<ReadConcern>,
 
