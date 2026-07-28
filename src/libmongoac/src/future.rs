@@ -5,6 +5,7 @@ use crate::private::bson::{BsonT, bson_t};
 use crate::private::macros::*;
 use crate::runtime::RuntimeT;
 
+use mongodb::bson::RawDocumentBuf;
 use parking_lot::Mutex;
 
 use std::future::{Future, poll_fn};
@@ -64,7 +65,7 @@ pub extern "C" fn mongoac_future_get_void(future: *const FutureT, error: *mut Er
 
 pub(crate) enum FutureValue {
     Bool(FutureValueType<bool>),
-    Bson(FutureValueType<mongodb::bson::RawDocumentBuf>),
+    Bson(FutureValueType<RawDocumentBuf>),
     ClientSession(FutureValueType<ClientSessionT>),
     Cursor(FutureValueType<CursorT>),
     Int32(FutureValueType<i32>),
@@ -119,7 +120,7 @@ impl FutureT {
         future_value_result!(self, Bool, "bool")
     }
 
-    pub(crate) fn get_bson(&self) -> Result<&mongodb::bson::RawDocumentBuf, ErrorT> {
+    pub(crate) fn get_bson(&self) -> Result<&RawDocumentBuf, ErrorT> {
         future_value_result!(self, Bson, "bson")
     }
 

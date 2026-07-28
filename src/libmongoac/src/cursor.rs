@@ -10,114 +10,10 @@ use mongodb::bson::{RawDocument, RawDocumentBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex as AsyncMutex;
 
-enum InnerCursor {
-    Plain(mongodb::Cursor<RawDocumentBuf>),
-    Session {
-        cursor: mongodb::SessionCursor<RawDocumentBuf>,
-        session: ClientSessionT,
-    },
-}
-
-impl InnerCursor {
-    async fn advance(&mut self) -> Result<bool, mongodb::error::Error> {
-        match self {
-            InnerCursor::Plain(c) => c.advance().await,
-            InnerCursor::Session { cursor, session } => {
-                let mut guard = session.state().lock().await;
-                cursor.advance(&mut guard).await
-            }
-        }
-    }
-
-    fn current(&self) -> &RawDocument {
-        match self {
-            InnerCursor::Plain(c) => c.current(),
-            InnerCursor::Session { cursor, .. } => cursor.current(),
-        }
-    }
-}
-
 #[derive(Clone)]
 pub struct CursorT {
-    state: Arc<AsyncMutex<InnerCursor>>,
+    state: Arc<AsyncMutex<CursorState>>,
     runtime: RuntimeT,
-}
-
-impl CursorT {
-    pub(crate) fn new(cursor: mongodb::Cursor<RawDocumentBuf>, runtime: RuntimeT) -> Self {
-        Self {
-            state: Arc::new(AsyncMutex::new(InnerCursor::Plain(cursor))),
-            runtime,
-        }
-    }
-
-    pub(crate) fn new_with_session(
-        cursor: mongodb::SessionCursor<RawDocumentBuf>,
-        session: ClientSessionT,
-        runtime: RuntimeT,
-    ) -> Self {
-        Self {
-            state: Arc::new(AsyncMutex::new(InnerCursor::Session { cursor, session })),
-            runtime,
-        }
-    }
-
-    fn next_sync(&self) -> Result<bool, mongodb::error::Error> {
-        self.runtime
-            .block_on(async { self.state.lock().await.advance().await })
-    }
-
-    fn next_async(&self) -> FutureT {
-        let inner = self.state.clone();
-        spawn!(
-            self,
-            Bool,
-            async move { inner.lock().await.advance().await }
-        )
-    }
-
-    fn get_document_bson(&self) -> RawDocumentBuf {
-        self.runtime.block_on(async {
-            let cursor = self.state.lock().await;
-            cursor.current().to_owned()
-        })
-    }
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn mongoac_cursor_destroy(cursor: *mut CursorT) {
-    safe_drop!(cursor);
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn mongoac_cursor_next(cursor: *mut CursorT, error: *mut ErrorT) -> bool {
-    let error = safe_optional_error_as_mut!(error);
-    let cursor = safe_as_mut_with_error!(cursor, error);
-
-    safe_error!(cursor.next_sync(), error)
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn mongoac_cursor_next_async(
-    cursor: *mut CursorT,
-    error: *mut ErrorT,
-) -> *mut FutureT {
-    let error = safe_optional_error_as_mut!(error);
-    let cursor = safe_as_ref_with_error!(cursor, error);
-
-    let future = cursor.next_async();
-    Box::into_raw(Box::new(future))
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn mongoac_cursor_get_document(
-    cursor: *const CursorT,
-    error: *mut ErrorT,
-) -> *mut bson_t {
-    let error = safe_optional_error_as_mut!(error);
-    let cursor = safe_as_ref_with_error!(cursor, error);
-
-    safe_error!(BsonT::try_from(&cursor.get_document_bson()), error).into_raw()
 }
 
 #[unsafe(no_mangle)]
@@ -129,4 +25,130 @@ pub extern "C" fn mongoac_future_get_cursor(
     let future = safe_as_ref_with_error!(future, error);
     let cursor = safe_error!(future.get_cursor(), error);
     Box::into_raw(Box::new(cursor.clone()))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_cursor_destroy(cursor: *mut CursorT) {
+    safe_drop!(cursor);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_cursor_clone(cursor: *const CursorT) -> *mut CursorT {
+    Box::into_raw(Box::new(safe_as_ref!(cursor).clone()))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_cursor_next(cursor: *const CursorT, error: *mut ErrorT) -> bool {
+    let error = safe_optional_error_as_mut!(error);
+    let cursor = safe_as_ref_with_error!(cursor, error);
+
+    safe_error!(cursor.next(), error)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_cursor_next_async(
+    cursor: *const CursorT,
+    error: *mut ErrorT,
+) -> *mut FutureT {
+    let error = safe_optional_error_as_mut!(error);
+    let cursor = safe_as_ref_with_error!(cursor, error);
+
+    Box::into_raw(Box::new(cursor.next_async()))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_cursor_current_async(
+    cursor: *const CursorT,
+    error: *mut ErrorT,
+) -> *mut FutureT {
+    let error = safe_optional_error_as_mut!(error);
+    let cursor = safe_as_ref_with_error!(cursor, error);
+
+    Box::into_raw(Box::new(cursor.current_async()))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_cursor_current(
+    cursor: *const CursorT,
+    error: *mut ErrorT,
+) -> *mut bson_t {
+    let error = safe_optional_error_as_mut!(error);
+    let cursor = safe_as_ref_with_error!(cursor, error);
+
+    safe_error!(BsonT::try_from(&cursor.current()), error).into_raw()
+}
+
+impl CursorT {
+    pub(crate) fn new(cursor: mongodb::Cursor<RawDocumentBuf>, runtime: RuntimeT) -> Self {
+        Self {
+            state: Arc::new(AsyncMutex::new(CursorState::Plain(cursor))),
+            runtime,
+        }
+    }
+
+    pub(crate) fn new_with_session(
+        cursor: mongodb::SessionCursor<RawDocumentBuf>,
+        session: ClientSessionT,
+        runtime: RuntimeT,
+    ) -> Self {
+        Self {
+            state: Arc::new(AsyncMutex::new(CursorState::Session { cursor, session })),
+            runtime,
+        }
+    }
+
+    fn next_async(&self) -> FutureT {
+        let state = self.state.clone();
+
+        spawn!(
+            self,
+            Bool,
+            async move { state.lock().await.advance().await }
+        )
+    }
+
+    fn next(&self) -> Result<bool, mongodb::error::Error> {
+        self.runtime
+            .block_on(async { self.state.lock().await.advance().await })
+    }
+
+    fn current_async(&self) -> FutureT {
+        let state = self.state.clone();
+
+        spawn!(self, Bson, async move {
+            Ok::<_, ErrorT>(state.lock().await.current().to_owned())
+        })
+    }
+
+    fn current(&self) -> RawDocumentBuf {
+        self.runtime
+            .block_on(async { self.state.lock().await.current().to_owned() })
+    }
+}
+
+enum CursorState {
+    Plain(mongodb::Cursor<RawDocumentBuf>),
+    Session {
+        cursor: mongodb::SessionCursor<RawDocumentBuf>,
+        session: ClientSessionT,
+    },
+}
+
+impl CursorState {
+    async fn advance(&mut self) -> Result<bool, mongodb::error::Error> {
+        match self {
+            CursorState::Plain(c) => c.advance().await,
+            CursorState::Session { cursor, session } => {
+                let mut guard = session.state().lock().await;
+                cursor.advance(&mut guard).await
+            }
+        }
+    }
+
+    fn current(&self) -> &RawDocument {
+        match self {
+            CursorState::Plain(c) => c.current(),
+            CursorState::Session { cursor, .. } => cursor.current(),
+        }
+    }
 }
