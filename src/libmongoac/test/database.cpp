@@ -16,108 +16,17 @@
 #include <mongoac/client.h>
 #include <mongoac/future.h>
 #include <mongoac/runtime.h>
+#include <test_util/bson.hpp>
+#include <test_util/owning_ptr.hpp>
 
 #include <array>
-#include <cstring>
 
-namespace
-{
-
-template <typename T, typename D> class owning_ptr
-{
- private:
-   T *_ptr;
-   D *_destroy;
-
- public:
-   ~owning_ptr()
-   {
-      _destroy(_ptr);
-   }
-
-   owning_ptr(owning_ptr &&other) noexcept : _ptr{other._ptr}, _destroy{other._destroy}
-   {
-      other._ptr = nullptr;
-      other._destroy = nullptr;
-   }
-
-   owning_ptr &
-   operator=(owning_ptr &&other) noexcept
-   {
-      auto tmp = std::move(other);
-      tmp.swap(*this);
-      return *this;
-   }
-
-   owning_ptr(owning_ptr const &other) = delete;
-   owning_ptr &
-   operator=(owning_ptr const &other) = delete;
-
-   explicit owning_ptr(T *ptr, D *destroy) : _ptr{ptr}, _destroy{destroy}
-   {
-      REQUIRE(ptr);
-      REQUIRE(destroy);
-   }
-
-   void
-   swap(owning_ptr &other) noexcept
-   {
-      std::swap(_ptr, other._ptr);
-      std::swap(_destroy, other._destroy);
-   }
-
-   T *
-   get() const
-   {
-      return _ptr;
-   }
-
-   /* explicit(false) */
-   operator T *() const
-   {
-      return this->get();
-   }
-};
-
-template <typename T, typename D>
-owning_ptr<T, D>
-make_owning_ptr(T *ptr, D *destroy)
-{
-   return owning_ptr<T, D>{ptr, destroy};
-}
-
-bool
-bson_array_contains_string(const bson_t *array, const char *str)
-{
-   bson_iter_t iter = {};
-
-   REQUIRE(array != nullptr);
-
-   if (!bson_iter_init(&iter, array)) {
-      return false;
-   }
-
-   while (bson_iter_next(&iter)) {
-      const char *value = nullptr;
-
-      if (!BSON_ITER_HOLDS_UTF8(&iter)) {
-         continue;
-      }
-
-      value = bson_iter_utf8(&iter, nullptr);
-
-      if (value && std::strcmp(value, str) == 0) {
-         return true;
-      }
-   }
-
-   return false;
-}
-
-} // namespace
+using mongoac::test_util::make_owning_ptr;
 
 TEST_CASE("create_collection", "[mongoac][database]")
 {
+   using mongoac::test_util::bson_array_contains_string;
+
    auto const client =
       make_owning_ptr(mongoac_client_new("mongodb://localhost:27017", nullptr), &mongoac_client_destroy);
 

@@ -22,6 +22,10 @@ target_include_directories (test-libmongoac
   # Suppress compiler warnings emitted by bson headers.
   SYSTEM PRIVATE "$<TARGET_PROPERTY:${bson_target},INTERFACE_INCLUDE_DIRECTORIES>"
 )
+target_include_directories (test-libmongoac
+  # Allow `#include <mongoac/test/...>`.
+  PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}"
+)
 
 file (GLOB_RECURSE test_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
 target_sources (test-libmongoac PRIVATE ${test_sources})
