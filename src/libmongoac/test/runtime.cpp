@@ -3,6 +3,7 @@
 //
 
 #include <catch2/catch_test_macros.hpp>
+#include <mongoac/client.h>
 
 TEST_CASE("make_progress", "[mongoac][runtime]")
 {
@@ -125,4 +126,21 @@ TEST_CASE("stop_requested", "[mongoac][runtime]")
    {
       CHECK(!mongoac_runtime_stop_requested(nullptr));
    }
+}
+
+TEST_CASE("lifetime", "[mongoac][runtime]")
+{
+   auto const client = mongoac_client_new("mongodb://localhost:27017", nullptr);
+   REQUIRE(client != nullptr);
+
+   auto const runtime = mongoac_client_get_runtime(client);
+   REQUIRE(runtime != nullptr);
+
+   mongoac_client_destroy(client); // RuntimeT may outlive ClientT.
+
+   CHECK(!mongoac_runtime_stop_requested(runtime));
+   CHECK(mongoac_runtime_request_stop(runtime));
+   CHECK(mongoac_runtime_stop_requested(runtime));
+
+   mongoac_runtime_destroy(runtime);
 }
