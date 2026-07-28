@@ -382,21 +382,20 @@ impl ClientT {
         options: Option<ListDatabasesOptions>,
     ) -> FutureT {
         let client = self.inner.clone();
-        let session_arc = session.map(|s| s.state.clone());
+        let session = session.map(|s| s.clone());
 
         spawn!(&self, Bson, async move {
-            if let Some(ref session_arc) = session_arc {
-                let mut guard = session_arc.lock().await;
-                let specs = client
-                    .list_databases()
-                    .with_options(options)
-                    .session(&mut *guard)
-                    .await?;
-                specs_to_bson_array(&specs)
-            } else {
-                let specs = client.list_databases().with_options(options).await?;
-                specs_to_bson_array(&specs)
-            }
+            let op = client.list_databases().with_options(options);
+
+            let res = match session {
+                Some(session) => {
+                    let mut guard = session.state().lock().await;
+                    op.session(&mut *guard).await?
+                }
+                None => op.await?,
+            };
+
+            specs_to_bson_array(&res)
         })
     }
 
@@ -405,21 +404,18 @@ impl ClientT {
         session: Option<&mut ClientSessionT>,
         options: Option<ListDatabasesOptions>,
     ) -> Result<RawDocumentBuf, ErrorT> {
-        let session_arc = session.map(|s| s.state.clone());
-        self.runtime.block_on(async move {
-            if let Some(ref session_arc) = session_arc {
-                let mut guard = session_arc.lock().await;
-                let specs = self
-                    .inner
-                    .list_databases()
-                    .with_options(options)
-                    .session(&mut *guard)
-                    .await?;
-                specs_to_bson_array(&specs)
-            } else {
-                let specs = self.inner.list_databases().with_options(options).await?;
-                specs_to_bson_array(&specs)
-            }
+        self.runtime.block_on(async {
+            let op = self.inner.list_databases().with_options(options);
+
+            let res = match session {
+                Some(session) => {
+                    let mut guard = session.state().lock().await;
+                    op.session(&mut *guard).await?
+                }
+                None => op.await?,
+            };
+
+            specs_to_bson_array(&res)
         })
     }
 
@@ -429,21 +425,20 @@ impl ClientT {
         options: Option<ListDatabasesOptions>,
     ) -> FutureT {
         let client = self.inner.clone();
-        let session_arc = session.map(|s| s.state.clone());
+        let session = session.map(|s| s.clone());
 
         spawn!(&self, Bson, async move {
-            if let Some(ref session_arc) = session_arc {
-                let mut guard = session_arc.lock().await;
-                let names = client
-                    .list_database_names()
-                    .with_options(options)
-                    .session(&mut *guard)
-                    .await?;
-                strings_to_bson(&names)
-            } else {
-                let names = client.list_database_names().with_options(options).await?;
-                strings_to_bson(&names)
-            }
+            let op = client.list_database_names().with_options(options);
+
+            let res = match session {
+                Some(session) => {
+                    let mut guard = session.state().lock().await;
+                    op.session(&mut *guard).await?
+                }
+                None => op.await?,
+            };
+
+            strings_to_bson(&res)
         })
     }
 
@@ -452,25 +447,18 @@ impl ClientT {
         session: Option<&mut ClientSessionT>,
         options: Option<ListDatabasesOptions>,
     ) -> Result<RawDocumentBuf, ErrorT> {
-        let session_arc = session.map(|s| s.state.clone());
-        self.runtime.block_on(async move {
-            if let Some(ref session_arc) = session_arc {
-                let mut guard = session_arc.lock().await;
-                let names = self
-                    .inner
-                    .list_database_names()
-                    .with_options(options)
-                    .session(&mut *guard)
-                    .await?;
-                strings_to_bson(&names)
-            } else {
-                let names = self
-                    .inner
-                    .list_database_names()
-                    .with_options(options)
-                    .await?;
-                strings_to_bson(&names)
-            }
+        self.runtime.block_on(async {
+            let op = self.inner.list_database_names().with_options(options);
+
+            let res = match session {
+                Some(session) => {
+                    let mut guard = session.state().lock().await;
+                    op.session(&mut *guard).await?
+                }
+                None => op.await?,
+            };
+
+            strings_to_bson(&res)
         })
     }
 
@@ -478,25 +466,25 @@ impl ClientT {
         let client = self.inner.clone();
 
         spawn!(&self, ClientSession, async move {
-            let mut builder = client.start_session();
-            if let Some(opts) = options {
-                builder = builder.with_options(opts);
-            }
-            builder.await.map(ClientSessionT::new)
+            client
+                .start_session()
+                .with_options(options)
+                .await
+                .map(ClientSessionT::new)
         })
     }
 
     fn start_session(
         &self,
         options: Option<mongodb::options::SessionOptions>,
-    ) -> Result<ClientSessionT, mongodb::error::Error> {
+    ) -> Result<ClientSessionT, ErrorT> {
         self.runtime.block_on(async {
-            let mut builder = self.inner.start_session();
-            if let Some(opts) = options {
-                builder = builder.with_options(opts);
-            }
-            let session = builder.await?;
-            Ok(ClientSessionT::new(session))
+            self.inner
+                .start_session()
+                .with_options(options)
+                .await
+                .map(ClientSessionT::new)
+                .map_err(Into::into)
         })
     }
 
@@ -512,11 +500,9 @@ impl ClientT {
     fn shutdown(&self) -> Result<(), ErrorT> {
         let client = self.inner.clone();
 
-        self.runtime.block_on({
-            async {
-                client.shutdown().await;
-                Ok(())
-            }
+        self.runtime.block_on(async {
+            client.shutdown().await;
+            Ok::<(), ErrorT>(())
         })
     }
 }
@@ -529,7 +515,7 @@ fn specs_to_bson_array(
     for (i, spec) in specs.iter().enumerate() {
         doc.insert(
             i.to_string(),
-            Bson::Document(bson::serialize_to_document(spec)?),
+            Bson::Document(bson::serialize_to_document(spec)?), // Deep-copy!
         );
     }
 

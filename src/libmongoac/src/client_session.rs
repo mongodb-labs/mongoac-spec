@@ -9,7 +9,7 @@ use crate::private::macros::*;
 
 #[derive(Clone)]
 pub struct ClientSessionT {
-    pub(crate) state: Arc<Mutex<ClientSession>>,
+    state: Arc<Mutex<ClientSession>>,
 }
 
 #[unsafe(no_mangle)]
