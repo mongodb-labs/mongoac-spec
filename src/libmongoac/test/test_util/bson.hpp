@@ -11,6 +11,9 @@ namespace mongoac
 namespace test_util
 {
 
+bson_t *
+bson_from_json(const char *json);
+
 bool
 bson_array_contains_string(const bson_t *array, const char *str);
 
