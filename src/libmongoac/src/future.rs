@@ -63,7 +63,7 @@ pub extern "C" fn mongoac_future_get_void(future: *const FutureT, error: *mut Er
     safe_error!(future.get_void(), error);
 }
 
-pub(crate) enum FutureValue {
+pub enum FutureValue {
     Bool(FutureValueType<bool>),
     Bson(FutureValueType<RawDocumentBuf>),
     ClientSession(FutureValueType<ClientSessionT>),
@@ -98,50 +98,50 @@ macro_rules! future_value_result {
 }
 
 impl FutureT {
-    pub(crate) fn new(runtime: RuntimeT, value: FutureValue) -> Self {
+    pub fn new(runtime: RuntimeT, value: FutureValue) -> Self {
         Self {
             runtime,
             value: Arc::new(value),
         }
     }
 
-    pub(crate) fn get_runtime(&self) -> &RuntimeT {
+    pub fn get_runtime(&self) -> &RuntimeT {
         &self.runtime
     }
 
-    pub(crate) fn is_ready(&self) -> bool {
+    pub fn is_ready(&self) -> bool {
         future_value_op!(self.value, v => v.is_ready())
     }
 
-    pub(crate) fn get_int32(&self) -> Result<&i32, ErrorT> {
+    pub fn get_int32(&self) -> Result<&i32, ErrorT> {
         future_value_result!(self, Int32, "int32")
     }
 
-    pub(crate) fn get_bool(&self) -> Result<&bool, ErrorT> {
+    pub fn get_bool(&self) -> Result<&bool, ErrorT> {
         future_value_result!(self, Bool, "bool")
     }
 
-    pub(crate) fn get_bson(&self) -> Result<&RawDocumentBuf, ErrorT> {
+    pub fn get_bson(&self) -> Result<&RawDocumentBuf, ErrorT> {
         future_value_result!(self, Bson, "bson")
     }
 
-    pub(crate) fn get_client_session(&self) -> Result<&ClientSessionT, ErrorT> {
+    pub fn get_client_session(&self) -> Result<&ClientSessionT, ErrorT> {
         future_value_result!(self, ClientSession, "client session")
     }
 
-    pub(crate) fn get_void(&self) -> Result<&(), ErrorT> {
+    pub fn get_void(&self) -> Result<&(), ErrorT> {
         future_value_result!(self, Void, "void")
     }
 
-    pub(crate) fn get_cursor(&self) -> Result<&CursorT, ErrorT> {
+    pub fn get_cursor(&self) -> Result<&CursorT, ErrorT> {
         future_value_result!(self, Cursor, "cursor")
     }
 
-    pub(crate) fn poll_with_context(&self, ctx: &mut Context<'_>) -> bool {
+    pub fn poll_with_context(&self, ctx: &mut Context<'_>) -> bool {
         future_value_op!(self.value, v => v.poll_with_context(ctx))
     }
 
-    pub(crate) fn poll(&self) -> impl Future<Output = ()> + '_ {
+    pub fn poll(&self) -> impl Future<Output = ()> + '_ {
         poll_fn(|ctx| {
             if self.poll_with_context(ctx) {
                 Poll::Ready(())
@@ -155,13 +155,13 @@ impl FutureT {
 /// The dynamic type of an `async` block which returns a `Result<T, ErrorT>`.
 type Async<T> = Pin<Box<dyn Future<Output = Result<T, ErrorT>> + Send>>;
 
-pub(crate) struct FutureValueType<T> {
+pub struct FutureValueType<T> {
     result: OnceLock<Result<T, ErrorT>>,
     handle: Mutex<Option<Async<T>>>,
 }
 
 impl<T: Send + 'static> FutureValueType<T> {
-    pub(crate) fn new<E: Into<ErrorT> + Send + 'static>(
+    pub fn new<E: Into<ErrorT> + Send + 'static>(
         handle: tokio::task::JoinHandle<Result<T, E>>,
     ) -> Self {
         Self {
@@ -178,11 +178,11 @@ impl<T: Send + 'static> FutureValueType<T> {
         }
     }
 
-    pub(crate) fn is_ready(&self) -> bool {
+    pub fn is_ready(&self) -> bool {
         self.result.get().is_some()
     }
 
-    pub(crate) fn result(&self) -> Result<&T, ErrorT> {
+    pub fn result(&self) -> Result<&T, ErrorT> {
         match self.result.get() {
             Some(Ok(val)) => Ok(val),
             Some(Err(err)) => Err(err.clone()),
@@ -193,7 +193,7 @@ impl<T: Send + 'static> FutureValueType<T> {
         }
     }
 
-    pub(crate) fn poll_with_context(&self, ctx: &mut Context<'_>) -> bool {
+    pub fn poll_with_context(&self, ctx: &mut Context<'_>) -> bool {
         if self.is_ready() {
             return true;
         }
@@ -227,17 +227,17 @@ macro_rules! spawn {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) struct FutureExt<'a> {
-    pub(crate) future: &'a FutureT,
-    pub(crate) index: usize,
+pub struct FutureExt<'a> {
+    pub future: &'a FutureT,
+    pub index: usize,
 }
 
 impl<'a> FutureExt<'a> {
-    pub(crate) fn new(future: &'a FutureT) -> Self {
+    pub fn new(future: &'a FutureT) -> Self {
         Self::new_with_index(future, 0)
     }
 
-    pub(crate) fn new_with_index(future: &'a FutureT, index: usize) -> Self {
+    pub fn new_with_index(future: &'a FutureT, index: usize) -> Self {
         Self { future, index }
     }
 }

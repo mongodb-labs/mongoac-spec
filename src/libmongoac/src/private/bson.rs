@@ -60,7 +60,7 @@ impl ConstBsonT {
 }
 
 impl BsonT {
-    pub(crate) fn into_raw(self) -> *mut bson_t {
+    pub fn into_raw(self) -> *mut bson_t {
         let ptr = self.0;
         std::mem::forget(self); // Release ownership.
         ptr

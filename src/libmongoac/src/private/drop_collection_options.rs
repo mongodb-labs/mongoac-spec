@@ -2,7 +2,7 @@ use mongodb::options::{DropCollectionOptions, WriteConcern};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
-pub(crate) struct DropCollectionOptionsT {
+pub struct DropCollectionOptionsT {
     #[serde(alias = "writeConcern")]
     write_concern: Option<WriteConcern>,
 }
