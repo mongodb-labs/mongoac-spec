@@ -89,9 +89,10 @@ macro_rules! future_value_result {
     ($self:expr, $variant:ident, $name:literal) => {
         match &*$self.value {
             FutureValue::$variant(fvt) => fvt.result(),
-            _ => Err(
-                mongodb::error::Error::custom(concat!("future does not return a ", $name)).into(),
-            ),
+            _ => Err(ErrorT::from_mongoac(
+                ErrorCodeT::RuntimeError,
+                concat!("future does not return a ", $name),
+            )),
         }
     };
 }
