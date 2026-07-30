@@ -6,8 +6,8 @@ use crate::error::ErrorT;
 use crate::future::FutureT;
 use crate::private::bson::{BsonT, ConstBsonT, bson_t};
 use crate::runtime::RuntimeT;
-use crate::spawn;
 use crate::version::{MONGOAC_BUILD_PLATFORM, MONGOAC_VERSION_FULL};
+use crate::{op_with_session, spawn};
 
 use mongodb::bson::{Document, RawDocumentBuf};
 use mongodb::{
@@ -385,16 +385,7 @@ impl ClientT {
         let session = session.map(|s| s.clone());
 
         spawn!(&self, Bson, async move {
-            let op = client.list_databases().with_options(options);
-
-            let res = match session {
-                Some(session) => {
-                    let mut guard = session.state().lock().await;
-                    op.session(&mut *guard).await?
-                }
-                None => op.await?,
-            };
-
+            let res = op_with_session!(client.list_databases().with_options(options), session)?;
             specs_to_bson_array(&res)
         })
     }
@@ -405,16 +396,7 @@ impl ClientT {
         options: Option<ListDatabasesOptions>,
     ) -> Result<RawDocumentBuf, ErrorT> {
         self.runtime.block_on(async {
-            let op = self.inner.list_databases().with_options(options);
-
-            let res = match session {
-                Some(session) => {
-                    let mut guard = session.state().lock().await;
-                    op.session(&mut *guard).await?
-                }
-                None => op.await?,
-            };
-
+            let res = op_with_session!(self.inner.list_databases().with_options(options), session)?;
             specs_to_bson_array(&res)
         })
     }
@@ -428,16 +410,8 @@ impl ClientT {
         let session = session.map(|s| s.clone());
 
         spawn!(&self, Bson, async move {
-            let op = client.list_database_names().with_options(options);
-
-            let res = match session {
-                Some(session) => {
-                    let mut guard = session.state().lock().await;
-                    op.session(&mut *guard).await?
-                }
-                None => op.await?,
-            };
-
+            let res =
+                op_with_session!(client.list_database_names().with_options(options), session)?;
             strings_to_bson(&res)
         })
     }
@@ -448,16 +422,10 @@ impl ClientT {
         options: Option<ListDatabasesOptions>,
     ) -> Result<RawDocumentBuf, ErrorT> {
         self.runtime.block_on(async {
-            let op = self.inner.list_database_names().with_options(options);
-
-            let res = match session {
-                Some(session) => {
-                    let mut guard = session.state().lock().await;
-                    op.session(&mut *guard).await?
-                }
-                None => op.await?,
-            };
-
+            let res = op_with_session!(
+                self.inner.list_database_names().with_options(options),
+                session
+            )?;
             strings_to_bson(&res)
         })
     }
@@ -471,6 +439,7 @@ impl ClientT {
                 .with_options(options)
                 .await
                 .map(ClientSessionT::new)
+                .map_err(ErrorT::from)
         })
     }
 
@@ -493,7 +462,7 @@ impl ClientT {
 
         spawn!(&self, Void, async move {
             client.shutdown().await;
-            Ok::<(), ErrorT>(())
+            Ok(())
         })
     }
 
@@ -502,7 +471,7 @@ impl ClientT {
 
         self.runtime.block_on(async {
             client.shutdown().await;
-            Ok::<(), ErrorT>(())
+            Ok(())
         })
     }
 }

@@ -584,7 +584,6 @@ fn futures_as_refs<'a>(
 
 #[cfg(test)]
 mod tests {
-    use crate::error::ErrorT;
     use crate::future::{FutureT, FutureValue, FutureValueType};
     use crate::private::test_util::make_runtime;
     use std::sync::Arc;
@@ -912,8 +911,7 @@ mod tests {
         FutureT::new(
             runtime.clone(),
             FutureValue::Void(FutureValueType::new(runtime.spawn(async move {
-                tokio::time::sleep(Duration::from_secs(10)).await;
-                Ok::<(), ErrorT>(())
+                Ok(tokio::time::sleep(Duration::from_secs(10)).await)
             }))),
         )
     }
@@ -1008,8 +1006,7 @@ mod tests {
         let future = FutureT::new(
             runtime.clone(),
             FutureValue::Void(FutureValueType::new(runtime.spawn(async move {
-                tokio::time::sleep(Duration::from_millis(50)).await;
-                Ok::<(), ErrorT>(())
+                Ok(tokio::time::sleep(Duration::from_millis(50)).await)
             }))),
         );
 

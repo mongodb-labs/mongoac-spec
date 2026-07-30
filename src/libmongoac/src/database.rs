@@ -8,6 +8,7 @@ use crate::private::drop_database_options::DropDatabaseOptionsT;
 use crate::private::macros::*;
 use crate::runtime::RuntimeT;
 use crate::spawn;
+use crate::{cursor_op_with_session, op_with_session};
 
 use crate::client::{ClientT, strings_to_bson};
 use mongodb::Database;
@@ -211,17 +212,7 @@ impl DatabaseT {
         let session = session.map(|s| s.clone());
 
         spawn!(self, Void, async move {
-            let op = db.drop().with_options(options);
-
-            match session {
-                Some(state) => {
-                    let mut guard = state.state().lock().await;
-                    op.session(&mut *guard).await?
-                }
-                None => op.await?,
-            };
-
-            Ok::<(), ErrorT>(())
+            op_with_session!(db.drop().with_options(options), session)
         })
     }
 
@@ -230,19 +221,8 @@ impl DatabaseT {
         session: Option<&mut ClientSessionT>,
         options: Option<DropDatabaseOptions>,
     ) -> Result<(), ErrorT> {
-        self.runtime.block_on(async {
-            let op = self.inner.drop().with_options(options);
-
-            match session {
-                Some(state) => {
-                    let mut guard = state.state().lock().await;
-                    op.session(&mut *guard).await?
-                }
-                None => op.await?,
-            };
-
-            Ok::<(), ErrorT>(())
-        })
+        self.runtime
+            .block_on(async { op_with_session!(self.inner.drop().with_options(options), session) })
     }
 
     fn create_collection_async(
@@ -255,17 +235,7 @@ impl DatabaseT {
         let session = session.map(|s| s.clone());
 
         spawn!(self, Void, async move {
-            let op = db.create_collection(name).with_options(options);
-
-            match session {
-                Some(state) => {
-                    let mut guard = state.state().lock().await;
-                    op.session(&mut *guard).await?
-                }
-                None => op.await?,
-            };
-
-            Ok::<(), ErrorT>(())
+            op_with_session!(db.create_collection(name).with_options(options), session)
         })
     }
 
@@ -276,17 +246,10 @@ impl DatabaseT {
         options: Option<CreateCollectionOptions>,
     ) -> Result<(), ErrorT> {
         self.runtime.block_on(async {
-            let op = self.inner.create_collection(name).with_options(options);
-
-            match session {
-                Some(state) => {
-                    let mut guard = state.state().lock().await;
-                    op.session(&mut *guard).await?
-                }
-                None => op.await?,
-            };
-
-            Ok::<(), ErrorT>(())
+            op_with_session!(
+                self.inner.create_collection(name).with_options(options),
+                session
+            )
         })
     }
 
@@ -300,21 +263,11 @@ impl DatabaseT {
         let runtime = self.runtime.clone();
 
         spawn!(&self, Cursor, async move {
-            let op = db.list_collections().with_options(options);
-
-            let res = match session {
-                Some(session) => {
-                    let mut guard = session.state().lock().await;
-                    CursorT::new_with_session(
-                        op.session(&mut *guard).await?.with_type(),
-                        session.clone(),
-                        runtime,
-                    )
-                }
-                None => CursorT::new(op.await?.with_type(), runtime),
-            };
-
-            Ok::<CursorT, ErrorT>(res)
+            cursor_op_with_session!(
+                db.list_collections().with_options(options),
+                session,
+                runtime
+            )
         })
     }
 
@@ -324,21 +277,11 @@ impl DatabaseT {
         options: Option<ListCollectionsOptions>,
     ) -> Result<CursorT, ErrorT> {
         self.runtime.block_on(async {
-            let op = self.inner.list_collections().with_options(options);
-
-            let res = match session {
-                Some(session) => {
-                    let mut guard = session.state().lock().await;
-                    CursorT::new_with_session(
-                        op.session(&mut *guard).await?.with_type(),
-                        session.clone(),
-                        self.runtime.clone(),
-                    )
-                }
-                None => CursorT::new(op.await?.with_type(), self.runtime.clone()),
-            };
-
-            Ok::<CursorT, ErrorT>(res)
+            cursor_op_with_session!(
+                self.inner.list_collections().with_options(options),
+                session,
+                self.runtime.clone()
+            )
         })
     }
 
@@ -351,16 +294,7 @@ impl DatabaseT {
         let session = session.map(|s| s.clone());
 
         spawn!(&self, Bson, async move {
-            let op = db.list_collection_names().with_options(options);
-
-            let res = match session {
-                Some(session) => {
-                    let mut guard = session.state().lock().await;
-                    op.session(&mut *guard).await?
-                }
-                None => op.await?,
-            };
-
+            let res = op_with_session!(db.list_collection_names().with_options(options), session)?;
             strings_to_bson(&res)
         })
     }
@@ -371,16 +305,10 @@ impl DatabaseT {
         options: Option<ListCollectionsOptions>,
     ) -> Result<RawDocumentBuf, ErrorT> {
         self.runtime.block_on(async {
-            let op = self.inner.list_collection_names().with_options(options);
-
-            let res = match session {
-                Some(session) => {
-                    let mut guard = session.state().lock().await;
-                    op.session(&mut *guard).await?
-                }
-                None => op.await?,
-            };
-
+            let res = op_with_session!(
+                self.inner.list_collection_names().with_options(options),
+                session
+            )?;
             strings_to_bson(&res)
         })
     }

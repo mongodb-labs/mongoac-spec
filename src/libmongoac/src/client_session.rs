@@ -39,3 +39,18 @@ impl ClientSessionT {
         &self.state
     }
 }
+
+#[macro_export]
+macro_rules! op_with_session {
+    ($op:expr, $session:expr) => {{
+        let op = $op;
+        let session = $session;
+        match session {
+            Some(session) => {
+                let mut guard = session.state().lock().await;
+                op.session(&mut *guard).await.map_err(ErrorT::from)
+            }
+            None => op.await.map_err(ErrorT::from),
+        }
+    }};
+}

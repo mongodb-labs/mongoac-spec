@@ -100,11 +100,9 @@ impl CursorT {
     fn next_async(&self) -> FutureT {
         let state = self.state.clone();
 
-        spawn!(
-            self,
-            Bool,
-            async move { state.lock().await.advance().await }
-        )
+        spawn!(self, Bool, async move {
+            state.lock().await.advance().await.map_err(ErrorT::from)
+        })
     }
 
     fn next(&self) -> Result<bool, mongodb::error::Error> {
@@ -116,7 +114,7 @@ impl CursorT {
         let state = self.state.clone();
 
         spawn!(self, Bson, async move {
-            Ok::<_, ErrorT>(state.lock().await.current().to_owned())
+            Ok(state.lock().await.current().to_owned())
         })
     }
 
@@ -147,8 +145,36 @@ impl CursorState {
 
     fn current(&self) -> &RawDocument {
         match self {
-            CursorState::Plain(c) => c.current(),
+            CursorState::Plain(cursor) => cursor.current(),
             CursorState::Session { cursor, .. } => cursor.current(),
         }
     }
+}
+
+#[macro_export]
+macro_rules! cursor_op_with_session {
+    ($op:expr, $session:expr, $runtime:expr) => {{
+        let op = $op;
+        let session = $session;
+        let runtime = $runtime;
+        match session {
+            Some(session) => {
+                let mut guard = session.state().lock().await;
+                op.session(&mut *guard)
+                    .await
+                    .map_err(ErrorT::from)
+                    .map(|cursor| {
+                        $crate::cursor::CursorT::new_with_session(
+                            cursor.with_type(),
+                            session.clone(),
+                            runtime,
+                        )
+                    })
+            }
+            None => op
+                .await
+                .map_err(ErrorT::from)
+                .map(|cursor| $crate::cursor::CursorT::new(cursor.with_type(), runtime)),
+        }
+    }};
 }

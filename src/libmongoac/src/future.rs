@@ -161,14 +161,12 @@ pub struct FutureValueType<T> {
 }
 
 impl<T: Send + 'static> FutureValueType<T> {
-    pub fn new<E: Into<ErrorT> + Send + 'static>(
-        handle: tokio::task::JoinHandle<Result<T, E>>,
-    ) -> Self {
+    pub fn new(handle: tokio::task::JoinHandle<Result<T, ErrorT>>) -> Self {
         Self {
             result: OnceLock::new(),
             handle: Mutex::new(Some(Box::pin(async move {
                 match handle.await {
-                    Ok(result) => result.map_err(|e| e.into()),
+                    Ok(result) => result,
                     Err(err) => Err(ErrorT::from_mongoac(
                         ErrorCodeT::RuntimeError,
                         &format!("tokio::task::JoinError: {err}"),
@@ -267,7 +265,7 @@ mod tests {
     use tokio::sync::Notify;
 
     fn spawn_immediate(runtime: &RuntimeT) -> FutureT {
-        let handle = runtime.spawn(async move { Ok::<(), ErrorT>(()) });
+        let handle = runtime.spawn(async move { Ok(()) });
         FutureT::new(
             runtime.clone(),
             FutureValue::Void(FutureValueType::new(handle)),
@@ -275,10 +273,7 @@ mod tests {
     }
 
     fn spawn_delayed(runtime: &RuntimeT, delay: Duration) -> FutureT {
-        let handle = runtime.spawn(async move {
-            tokio::time::sleep(delay).await;
-            Ok::<(), ErrorT>(())
-        });
+        let handle = runtime.spawn(async move { Ok(tokio::time::sleep(delay).await) });
         FutureT::new(
             runtime.clone(),
             FutureValue::Void(FutureValueType::new(handle)),
@@ -286,10 +281,7 @@ mod tests {
     }
 
     fn spawn_notified(runtime: &RuntimeT, notify: Arc<Notify>) -> FutureT {
-        let handle = runtime.spawn(async move {
-            notify.notified().await;
-            Ok::<(), ErrorT>(())
-        });
+        let handle = runtime.spawn(async move { Ok(notify.notified().await) });
         FutureT::new(
             runtime.clone(),
             FutureValue::Void(FutureValueType::new(handle)),
@@ -531,7 +523,7 @@ mod tests {
     #[test]
     fn get_int32_ready() {
         let runtime = make_runtime();
-        let handle = runtime.spawn(async move { Ok::<i32, ErrorT>(42) });
+        let handle = runtime.spawn(async move { Ok(42) });
         let future = FutureT::new(
             runtime.clone(),
             FutureValue::Int32(FutureValueType::new(handle)),
@@ -550,7 +542,7 @@ mod tests {
         let runtime = make_runtime();
         let handle = runtime.spawn(async move {
             tokio::time::sleep(Duration::from_secs(10)).await;
-            Ok::<i32, ErrorT>(42)
+            Ok(42)
         });
         let future = FutureT::new(
             runtime.clone(),
@@ -599,7 +591,7 @@ mod tests {
             FutureValue::Void(FutureValueType::new(runtime.spawn(async move {
                 tokio::time::sleep(Duration::from_millis(100)).await;
                 done_clone.store(true, Ordering::Release);
-                Ok::<(), ErrorT>(())
+                Ok(())
             }))),
         );
 
