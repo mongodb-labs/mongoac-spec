@@ -11,6 +11,7 @@ impl From<DropCollectionOptionsT> for DropCollectionOptions {
     fn from(opts: DropCollectionOptionsT) -> Self {
         DropCollectionOptions::builder()
             .write_concern(opts.write_concern)
+            // Requires "mongodb" crate feature: "in-use-encryption"
             // .encrypted_fields(opts.encrypted_fields)
             .build()
     }
