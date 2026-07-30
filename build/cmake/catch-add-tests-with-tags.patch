@@ -1,11 +1,11 @@
 diff --git a/extras/CatchAddTests.cmake b/extras/CatchAddTests.cmake
-index 4c27f47..24c8c8c 100644
+index 59a39c7..9327714 100644
 --- a/extras/CatchAddTests.cmake
 +++ b/extras/CatchAddTests.cmake
-@@ -158,6 +158,28 @@ function(catch_discover_tests_impl)
-     string(JSON test_tags GET "${single_test}" "tags")
+@@ -360,6 +360,28 @@ function(catch_discover_tests_impl)
+     endif()
      string(JSON plain_name GET "${single_test}" "name")
-
+ 
 +    # --- catch2-add-tests-with-tags ---
 +    string(JSON _num_tags LENGTH "${test_tags}")
 +    math(EXPR _num_tags "${_num_tags} - 1")
@@ -31,45 +31,46 @@ index 4c27f47..24c8c8c 100644
      # Escape characters in test case names that would be parsed by Catch2
      # Note that the \ escaping must happen FIRST! Do not change the order.
      set(escaped_name "${plain_name}")
-@@ -172,7 +195,7 @@ function(catch_discover_tests_impl)
-
+@@ -374,7 +396,7 @@ function(catch_discover_tests_impl)
+ 
      # ...and add to script
-     add_command(add_test
+     prepare_command(add_test
 -      "${prefix}${plain_name}${suffix}"
 +      "${prefix}${ctest_name}${suffix}"
        ${_TEST_EXECUTOR}
        "${_TEST_EXECUTABLE}"
        "${escaped_name}"
-@@ -181,7 +204,7 @@ function(catch_discover_tests_impl)
-       "${output_dir_arg}"
+@@ -384,7 +406,7 @@ function(catch_discover_tests_impl)
      )
-     add_command(set_tests_properties
+     string(APPEND script "${_Command}")
+     prepare_command(set_tests_properties
 -      "${prefix}${plain_name}${suffix}"
 +      "${prefix}${ctest_name}${suffix}"
        PROPERTIES
        WORKING_DIRECTORY "${_TEST_WORKING_DIR}"
        ${properties}
-@@ -206,7 +229,7 @@ function(catch_discover_tests_impl)
+@@ -410,7 +432,7 @@ function(catch_discover_tests_impl)
          endforeach()
-
-         add_command(set_tests_properties
+ 
+         prepare_command(set_tests_properties
 -          "${prefix}${plain_name}${suffix}"
 +          "${prefix}${ctest_name}${suffix}"
            PROPERTIES
            LABELS "${tag_list}"
          )
-@@ -215,12 +238,12 @@ function(catch_discover_tests_impl)
-
+@@ -420,13 +442,13 @@ function(catch_discover_tests_impl)
+ 
      if(environment_modifications)
-       add_command(set_tests_properties
+       prepare_command(set_tests_properties
 -        "${prefix}${plain_name}${suffix}"
 +        "${prefix}${ctest_name}${suffix}"
          PROPERTIES
          ENVIRONMENT_MODIFICATION "${environment_modifications}")
+       string(APPEND script "${_Command}")
      endif()
-
+ 
 -    list(APPEND tests "${prefix}${plain_name}${suffix}")
 +    list(APPEND tests "${prefix}${ctest_name}${suffix}")
    endforeach()
-
+ 
    # Create a list of all discovered tests, which users may use to e.g. set

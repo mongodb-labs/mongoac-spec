@@ -7,8 +7,9 @@ function(fetch_catch2)
         EP_Catch2
 
         GIT_REPOSITORY https://github.com/catchorg/Catch2
-        GIT_TAG v3.15.1
+        GIT_TAG v3.15.3
         GIT_SHALLOW TRUE
+        GIT_REMOTE_UPDATE_STRATEGY CHECKOUT
         LOG_DOWNLOAD ON
 
         # Support registering Catch2 tests with CTest uniquely by tags.
