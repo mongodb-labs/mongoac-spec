@@ -178,7 +178,7 @@ macro_rules! safe_optional_bson_opts_with_error {
 }
 
 #[macro_export]
-macro_rules! safe_const_bson {
+macro_rules! safe_const_bson_with_error {
     ($ptr:expr, $error:expr) => {{
         let ptr = $ptr;
         match unsafe { ptr.as_ref() } {
