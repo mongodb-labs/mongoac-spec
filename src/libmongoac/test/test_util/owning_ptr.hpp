@@ -18,7 +18,9 @@ template <typename T, typename D> class owning_ptr
  public:
    ~owning_ptr()
    {
-      _destroy(_ptr);
+      if (_ptr) {
+         _destroy(_ptr);
+      }
    }
 
    owning_ptr(owning_ptr &&other) noexcept : _ptr{other._ptr}, _destroy{other._destroy}
@@ -41,7 +43,6 @@ template <typename T, typename D> class owning_ptr
 
    explicit owning_ptr(T *ptr, D *destroy) : _ptr{ptr}, _destroy{destroy}
    {
-      REQUIRE(ptr);
       REQUIRE(destroy);
    }
 
