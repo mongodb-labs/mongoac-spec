@@ -97,7 +97,6 @@ file (GLOB_RECURSE mongoac_headers CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR
 
 set (cargo_dependencies
   ${cargo_sources}
-  ${mongoac_headers}
   "${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml"
   "${CMAKE_CURRENT_SOURCE_DIR}/Cargo.lock"
   "${CMAKE_CURRENT_SOURCE_DIR}/build.rs"
@@ -107,7 +106,7 @@ set (cargo_headers "")
 foreach (source IN LISTS cargo_sources)
   cmake_path (GET source FILENAME filename)
 
-  # Keep synchronized with `SKIP_CARGO_HEADERS` list in build.rs.
+  # Keep synchronized with `SKIP_CARGO_HEADERS` in cmake/generate-crate-headers/src/main.rs.
   set (skip_cargo_headers "lib.rs" "mod.rs" "version.rs")
   if (filename IN_LIST skip_cargo_headers)
     continue ()
@@ -120,6 +119,27 @@ foreach (source IN LISTS cargo_sources)
   cmake_path (REPLACE_EXTENSION header LAST_ONLY ".h" OUTPUT_VARIABLE header)
   list (APPEND cargo_headers "${include_dir}/mongoac/${header}")
 endforeach ()
+
+add_custom_command (
+  OUTPUT ${cargo_headers}
+  COMMENT "Generating mongoac crate headers"
+  COMMAND
+    "${CMAKE_COMMAND}" -E env
+      "MONGOAC_SRC_DIR=${CMAKE_CURRENT_SOURCE_DIR}/src"
+      "MONGOAC_INCLUDE_DIR=${include_dir}/mongoac"
+    "${CARGO_EXECUTABLE}" run
+      --manifest-path "${CMAKE_CURRENT_SOURCE_DIR}/cmake/generate-crate-headers/Cargo.toml"
+      --locked
+      --target-dir "${cargo_target_dir}"
+      "$<$<NOT:$<CONFIG:Debug>>:--release>"
+  DEPENDS
+    ${cargo_sources}
+    "${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Cargo.lock"
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/generate-crate-headers/Cargo.toml"
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/generate-crate-headers/src/main.rs"
+)
+add_custom_target (mongoac_crate_headers_target DEPENDS ${cargo_headers})
 
 set_source_files_properties (${mongoac_headers} ${cargo_headers} PROPERTIES LANGUAGE C)
 
@@ -194,9 +214,9 @@ if ("$CACHE{ENABLE_SHARED}")
       "${library_shared}"
       "${library_shared_soversion}"
       "${library_shared_soversion_full}"
+    COMMENT "Building the mongoac shared library"
     COMMAND
       "${CMAKE_COMMAND}" -E env
-        "MONGOAC_INCLUDE_DIR=${include_dir}"
         "${bson_library_env_var}=${bson_library_filename}"
         "MONGOAC_CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
         "MONGOAC_LIBRARY_TYPE=shared"
@@ -224,7 +244,6 @@ if ("$CACHE{ENABLE_SHARED}")
       ${cargo_dependencies}
     BYPRODUCTS
       "${cargo_library_shared}"
-      ${cargo_headers}
   )
 
   add_custom_target (mongoac_shared_target ALL DEPENDS
@@ -238,7 +257,7 @@ if ("$CACHE{ENABLE_SHARED}")
     EXPORT_NAME mongoac::shared
     SOVERSION "${PROJECT_VERSION_MAJOR}"
   )
-  add_dependencies (mongoac_shared mongoac_shared_target)
+  add_dependencies (mongoac_shared mongoac_shared_target mongoac_crate_headers_target)
   target_include_directories (mongoac_shared INTERFACE ${mongoac_include_dirs})
   target_link_libraries (mongoac_shared INTERFACE
     "$<BUILD_INTERFACE:${library_shared}>"
@@ -261,17 +280,11 @@ if ("$CACHE{ENABLE_SHARED}")
 endif ()
 
 if (NOT "$CACHE{ENABLE_STATIC}" STREQUAL "OFF")
-  if ("$CACHE{ENABLE_SHARED}")
-    set (cargo_static_headers "") # Avoid BYPRODUCTS conflicts with the shared library target.
-  else ()
-    set (cargo_static_headers ${cargo_headers})
-  endif ()
-
   add_custom_command (
     OUTPUT "${library_static}"
+    COMMENT "Building the mongoac static library"
     COMMAND
       "${CMAKE_COMMAND}" -E env
-        "MONGOAC_INCLUDE_DIR=${include_dir}"
         "${bson_library_env_var}=${bson_library_filename}"
         "MONGOAC_CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
         "MONGOAC_LIBRARY_TYPE=static"
@@ -290,14 +303,13 @@ if (NOT "$CACHE{ENABLE_STATIC}" STREQUAL "OFF")
       ${cargo_dependencies}
     BYPRODUCTS
       "${cargo_library_static}"
-      ${cargo_static_headers}
   )
 
   add_custom_target (mongoac_static_target ALL DEPENDS "${library_static}")
 
   add_library (mongoac_static INTERFACE)
   set_target_properties (mongoac_static PROPERTIES EXPORT_NAME mongoac::static)
-  add_dependencies (mongoac_static mongoac_static_target)
+  add_dependencies (mongoac_static mongoac_static_target mongoac_crate_headers_target)
   target_compile_definitions (mongoac_static INTERFACE MONGOAC_STATIC)
   target_include_directories (mongoac_static INTERFACE ${mongoac_include_dirs})
   target_link_libraries (mongoac_static INTERFACE
