@@ -121,7 +121,7 @@ impl<'a> TryFrom<&'a ConstBsonT> for &'a RawDocument {
     type Error = mongodb::bson::error::Error;
 
     fn try_from(bson: &'a ConstBsonT) -> Result<Self, Self::Error> {
-        RawDocument::from_bytes(bson.as_bytes()) // Deep-copy!
+        RawDocument::from_bytes(bson.as_bytes())
     }
 }
 

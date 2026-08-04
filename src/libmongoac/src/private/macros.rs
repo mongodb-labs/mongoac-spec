@@ -4,6 +4,7 @@ pub use crate::safe_as_mut;
 pub use crate::safe_as_mut_with_error;
 pub use crate::safe_as_ref;
 pub use crate::safe_as_ref_with_error;
+pub use crate::safe_const_bson_array_as_vec_with_error;
 pub use crate::safe_const_bson_with_error;
 pub use crate::safe_cstr_from_ptr;
 pub use crate::safe_cstr_from_ptr_with_error;

@@ -206,6 +206,38 @@ macro_rules! safe_optional_const_bson {
 }
 
 #[macro_export]
+macro_rules! safe_const_bson_array_as_vec_with_error {
+    ($ptr:expr, $len:expr, $error:expr) => {{
+        let ptr: *const *const $crate::private::bson::bson_t = $ptr;
+        let len: usize = $len;
+
+        if ptr.is_null() || len == 0 {
+            return Default::default();
+        }
+
+        // SAFETY: `ptr` and `len` validity is an uncheckable precondition.
+        let arr = unsafe { std::slice::from_raw_parts(ptr, len) };
+
+        let mut vec = Vec::with_capacity(len);
+        for (i, e) in arr.iter().enumerate() {
+            match unsafe { e.as_ref() } {
+                Some(e) => {
+                    vec.push($crate::private::bson::ConstBsonT::from(e));
+                }
+                None => {
+                    $crate::private::safety::invalid_argument(
+                        $error,
+                        &format!("BSON array element at index {i}: must not be null"),
+                    );
+                    return Default::default();
+                }
+            }
+        }
+        vec
+    }};
+}
+
+#[macro_export]
 macro_rules! safe_error {
     ($expr:expr, $error:expr) => {
         match $expr {

@@ -143,6 +143,7 @@ impl CursorState {
         }
     }
 
+    // Precondition: `advance()` returned `true`.
     fn current(&self) -> &RawDocument {
         match self {
             CursorState::Plain(cursor) => cursor.current(),

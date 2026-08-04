@@ -46,11 +46,10 @@ template <typename T, typename D> class owning_ptr
       REQUIRE(destroy);
    }
 
-   void
-   swap(owning_ptr &other) noexcept
+   explicit
+   operator bool() const
    {
-      std::swap(_ptr, other._ptr);
-      std::swap(_destroy, other._destroy);
+      return _ptr != nullptr;
    }
 
    T *
@@ -64,6 +63,13 @@ template <typename T, typename D> class owning_ptr
    {
       return this->get();
    }
+
+   void
+   swap(owning_ptr &other) noexcept
+   {
+      std::swap(_ptr, other._ptr);
+      std::swap(_destroy, other._destroy);
+   }
 };
 
 template <typename T, typename D>
@@ -72,6 +78,17 @@ make_owning_ptr(T *ptr, D *destroy)
 {
    return owning_ptr<T, D>{ptr, destroy};
 }
+
+// Requires `owning_ptr<mongoac_error_t, ...> error;` to be in scope.
+#define REQUIRE_MAKE_OWNING_PTR(ptr, destroy)                             \
+   [&, error = static_cast<::mongoac_error_t *>(error)] {                 \
+      auto ret = ::mongoac::test_util::make_owning_ptr((ptr), (destroy)); \
+      CHECKED_IF(::mongoac_error_code(error) != 0)                        \
+      {                                                                   \
+         FAIL(::mongoac_error_message(error));                            \
+      }                                                                   \
+      return ret;                                                         \
+   }()
 
 } // namespace test_util
 } // namespace mongoac
