@@ -137,7 +137,9 @@ impl ErrorT {
 
     pub fn code(&self) -> ErrorCodeT {
         match self {
-            Self::None | Self::Bson(..) => ErrorCodeT::Ok,
+            Self::None => ErrorCodeT::Ok,
+            // mongodb::bson::error::Error does not use integral error codes.
+            Self::Bson(..) => ErrorCodeT::Unknown(i32::MIN),
             Self::MongoAC { code, .. } => *code,
             Self::Rust(err, _) => match err.kind.as_ref() {
                 mongodb::error::ErrorKind::Command(cmd) => ErrorCodeT::from(cmd.code),
@@ -162,6 +164,7 @@ impl ErrorT {
     }
 }
 
+// TODO: remove in favor of descriptive mongoac errors?
 impl From<mongodb::bson::error::Error> for ErrorT {
     fn from(err: mongodb::bson::error::Error) -> Self {
         let msg = CString::new(err.to_string()).ok();
