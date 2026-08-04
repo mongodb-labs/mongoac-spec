@@ -1,7 +1,4 @@
 pub mod bson;
-pub mod database_options;
-pub mod drop_collection_options;
-pub mod drop_database_options;
 pub mod macros;
 pub mod safety;
 

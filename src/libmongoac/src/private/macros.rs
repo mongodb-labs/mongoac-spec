@@ -14,5 +14,6 @@ pub use crate::safe_optional_as_mut;
 pub use crate::safe_optional_as_ref;
 pub use crate::safe_optional_bson_opts_with_error;
 pub use crate::safe_optional_const_bson;
+pub use crate::safe_optional_cstr_from_ptr;
 pub use crate::safe_optional_cstr_from_ptr_with_error;
 pub use crate::safe_optional_error_as_mut;

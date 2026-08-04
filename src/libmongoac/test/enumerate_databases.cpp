@@ -5,9 +5,13 @@
 #include <mongoac/client.h>
 #include <mongoac/error.h>
 #include <mongoac/future.h>
+#include <mongoac/list_databases_options.h>
 #include <mongoac/runtime.h>
+#include <test_util/owning_ptr.hpp>
 
 #include <string>
+
+using mongoac::test_util::make_owning_ptr;
 
 TEST_CASE("list_databases_async", "[mongoac][client]")
 {
@@ -41,15 +45,13 @@ TEST_CASE("list_databases_async", "[mongoac][client]")
       auto const client = mongoac_client_new("mongodb://localhost:27017", nullptr);
       REQUIRE(client != nullptr);
 
-      bson_t opts_bson;
-      bson_init(&opts_bson);
-      bson_append_bool(&opts_bson, "authorizedDatabases", -1, true);
+      auto const opts = make_owning_ptr(mongoac_list_databases_options_new(), &mongoac_list_databases_options_destroy);
+      mongoac_list_databases_options_set_authorized_databases(opts, true);
 
-      auto const future = mongoac_client_list_databases_async(client, nullptr, &opts_bson, nullptr);
+      auto const future = mongoac_client_list_databases_async(client, nullptr, opts, nullptr);
 
       CHECK(future != nullptr);
 
-      bson_destroy(&opts_bson);
       mongoac_future_destroy(future);
       mongoac_client_destroy(client);
    }

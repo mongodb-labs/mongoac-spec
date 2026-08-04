@@ -106,8 +106,7 @@ TEST_CASE("sessions", "[mongoac][client_session]")
    auto const opts = make_owning_ptr(mongoac_client_options_new(), &mongoac_client_options_destroy);
    mongoac_client_options_set_capture_command_events(opts, true);
 
-   auto const client = make_owning_ptr(mongoac_client_new_with_options("mongodb://localhost:27017", opts, nullptr),
-                                       &mongoac_client_destroy);
+   auto const client = make_owning_ptr(mongoac_client_new_with_options(opts, nullptr), &mongoac_client_destroy);
 
    auto const db = make_owning_ptr(mongoac_client_get_database(client, "mongoac_session_lsid", nullptr, nullptr),
                                    &mongoac_database_destroy);

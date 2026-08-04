@@ -1,13 +1,12 @@
 #include <mongoac/client.h>
 
-#include <bson/bson.h>
-
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <mongoac/client_options.h>
 #include <mongoac/error.h>
 #include <mongoac/future.h>
 #include <mongoac/runtime.h>
+#include <mongoac/server_api.h>
 #include <test_util/owning_ptr.hpp>
 
 using mongoac::test_util::make_owning_ptr;
@@ -60,83 +59,45 @@ TEST_CASE("client_new_with_options", "[mongoac][client_options]")
 {
    SECTION("null")
    {
-      auto const opts = mongoac_client_options_new();
-      REQUIRE(opts != nullptr);
       auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
-
-      auto const client = mongoac_client_new_with_options(nullptr, opts, error);
-      CHECK(client == nullptr);
-      CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_MONGOAC);
-
-      mongoac_client_options_destroy(opts);
-   }
-
-   SECTION("invalid URI")
-   {
-      auto const opts = mongoac_client_options_new();
-      REQUIRE(opts != nullptr);
-      auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
-
-      auto const client = mongoac_client_new_with_options("not-a-uri", opts, error);
-      CHECK(client == nullptr);
-      CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_RUST);
-
-      mongoac_client_options_destroy(opts);
-   }
-
-   SECTION("null options")
-   {
-      auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
-
-      auto const client = mongoac_client_new_with_options("mongodb://localhost:27017", nullptr, error);
+      auto const client = make_owning_ptr(mongoac_client_new_with_options(nullptr, error), &mongoac_client_destroy);
       CHECK(client != nullptr);
       CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_OK);
       CHECK(mongoac_client_count_command_events(client) == 0);
-
-      mongoac_client_destroy(client);
    }
 
-   SECTION("valid with default options")
+   SECTION("default options")
    {
-      auto const opts = mongoac_client_options_new();
+      auto const opts = make_owning_ptr(mongoac_client_options_new(), &mongoac_client_options_destroy);
       REQUIRE(opts != nullptr);
 
-      auto const client = mongoac_client_new_with_options("mongodb://localhost:27017", opts, nullptr);
+      auto const client = make_owning_ptr(mongoac_client_new_with_options(opts, nullptr), &mongoac_client_destroy);
       CHECK(client != nullptr);
       CHECK(mongoac_client_count_command_events(client) == 0);
-
-      mongoac_client_destroy(client);
-      mongoac_client_options_destroy(opts);
    }
 
-   SECTION("valid with command event capture enabled")
+   SECTION("capture_command_events")
    {
-      auto const opts = mongoac_client_options_new();
+      auto const opts = make_owning_ptr(mongoac_client_options_new(), &mongoac_client_options_destroy);
       REQUIRE(opts != nullptr);
       mongoac_client_options_set_capture_command_events(opts, true);
 
-      auto const client = mongoac_client_new_with_options("mongodb://localhost:27017", opts, nullptr);
+      auto const client = make_owning_ptr(mongoac_client_new_with_options(opts, nullptr), &mongoac_client_destroy);
       CHECK(client != nullptr);
       CHECK(mongoac_client_count_command_events(client) == 0);
-
-      mongoac_client_destroy(client);
-      mongoac_client_options_destroy(opts);
    }
 
-   SECTION("valid with server_api")
+   SECTION("server_api")
    {
-      auto const opts = mongoac_client_options_new();
+      auto const opts = make_owning_ptr(mongoac_client_options_new(), &mongoac_client_options_destroy);
       REQUIRE(opts != nullptr);
 
-      auto const bson = BCON_NEW("apiVersion", BCON_UTF8("1"), "apiStrict", BCON_BOOL(true));
-      mongoac_client_options_set_server_api(opts, bson, nullptr);
-      bson_destroy(bson);
+      auto const api = make_owning_ptr(mongoac_server_api_new(), &mongoac_server_api_destroy);
+      mongoac_server_api_set_strict(api, true);
+      mongoac_client_options_set_server_api(opts, api, nullptr);
 
-      auto const client = mongoac_client_new_with_options("mongodb://localhost:27017", opts, nullptr);
+      auto const client = make_owning_ptr(mongoac_client_new_with_options(opts, nullptr), &mongoac_client_destroy);
       CHECK(client != nullptr);
-
-      mongoac_client_destroy(client);
-      mongoac_client_options_destroy(opts);
    }
 }
 
@@ -150,14 +111,12 @@ TEST_CASE("get_runtime", "[mongoac][client]")
 
    SECTION("valid")
    {
-      auto const client = mongoac_client_new("mongodb://localhost:27017", nullptr);
+      auto const client =
+         make_owning_ptr(mongoac_client_new("mongodb://localhost:27017", nullptr), &mongoac_client_destroy);
       REQUIRE(client != nullptr);
 
-      auto const runtime = mongoac_client_get_runtime(client);
+      auto const runtime = make_owning_ptr(mongoac_client_get_runtime(client), &mongoac_runtime_destroy);
       CHECK(runtime != nullptr);
-
-      mongoac_runtime_destroy(runtime);
-      mongoac_client_destroy(client);
    }
 }
 
@@ -243,9 +202,10 @@ TEST_CASE("destroy", "[mongoac][client]")
 
 TEST_CASE("shutdown", "[mongoac][client]")
 {
+   auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
+
    SECTION("null")
    {
-      auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
       mongoac_client_shutdown(nullptr, error);
 
       CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_MONGOAC);
@@ -254,10 +214,10 @@ TEST_CASE("shutdown", "[mongoac][client]")
 
    SECTION("valid client")
    {
-      auto const client = mongoac_client_new("mongodb://localhost:27017", nullptr);
+      auto const client =
+         make_owning_ptr(mongoac_client_new("mongodb://localhost:27017", nullptr), &mongoac_client_destroy);
       REQUIRE(client != nullptr);
 
-      auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
       mongoac_client_shutdown(client, error);
 
       CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_NONE);
@@ -269,8 +229,6 @@ TEST_CASE("shutdown", "[mongoac][client]")
          CHECK(mongoac_error_code(error) != MONGOAC_ERROR_CODE_OK);
          CHECK_THAT(mongoac_error_message(error), Catch::Matchers::ContainsSubstring("shut down"));
       }
-
-      mongoac_client_destroy(client);
    }
 }
 
@@ -279,7 +237,7 @@ TEST_CASE("shutdown_async", "[mongoac][client]")
    SECTION("null")
    {
       auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
-      auto const future = mongoac_client_shutdown_async(nullptr, error);
+      auto const future = make_owning_ptr(mongoac_client_shutdown_async(nullptr, error), &mongoac_future_destroy);
 
       CHECK(future == nullptr);
       CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_MONGOAC);
@@ -288,14 +246,15 @@ TEST_CASE("shutdown_async", "[mongoac][client]")
 
    SECTION("valid client")
    {
-      auto const client = mongoac_client_new("mongodb://localhost:27017", nullptr);
+      auto const client =
+         make_owning_ptr(mongoac_client_new("mongodb://localhost:27017", nullptr), &mongoac_client_destroy);
       REQUIRE(client != nullptr);
 
-      auto const runtime = mongoac_client_get_runtime(client);
+      auto const runtime = make_owning_ptr(mongoac_client_get_runtime(client), &mongoac_runtime_destroy);
       REQUIRE(runtime != nullptr);
 
       auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
-      auto const future = mongoac_client_shutdown_async(client, error);
+      auto const future = make_owning_ptr(mongoac_client_shutdown_async(client, error), &mongoac_future_destroy);
       REQUIRE(future != nullptr);
       CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_OK);
 
@@ -311,9 +270,5 @@ TEST_CASE("shutdown_async", "[mongoac][client]")
          CHECK(mongoac_error_code(error) != MONGOAC_ERROR_CODE_OK);
          CHECK_THAT(mongoac_error_message(error), Catch::Matchers::ContainsSubstring("shut down"));
       }
-
-      mongoac_future_destroy(future);
-      mongoac_runtime_destroy(runtime);
-      mongoac_client_destroy(client);
    }
 }

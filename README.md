@@ -372,19 +372,8 @@ Therefore, with the exception of `mongoac_*_destroy()`, most functions `mongoac_
 The mongoac library internally uses `Arc<Mutex<T>>` for consistency with the Rust Driver's thread-safety model.
 This is conceptually analogous to `std::shared_ptr<std::pair<std::mutex, T>>` in C++.
 
-Because (nearly) all Rust API `*Options` structs support deserialization via
-  [serde](https://docs.rs/serde/latest/serde/), the initial design specification proposes consistently using a single
-  `options: *const bson_t` optional (nullable) parameter for all options by default to keep the Rust FFI as "thin" as
-  possible.
-This avoids needing to implement a large number of `*OptionsT` structs and accessor API in the initial Rust FFI
-  implementation (several hundred functions in total when accounting for all the various options structs).
-The API may be extended as-needed in the future to support typed options structs by adding `*_with_options()` variants
-  to the existing API (e.g. see `mongoac_client_new_with_options()` for `mongoac_client_options_t`).
-This pattern is also consistent with the Rust API's use of `*_with_options()` functions.
-
 > [!TIP]
-> - [Why use a single `bson_t` for options structs?](#why-bson-options)
-> - [Should unrecognized fields be warned about?](#unrecognized-bson-fields)
+> - [Why typed options structs?](#why-typed-options)
 
 > [!NOTE]
 > `ClientSession` is a notable exception to the "non-options structs are immutable" pattern.
@@ -528,27 +517,14 @@ However, only async tasks explicitly spawned by the mongoac library (or a stop r
 
 #### Client Options
 
-Client options that cannot be expressed through the connection string URI are
-configured via a separate opaque `mongoac_client_options_t` handle. This handle
-is passed to `mongoac_client_new_with_options()` and is **not** retained after
-construction.
+Client options are represented by `mongoac_client_options_t`.
 
-**Fields supported in this phase:**
+The connection string remains the primary configuration path; typed setters **overlay** on the URI-parsed values. Fields left at their default (`None`/empty) defer to the connection string; fields set explicitly override the corresponding URI option.
 
-| Field | Setter | Type |
-|---|---|---|
-| Command event capture | `mongoac_client_options_set_capture_command_events(opts, bool)` | `bool` toggle (`false` default) |
-| CMAP/SDAM event capture toggles | `mongoac_client_options_set_capture_cmap_events(opts, bool)` / `mongoac_client_options_set_capture_sdam_events(opts, bool)` | `bool` toggle (`false` default; **not yet wired to event handlers**) |
-| `server_api` | `mongoac_client_options_set_server_api(opts, bson_t*, error)` | BSON document (`bson_t*`; `NULL` clears) |
-
-The `server_api` document is parsed and validated at setter time. It follows a
-fixed schema (`apiVersion` required; `apiStrict`, `apiDeprecationErrors`
-optional) that the Rust driver deserializes via serde. Unrecognized keys are
-silently ignored.
+The mongoac library adds boolean fields to toggle event monitoring fields for commands, SDAM, and CMAP.
 
 > [!TIP]
-> - [Why typed ClientOptionsT when operation options use BSON?](#why-typed-client-options)
-> - [Other purely programmatic fields](#deferred-client-options-fields)
+> - [Feature-gated fields not exposed](#deferred-client-options-fields)
 
 #### Error Model
 
@@ -581,11 +557,10 @@ Mongoac accepts connection strings directly in `mongoac_client_new()`. There is 
 
 ##### URI Options
 
-URI options are parsed by `ClientOptions::parse()`. All supported options configure the Rust driver's internal behavior; no C API exposes the runtime state. Supported categories include DNS seedlist, SRV polling, SDAM, server selection, read preference, read concern, compression, load balancers, retryable reads/writes, backpressure, connection pool sizing, auth (SCRAM, X509, GSSAPI, PLAIN, AWS, OIDC), and write concern. Unsupported options (`waitQueueTimeoutMS`, `serverSelectionTryOnce`) are silently ignored. `socketTimeoutMS` is rejected by the Rust driver.
+URI options are parsed by `ClientOptions::parse()`. All supported options configure the Rust driver's internal behavior. Supported categories include DNS seedlist, SRV polling, SDAM, server selection, read preference, read concern, compression, load balancers, retryable reads/writes, backpressure, connection pool sizing, auth (SCRAM, X509, GSSAPI, PLAIN, AWS, OIDC), and write concern. Unsupported options (`waitQueueTimeoutMS`, `serverSelectionTryOnce`) are silently ignored. `socketTimeoutMS` is rejected by the Rust driver. Every URI-expressible field can also be set programmatically via the [typed setters](#client-options) on `mongoac_client_options_t`, which overlay on the URI-parsed values.
 
 > [!TIP]
 > - [Why no URI option getters?](#why-no-uri-getters)
-> - [Why are connection-string features URI-only?](#why-connection-string-features-uri-only)
 > - [Why no callback-based auth API?](#why-no-callback-auth)
 
 #### Client Metadata
@@ -596,16 +571,16 @@ The handshake metadata sent to the server contains:
 
 | Field | Source | Notes |
 |---|---|---|
-| `client.application.name` | URI `appName` option | Maps to Rust `ClientOptions::app_name` |
-| `client.driver.name` | Rust driver + mongoac | Rust base name is `"mongo-rust-driver"`; mongoac appends `"mongoac"` |
-| `client.driver.version` | Rust driver + mongoac | Rust base version + mongoac version |
+| `client.application.name` | URI `appName` option or `mongoac_client_options_set_app_name` | Maps to Rust `ClientOptions::app_name` |
+| `client.driver.name` | Rust driver + mongoac (+ optional user) | `mongo-rust-driver` \| `mongoac` \| `<user>` |
+| `client.driver.version` | Rust driver + mongoac (+ optional user) | Rust base version + mongoac version (+ user version) |
 | `client.os.*` | Rust driver | Detected from `std::env::consts` |
 | `client.platform` | Rust driver + mongoac | Rust platform string + `\|`-delimited C build metadata (`<build><link>`) |
 | `client.env.*` | Rust driver | Detected from environment variables |
 
-mongoac injects C driver identity into the handshake by setting `ClientOptions::driver_info` during `mongoac_client_new()`. The metadata uses the `|` delimiter required by the [Driver Handshake spec](https://github.com/mongodb/specifications/blob/master/source/mongodb-handshake/handshake.md). A two-character suffix is appended to the Rust `platform` string encoding build type (`d`/`r`/`u`) and linkage (`h`/`t`).
+mongoac injects its identity into the handshake by setting `ClientOptions::driver_info` during client construction. User-provided `driver_info` (set via `mongoac_client_options_set_driver_info`) is appended *after* mongoac's via `Client::append_metadata`, yielding the order `mongo-rust-driver | mongoac | <user>`. The metadata uses the `|` delimiter required by the [Driver Handshake spec](https://github.com/mongodb/specifications/blob/master/source/mongodb-handshake/handshake.md). A two-character suffix is appended to the Rust `platform` string encoding build type (`d`/`r`/`u`) and linkage (`h`/`t`).
 
-C callers may optionally append wrapping-library metadata via `mongoac_client_append_metadata(client, name, version, platform, error)`.
+C callers may also append wrapping-library metadata at runtime via `mongoac_client_append_metadata(client, name, version, platform, error)`.
 
 > [!NOTE]
 > `mongoac_client_append_metadata()` validates immediate FFI safety (non-null client) and UTF-8 encoding for each non-`NULL` string argument. The [Driver Handshake spec](https://github.com/mongodb/specifications/blob/master/source/mongodb-handshake/handshake.md) requires `name` to be present, rejects `|` in driver-info strings, and limits the metadata document to 512 bytes; these spec-level checks are **delegated to the Rust driver**, not the FFI layer.
@@ -644,22 +619,18 @@ SDAM runs inside the Rust driver. mongoac does not expose topology state or serv
 
 ##### Server Selection
 
-The Rust driver selects a server automatically for every operation. Client-specific options (`serverSelectionTimeoutMS`, `localThresholdMS`) are URI-only. Non-client-specific options (`readPreference`, `maxStalenessSeconds`, `readPreferenceTags`) map to `SelectionCriteria` and can be configured at any level by passing a `bson_t*` document with fields `mode`, `tagSets`, and `maxStalenessSeconds`. These options are deserialized when creating database/collection handles, but no CRUD operations currently consume them.
+The Rust driver selects a server automatically for every operation. Client-specific options (`serverSelectionTimeoutMS`, `localThresholdMS`) are available both through the URI and as `mongoac_client_options_t` fields. Non-client-specific options (`readPreference`, `maxStalenessSeconds`, `readPreferenceTags`) map to `SelectionCriteria` and are configured at the database, collection, and operation levels via `mongoac_read_preference_t` with setters for mode, max staleness (seconds), tag sets (BSON array), and hedge. `SelectionCriteria::Predicate` (custom closure) is not FFI-expressible and is not exposed.
 
 > [!TIP]
-> - [Why are client-specific server selection options URI-only?](#why-uri-only-client-server-selection)
-> - [Why are database/collection/operation read preferences passed as BSON documents?](#why-bson-read-preference)
+> - [Why typed read preference?](#why-typed-read-preference)
 
 ##### Retryable Reads & Writes
 
-Retryable reads and writes are enabled by default and controlled by URI options `retryReads` and `retryWrites`. The Rust driver automatically retries eligible operations once. No per-operation retry flags are exposed.
+Retryable reads and writes are enabled by default and controlled by URI options `retryReads` and `retryWrites`, or equivalently by `mongoac_client_options_set_retry_reads` / `mongoac_client_options_set_retry_writes`. The Rust driver automatically retries eligible operations once. No per-operation retry flags are exposed.
 
 ##### Connection Resilience (Step-Down)
 
 The Rust driver preserves connections across replica set step-downs on wire version 8+. This requires no C API.
-
-> [!TIP]
-> - [Why defer typed read-preference structs?](#deferred-typed-read-preference)
 
 #### Enumerate Databases
 
@@ -668,7 +639,7 @@ Two client-level async operations, distinguished by result format:
 - **`list_databases`** returns a BSON array of `DatabaseSpecification` documents (`{ name, sizeOnDisk, empty, shards? }`).
 - **`list_database_names`** returns a BSON array of name strings — both via `mongoac_future_get_bson()`.
 
-Options (`authorizedDatabases`, `comment`, `filter`) as `*const bson_t` deserialized into `ListDatabasesOptions`; `NULL` = defaults. `nameOnly` is not a valid option — the Rust driver determines it internally per entry point, so two separate C functions avoid ambiguity. Targets `admin`; runs on primary. `totalSize` is not exposed.
+Options are represented as `mongoac_list_databases_options_t`; `NULL` = defaults. `nameOnly` is not a valid option — the Rust driver determines it internally per entry point, so two separate C functions avoid ambiguity. Targets `admin`; runs on primary. `totalSize` is not exposed.
 
 #### Enumerate Collections
 
@@ -677,21 +648,17 @@ Two database-level operations are exposed, following the same result-type split 
 - **`list_collections`** returns a cursor (`mongoac_cursor_t`) with `*const bson_t` views of `CollectionSpecification` documents. The `type` field is a string (no dedicated C enum).
 - **`list_collection_names`** returns a BSON array of name strings via `mongoac_database_list_collection_names()`.
 
-Options (`filter`, `batchSize`, `comment`, `authorizedCollections`) as `*const bson_t` deserialized into `ListCollectionsOptions`; `NULL` = defaults. `nameOnly` is not a valid option (same rationale as enumerate databases). `authorizedCollections` only affects `list_collection_names`.
+Options are represented by `mongoac_list_collections_options_t`; `NULL` = defaults. `nameOnly` is not a valid option (same rationale as enumerate databases). `authorizedCollections` only affects `list_collection_names`.
 
 #### Read Concern & Write Concern
 
-> [!NOTE]
-> Not yet implemented in the current proof-of-concept. `DatabaseOptions` can be deserialized from a `bson_t*`, but no operation currently consumes read concern or write concern settings.
-
-Read concern and write concern will follow the [Options Deserialization](#why-bson-options) pattern: passed as BSON fields within the `*const bson_t options` parameter. Key casing matches the containing options struct — `camelCase` for most structs, `snake_case` for `DatabaseOptions` (both accepted due to FFI normalization). `NULL` (or omitting the field) inherits from the parent level.
+Read concern and write concern are represented by `mongoac_read_concern_t` and `mongoac_write_concern_t`. `NULL` (or not calling the setter) inherits from the parent level.
 
 > [!WARNING]
 > **Empty ReadConcern for server-default reset** is not currently expressible — see [Rejected Ideas](#rejected-empty-read-concern-hack).
 
 > [!TIP]
-> - [Why use BSON documents for read/write concern?](#why-bson-options)
-> - [Why defer typed concern structs?](#deferred-typed-read-preference)
+> - [Why typed options structs?](#why-typed-options)
 
 <a id="crud-operations"></a>
 #### CRUD Operations
@@ -729,7 +696,7 @@ The cursor is backed by the Rust driver's `Cursor<T>` (implicit session) or `Ses
 > [!NOTE]
 > Not yet implemented in the current proof-of-concept. No CRUD or index operations are exposed.
 
-Collation will be passed as a BSON sub-document inside existing `*const bson_t options` parameters. The BSON document follows the Rust `Collation` struct fields (`locale` required, plus optional `strength`, `caseLevel`, `caseFirst`, `numericOrdering`, `alternate`, `maxVariable`, `normalization`, `backwards`). Collation will be supported on all CRUD operations except `estimated_document_count`, `insert_one`, and `insert_many`. mongoac will not check `maxWireVersion < 5` for collation; the Rust driver handles server incompatibility.
+Collation will be passed as a BSON sub-document within options structs (e.g. `mongoac_find_options_t`). The BSON document follows the Rust `Collation` struct fields (`locale` required, plus optional `strength`, `caseLevel`, `caseFirst`, `numericOrdering`, `alternate`, `maxVariable`, `normalization`, `backwards`). Collation will be supported on all CRUD operations except `estimated_document_count`, `insert_one`, and `insert_many`. mongoac will not check `maxWireVersion < 5` for collation; the Rust driver handles server incompatibility.
 
 > [!TIP]
 > - [Why no maxWireVersion check?](#why-no-maxwireversion-check)
@@ -742,8 +709,8 @@ Collation will be passed as a BSON sub-document inside existing `*const bson_t o
 
 Mongoac provides async create and drop operations for collection lifecycle management. All resolve to void via `mongoac_future_get_void()`.
 
-- **`create_collection_async`** — database-level, accepts `CreateCollectionOptions` as a BSON document (capped, validator, `viewOn`/`pipeline` for views, collation, timeseries, clusteredIndex, `encryptedFields`, and other `CreateCollectionOptions` fields). Only the async form is available.
-- **`drop_collection_async`** — collection-level, accepts `DropCollectionOptions` as BSON (currently accepted but unused in the initial implementation).
+- **`create_collection_async`** — database-level, accepts `mongoac_create_collection_options_t` (capped, validator, `viewOn`/`pipeline` for views, collation, timeseries, clusteredIndex, `encryptedFields`, and other `CreateCollectionOptions` fields). Only the async form is available.
+- **`drop_collection_async`** — collection-level, accepts `mongoac_drop_collection_options_t` (write concern).
 - **`drop_database_async`** — database-level, drops the entire database.
 
 `rename_collection` is not exposed — the Rust driver has no dedicated API. View creation uses `create_collection_async` with `viewOn`+`pipeline`; no separate create-view function. All operations are async-only.
@@ -756,7 +723,7 @@ Mongoac provides async create and drop operations for collection lifecycle manag
 
 Session support follows the [Driver Sessions specification](https://github.com/mongodb/specifications/blob/master/source/sessions/driver-sessions.md). The Rust driver manages server session lifetime internally; the FFI layer exposes explicit session handles for C callers.
 
-`mongoac_client_start_session()` (synchronous, via `block_on()`) creates a session and returns the handle directly. An async variant `mongoac_client_start_session_async()` is also provided as part of the public API. Session options are deserialized via the [standard BSON option pattern](#why-bson-options) into Rust's `SessionOptions`. Validation (`causal_consistency` + `snapshot` conflict) is delegated to the Rust driver. Sessions are destroyed with `mongoac_client_session_destroy()`, dropping the backing `ClientSession` which returns the server session to the pool. If a transaction is in-progress at destroy time, the Rust driver's `Drop` impl fires an async abort task unawaited (matching Rust driver conventions).
+`mongoac_client_start_session()` (synchronous, via `block_on()`) creates a session and returns the handle directly. An async variant `mongoac_client_start_session_async()` is also provided as part of the public API. Session options are represented by `mongoac_session_options_t`. Validation (`causal_consistency` + `snapshot` conflict) is delegated to the Rust driver. Sessions are destroyed with `mongoac_client_session_destroy()`, dropping the backing `ClientSession` which returns the server session to the pool. If a transaction is in-progress at destroy time, the Rust driver's `Drop` impl fires an async abort task unawaited (matching Rust driver conventions).
 
 The session type wraps `Arc<tokio::sync::Mutex<ClientSession>>`, providing thread safety across the two-thread polling model. All session access — both async spawned tasks and synchronous accessors — goes through the mutex. Multiple tasks queued for the same session yield on contention via `lock().await`; no deadlock occurs.
 
@@ -774,7 +741,7 @@ Transaction support will follow the [Driver Transactions specification](https://
 
 Each transaction operation (`start_transaction`, `commit_transaction`, `abort_transaction`) will be provided in two forms: async (`*_async()`) returning a `mongoac_future_t*`, and sync (no suffix) blocking via `runtime.block_on()`. The sync variants must not be called from within a `make_progress()` context, matching the sync session accessor convention.
 
-`TransactionOptions` will use the standard BSON deserialization pattern, supporting `readConcern`, `writeConcern`, `readPreference` (as a `SelectionCriteria` sub-document), and `maxCommitTimeMS` (`timeoutMS` is [deferred](#deferred-transaction-timeoutms)). `NULL` for options uses session-level defaults set via `defaultTransactionOptions` at session creation; per-call options override those defaults — the Rust driver handles the inheritance chain.
+`TransactionOptions` is represented by `mongoac_transaction_options_t` (`timeoutMS` is [deferred](#deferred-transaction-timeoutms)). `NULL` for options uses session-level defaults set via `default_transaction_options` at session creation; per-call options override those defaults — the Rust driver handles the inheritance chain.
 
 Transaction state machine validation (`None → Starting → InProgress → Committed → Aborted`) will be delegated to the Rust driver, which detects invalid transitions synchronously and propagates them through the error out-parameter. Error labels (`"TransientTransactionError"`, `"UnknownTransactionCommitResult"`) are accessible via `mongoac_error_has_label()`, which delegates directly to the Rust driver's `contains_label()` on the preserved original error.
 
@@ -873,36 +840,20 @@ Rust tests exercise internal logic without cbindgen/C compilation overhead. C++ 
 
 ### Rust FFI Design
 
-<a id="why-bson-options"></a>
-#### Why use a single `bson_t` for options structs?
+<a id="why-typed-options"></a>
+#### Why typed options structs?
 
-Because (nearly) all Rust API `*Options` structs support deserialization via
-  [serde](https://docs.rs/serde/latest/serde/), the initial design specification proposes consistently using a single
-  `options: *const bson_t` optional (nullable) parameter for all options by default to keep the Rust FFI as "thin" as
-  possible.
-This avoids needing to implement a large number of `*OptionsT` structs and accessor API in the initial Rust FFI
-  implementation: over a hundred functions in total when accounting for all the various options structs whose accessors
-  must be kept in sync with every individual options field.
-The API may be extended as-needed in the future to support typed options structs by adding `*_with_options()` variants
-  to the existing API (e.g. see `mongoac_client_new_with_options()` for `mongoac_client_options_t`).
-This pattern is also consistent with the Rust API's use of `*_with_options()` functions.
+The Rust Driver discourages depending on `Deserialize` for options classes.
+Quoting [RUST-2022](https://jira.mongodb.org/browse/RUST-2022):
 
-> [!IMPORTANT]
-> Though the `Deserialize` trait is implemented on many Rust API types, the Rust driver does not intend to continue this pattern. Quoting [RUST-2022](https://jira.mongodb.org/browse/RUST-2022):
->
-> > The presence of Deserialize on those structs is something of an accident of implementation of our automated testing and something we're avoiding going forward.
->
-> The FFI can use wrapper structs for types that do not implement `Deserialize` as expected.
+> The presence of Deserialize on those structs is something of an accident of implementation of our automated testing and something we're avoiding going forward.
 
-
-<a id="why-typed-client-options"></a>
-#### Why typed `ClientOptionsT` when operation options use `bson_t`?
-
-Programmatic client options not settable via URI are few (three event toggles,
-`server_api`) and stable, so a typed handle with named setters is more
-discoverable and avoids a serde round-trip for trivial booleans. `server_api`
-takes a `bson_t*` because its fixed schema is already serde-deserializable,
-making a parallel C struct unnecessary.
+Additionally, many option fields are `#[serde(skip)]` or `#[serde(skip_serializing)]` (e.g. `write_concern`), which
+  forces the implementation to use a custom type anyways.
+For consistency, options fields (e.g. `ReadConcern`, `ServerApi`, etc.) are also typed (e.g. `mongoac_read_concern_t`,
+  `mongoac_server_api_t`, etc.).
+Only options fields which are fundamentally BSON documents (e.g. `filter`, `comment`, etc.) use `bson_t` in their
+  corresponding accessor API.
 
 <a id="why-opaque-error-handle"></a>
 #### Why opaque errors?
@@ -981,7 +932,7 @@ A dedicated pointer locks the ABI from day one: callers pass `NULL` until sessio
 <a id="why-bson-string-cursortype"></a>
 #### Why BSON string for CursorType?
 
-Consistency with the existing [options deserialization pattern](#why-bson-options): the BSON options document is deserialized directly into the Rust struct via serde, which handles the string-to-enum mapping. An integer enum would require a parallel C `#define` set and manual conversion code that duplicates serde's work.
+`FindOptions` currently uses a transitional `set_from_bson()` that deserializes a BSON document into the Rust struct via serde, which handles the string-to-enum mapping for `CursorType`. An integer enum would require a parallel C `#define` set and manual conversion code that duplicates serde's work. Once full typed setters are added to `mongoac_find_options_t`, `CursorType` will be exposed as a `#define` enum with a typed setter.
 
 ### Supported Features
 
@@ -1006,22 +957,12 @@ The `mongodb` crate's `ClientOptions::parse()` is the authoritative parser. Call
 
 `ClientOptions` fields are consumed during `Client::with_options()`. Exposing them back would require storing a copy inside `mongoac_client_t` for rarely-accessed data. The common workflow (connect, operate, disconnect) does not need post-construction URI inspection.
 
-<a id="why-connection-string-features-uri-only"></a>
-##### Why are connection-string features URI-only?
-
-The Rust driver's `ClientOptions::parse()` is the authoritative parser for connection strings. It validates and applies options for authentication, SDAM, server selection, compression, load balancing, max staleness, retryable reads, retryable writes, pool sizing, and SRV behavior internally. Typed C APIs for each feature would duplicate the Rust driver's model, increase the FFI surface, and require ongoing maintenance to track `#[non_exhaustive]` option fields. URI-only configuration keeps the API surface minimal and avoids leaking Rust-internal topology, pool, and monitoring state across the FFI boundary.
-
-> [!TIP]
-> - [Why not expose a credential type?](#rejected-credential-type)
-> - [Why not expose typed C APIs for standard connection-string features?](#rejected-connection-string-feature-apis)
-
 <a id="why-no-callback-auth"></a>
 ##### Why no callback-based auth API?
 
-Rust-to-C callbacks would require the Rust driver to invoke caller-supplied C functions during async authentication on the per-client Tokio runtime, creating re-entrancy, cancellation, and lifetime hazards across the FFI boundary. The built-in OIDC environment integrations (Azure, GCP, k8s) and standard URI-driven mechanisms cover the common cases without callbacks.
+Rust-to-C callbacks would require the Rust driver to invoke caller-supplied C functions during async authentication on the per-client Tokio runtime, creating re-entrancy, cancellation, and lifetime hazards across the FFI boundary. The built-in OIDC environment integrations (Azure, GCP, k8s) and standard URI-driven mechanisms cover the common cases without callbacks. `mongoac_credential_t` exposes all non-callback `Credential` fields but omits `oidc_callback` for this reason.
 
 > [!TIP]
-> - [Why not expose a credential type?](#rejected-credential-type)
 > - [Why not callback-based auth?](#rejected-callback-auth)
 
 <a id="why-build-platform-metadata"></a>
@@ -1063,18 +1004,10 @@ Events are serialized to BSON at `get()` time and returned as an owning `*mut bs
 
 Consistent with the [partially-transparent error-handling approach](#error-handling-transparency): the FFI layer validates pointer safety and encoding, but defers semantic choices (including event serialization format) to the Rust driver. Normalizing event shapes to spec-expected conventions would require duplicating or transforming Rust driver internals, adding complexity and risk of divergence from the upstream crate. Known spec-level divergences (e.g., `topologyId` serde skip, untagged serialization, duration subdocuments, string `failure`, `connectionId` and `databaseName` shapes) are accepted as-is and documented in the investigation reports.
 
-<a id="why-uri-only-client-server-selection"></a>
-##### Why are client-specific server selection options URI-only?
+<a id="why-typed-read-preference"></a>
+##### Why typed read preference?
 
-`serverSelectionTimeoutMS` and `localThresholdMS` are client-level settings in the Rust driver (`ClientOptions`). They affect every operation on the client and are naturally expressed through the URI. Because they are client-specific and the Rust driver already parses them from the URI, a typed C API would duplicate the Rust driver's model without providing new capabilities.
-
-<a id="why-bson-read-preference"></a>
-##### Why are database/collection/operation read preferences passed as BSON documents?
-
-Unlike client-specific server selection options, `readPreference`, `maxStalenessSeconds`, and `readPreferenceTags` are meaningful at the database, collection, and operation levels in the Rust driver. The `mongodb` crate exposes `SelectionCriteria` on `DatabaseOptions`, `CollectionOptions`, and per-operation option structs such as `FindOptions`. A `bson_t*` document deserializes directly into `SelectionCriteria` through the Rust driver's serde, reusing the same validation and shape without introducing a new C type.
-
-> [!TIP]
-> - [Typed C API for read preference](#deferred-typed-read-preference)
+`readPreference`, `maxStalenessSeconds`, and `readPreferenceTags` are meaningful at the database, collection, and operation levels in the Rust driver. The `mongodb` crate exposes `SelectionCriteria` on `DatabaseOptions`, `CollectionOptions`, and per-operation option structs such as `FindOptions`. A typed `mongoac_read_preference_t` handle with named setters for mode (`#define` constants), max staleness (seconds), tag sets (BSON array), and hedge provides stronger type checking than a BSON document and unlocks the `selection_criteria` field on `FindOptions` (which is `#[serde(skip)]` and therefore unreachable via BSON deserialization). The same handle is reused for the client-level `selection_criteria` field on `mongoac_client_options_t`. `SelectionCriteria::Predicate` (custom closure) is not exposed.
 
 <a id="why-internal-no-api"></a>
 ##### Why do SDAM, retry, and step-down resilience require no C API?
@@ -1267,16 +1200,6 @@ The Rust driver's dual-cursor type is a borrow-checker artifact. C lacks Rust's 
 
 #### Connection Strings (URI)
 
-<a id="rejected-connection-string-feature-apis"></a>
-##### Exposing typed C APIs for standard connection-string features
-
-The Rust driver already parses, validates, and applies URI options internally. A parallel C API would duplicate that model and require ongoing maintenance for `#[non_exhaustive]` option fields without providing new capabilities.
-
-<a id="rejected-credential-type"></a>
-##### Exposing a `mongoac_credential_t` type with typed setters
-
-A dedicated credential type would create a parallel construction path alongside the URI without adding functionality for standard auth mechanisms. It would also not enable callback-based auth, which the FFI deliberately avoids.
-
 <a id="rejected-callback-auth"></a>
 ##### Callback-based authentication API
 
@@ -1434,29 +1357,25 @@ A read-only wrapper adds little value over a future `mongoac_client_get_uri_stri
 
 <a id="deferred-client-options-fields"></a>
 
-##### Other purely programmatic `ClientOptions` fields
+##### Feature-gated fields not exposed
 
-The following `ClientOptions` fields cannot be expressed through the connection
-string but are **deferred** from the initial `mongoac_client_options_t` API:
+The following `ClientOptions` / `TlsOptions` / `Credential` fields are not exposed because mongoac does not enable the corresponding Rust driver feature flags, or because the field type is not FFI-expressible:
 
 | Field | Why deferred |
 |---|---|
-| `driver_info` | `mongoac_client_append_metadata()` already enables post-construction metadata injection. A separate setter would duplicate this existing API. |
 | `tracing_max_document_length_bytes` | Feature-gated (`tracing-unstable`) in the Rust driver. Deferred until the tracing feature is stable. |
 | `tracing` (opentelemetry) | Feature-gated (`opentelemetry`) in the Rust driver. Requires establishing a tracing strategy for mongoac first. |
+| `socks5_proxy` | Feature-gated (`socks5-proxy`) in the Rust driver. Deferred until SOCKS5 proxy support is needed. |
+| `credential.oidc_callback` | Rust callback type (`oidc::Callback`) that cannot cross the FFI boundary. Not FFI-expressible; OIDC via the connection string remains the supported path. |
+| `credential.mechanism = GSSAPI` | Requires `gssapi-auth` feature, not enabled by mongoac. |
+| `TlsOptions.allow_invalid_hostnames` | Feature-gated (`openssl-tls`), not available under mongoac's `rustls-tls` feature. |
+| `TlsOptions.tls_certificate_key_file_password` | Feature-gated (`cert-key-password`), not enabled by mongoac. |
+| Compressor levels | Typed setters add compressors with default level only. Non-default compression levels are available through the connection string. Adding `with_level` setter variants is an additive change. |
 
 Adding these fields later is an additive change: new setter functions on
 `mongoac_client_options_t` that do not break existing C API or ABI.
 
-#### Read Concern, Write Concern & Read Preference
-
-<a id="deferred-typed-read-preference"></a>
-
-##### Typed C API for read preference, read concern, and write concern
-
-`SelectionCriteria`, `ReadConcern`, and `WriteConcern` are currently passed as BSON fields within `*const bson_t options` documents. A future `*_with_options()` extension (analogous to `mongoac_client_new_with_options()`) could accept dedicated C structs, providing stronger type checking and enabling configurations not expressible via plain BSON deserialization — such as an empty `ReadConcern { }` for server-default reset (the Rust driver's public API cannot construct this). Deferred because the BSON options pattern covers all common cases, and adding typed structs later is an additive change.
-
-
+#### Rust FFI Design
 
 #### Logging
 
@@ -1473,7 +1392,7 @@ The handshake spec permits setting the application name on the `MongoClient` bef
 
 ##### Separate `mongoac_collation_t` type
 
-A dedicated collation handle with typed setters for each field would provide discoverability and type safety, following the same pattern as the deferred [typed read-preference/concern structs](#deferred-typed-read-preference). The existing BSON options pattern covers all common cases. Adding a `mongoac_collation_t` later is an additive change.
+A dedicated collation handle with typed setters for each field would provide discoverability and type safety, following the same pattern as the existing typed read-preference/concern/write-concern handles. The existing BSON sub-document approach (passing `const bson_t*` within typed options structs) covers all common cases. Adding a `mongoac_collation_t` later is an additive change.
 
 ##### Bulk write collation helper
 
@@ -1567,17 +1486,6 @@ Should the FFI layer defer all error semantics to the Rust API, or implement spe
 - **Opaque (spec-compliant FFI layer):** implement the full specification on the Rust side regardless of whether the Rust API enforces it. This gives C callers consistent, spec-compliant behavior independent of Rust driver version. However, it duplicates validation logic, requires ongoing maintenance to track spec changes, and risks divergence if the Rust driver later enforces different rules.
 
 Current approach: **partially-transparent** — the FFI layer validates pointer safety and UTF-8 encoding, rejecting invalid UTF-8 with `MONGOAC_ERROR_CODE_INVALID_ARGUMENT`. Spec-level constraints (e.g., `|` in metadata, 512-byte limit) are delegated to the Rust API. This decision is deferrable: moving more or less validation to the boundary is a behavior change that does not break C API or ABI, though it may change which errors callers observe.
-
-<a id="unrecognized-bson-fields"></a>
-#### Unrecognized fields in BSON options deserialization
-
-Should BSON deserialization warn on unrecognized fields?
-
-- **Warn on unrecognized fields:** Emit a WARN-level log for any field not present in the corresponding Rust `*Options` struct. This helps callers catch typos early. However, it requires serde's unknown-field detection or a maintained allow-list per options type, adds log volume, and may produce warnings for intentionally ignored fields (e.g., forward-compatibility options).
-- **Silently ignore:** Rely on serde's default behavior. This is simple, matches the Rust driver, and avoids log noise. However, callers may not realize they are passing misspelled or unsupported fields.
-- **Reject unrecognized fields:** Treat unknown fields as an error and return `MONGOAC_ERROR_CODE_INVALID_ARGUMENT`. This gives the strongest validation but breaks forward compatibility and may reject documents with extra fields the caller does not control.
-
-Current approach: **silently ignore** — the FFI layer relies on serde's default behavior. This decision is deferrable: adding warnings or strict rejection later is a behavior change that does not break the C API or ABI, though it may change runtime logs and which documents are accepted.
 
 #### Async Operations
 

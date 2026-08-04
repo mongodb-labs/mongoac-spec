@@ -1,10 +1,12 @@
 use crate::client_session::ClientSessionT;
+use crate::create_collection_options::CreateCollectionOptionsT;
 use crate::cursor::CursorT;
+use crate::database_options::DatabaseOptionsT;
+use crate::drop_database_options::DropDatabaseOptionsT;
 use crate::error::ErrorT;
 use crate::future::FutureT;
+use crate::list_collections_options::ListCollectionsOptionsT;
 use crate::private::bson::{BsonT, bson_t};
-use crate::private::database_options::DatabaseOptionsT;
-use crate::private::drop_database_options::DropDatabaseOptionsT;
 use crate::private::macros::*;
 use crate::runtime::RuntimeT;
 use crate::spawn;
@@ -27,15 +29,15 @@ pub struct DatabaseT {
 pub extern "C" fn mongoac_client_get_database(
     client: *const ClientT,
     name: *const c_char,
-    options: *const bson_t,
+    options: *const DatabaseOptionsT,
     error: *mut ErrorT,
 ) -> *mut DatabaseT {
     let error = safe_optional_error_as_mut!(error);
     let client = safe_as_ref_with_error!(client, error);
     let name = safe_cstr_from_ptr_with_error!(name, error);
-    let opts = safe_optional_bson_opts_with_error!(DatabaseOptionsT, options, error);
+    let options = safe_optional_as_ref!(options);
 
-    let db = safe_error!(DatabaseT::new(client, name, opts.map(Into::into)), error);
+    let db = safe_error!(DatabaseT::new(client, name, options.map(Into::into)), error);
     Box::into_raw(Box::new(db))
 }
 
@@ -48,13 +50,13 @@ pub extern "C" fn mongoac_database_destroy(database: *mut DatabaseT) {
 pub extern "C" fn mongoac_database_drop_async(
     database: *const DatabaseT,
     session: *mut ClientSessionT,
-    options: *const bson_t,
+    options: *const DropDatabaseOptionsT,
     error: *mut ErrorT,
 ) -> *mut FutureT {
     let error = safe_optional_error_as_mut!(error);
     let database = safe_as_ref_with_error!(database, error);
     let session = safe_optional_as_mut!(session);
-    let options = safe_optional_bson_opts_with_error!(DropDatabaseOptionsT, options, error);
+    let options = safe_optional_as_ref!(options);
 
     Box::into_raw(Box::new(
         database.drop_async(session, options.map(Into::into)),
@@ -65,13 +67,13 @@ pub extern "C" fn mongoac_database_drop_async(
 pub extern "C" fn mongoac_database_drop(
     database: *const DatabaseT,
     session: *mut ClientSessionT,
-    options: *const bson_t,
+    options: *const DropDatabaseOptionsT,
     error: *mut ErrorT,
 ) {
     let error = safe_optional_error_as_mut!(error);
     let database = safe_as_ref_with_error!(database, error);
     let session = safe_optional_as_mut!(session);
-    let options = safe_optional_bson_opts_with_error!(DropDatabaseOptionsT, options, error);
+    let options = safe_optional_as_ref!(options);
 
     safe_error!(database.drop(session, options.map(Into::into)), error);
 }
@@ -81,14 +83,15 @@ pub extern "C" fn mongoac_database_create_collection_async(
     database: *const DatabaseT,
     session: *mut ClientSessionT,
     name: *const c_char,
-    options: *const bson_t,
+    options: *const CreateCollectionOptionsT,
     error: *mut ErrorT,
 ) -> *mut FutureT {
     let error = safe_optional_error_as_mut!(error);
     let database = safe_as_ref_with_error!(database, error);
     let session = safe_optional_as_mut!(session);
     let name = safe_cstr_from_ptr_with_error!(name, error);
-    let create_opts = safe_optional_bson_opts_with_error!(CreateCollectionOptions, options, error);
+    let options = safe_optional_as_ref!(options);
+    let create_opts = options.map(Into::into);
 
     let future = database.create_collection_async(name, session, create_opts);
     Box::into_raw(Box::new(future))
@@ -99,14 +102,15 @@ pub extern "C" fn mongoac_database_create_collection(
     database: *const DatabaseT,
     session: *mut ClientSessionT,
     name: *const c_char,
-    options: *const bson_t,
+    options: *const CreateCollectionOptionsT,
     error: *mut ErrorT,
 ) {
     let error = safe_optional_error_as_mut!(error);
     let database = safe_as_ref_with_error!(database, error);
     let session = safe_optional_as_mut!(session);
     let name = safe_cstr_from_ptr_with_error!(name, error);
-    let create_opts = safe_optional_bson_opts_with_error!(CreateCollectionOptions, options, error);
+    let options = safe_optional_as_ref!(options);
+    let create_opts = options.map(Into::into);
 
     safe_error!(
         database.create_collection(name, session, create_opts),
@@ -118,15 +122,15 @@ pub extern "C" fn mongoac_database_create_collection(
 pub extern "C" fn mongoac_database_list_collections_async(
     database: *const DatabaseT,
     session: *mut ClientSessionT,
-    options: *const bson_t,
+    options: *const ListCollectionsOptionsT,
     error: *mut ErrorT,
 ) -> *mut FutureT {
     let error = safe_optional_error_as_mut!(error);
     let database = safe_as_ref_with_error!(database, error);
     let session = safe_optional_as_mut!(session);
-    let opts = safe_optional_bson_opts_with_error!(ListCollectionsOptions, options, error);
+    let options = safe_optional_as_ref!(options);
 
-    let future = database.list_collections_async(session, opts);
+    let future = database.list_collections_async(session, options.map(Into::into));
     Box::into_raw(Box::new(future))
 }
 
@@ -134,15 +138,18 @@ pub extern "C" fn mongoac_database_list_collections_async(
 pub extern "C" fn mongoac_database_list_collections(
     database: *const DatabaseT,
     session: *mut ClientSessionT,
-    options: *const bson_t,
+    options: *const ListCollectionsOptionsT,
     error: *mut ErrorT,
 ) -> *mut CursorT {
     let error = safe_optional_error_as_mut!(error);
     let database = safe_as_ref_with_error!(database, error);
     let session = safe_optional_as_mut!(session);
-    let opts = safe_optional_bson_opts_with_error!(ListCollectionsOptions, options, error);
+    let options = safe_optional_as_ref!(options);
 
-    let cursor = safe_error!(database.list_collections(session, opts), error);
+    let cursor = safe_error!(
+        database.list_collections(session, options.map(Into::into)),
+        error
+    );
     Box::into_raw(Box::new(cursor))
 }
 
@@ -150,15 +157,15 @@ pub extern "C" fn mongoac_database_list_collections(
 pub extern "C" fn mongoac_database_list_collection_names_async(
     database: *const DatabaseT,
     session: *mut ClientSessionT,
-    options: *const bson_t,
+    options: *const ListCollectionsOptionsT,
     error: *mut ErrorT,
 ) -> *mut FutureT {
     let error = safe_optional_error_as_mut!(error);
     let database = safe_as_ref_with_error!(database, error);
     let session = safe_optional_as_mut!(session);
-    let opts = safe_optional_bson_opts_with_error!(ListCollectionsOptions, options, error);
+    let options = safe_optional_as_ref!(options);
 
-    let future = database.list_collection_names_async(session, opts);
+    let future = database.list_collection_names_async(session, options.map(Into::into));
     Box::into_raw(Box::new(future))
 }
 
@@ -166,15 +173,18 @@ pub extern "C" fn mongoac_database_list_collection_names_async(
 pub extern "C" fn mongoac_database_list_collection_names(
     database: *const DatabaseT,
     session: *mut ClientSessionT,
-    options: *const bson_t,
+    options: *const ListCollectionsOptionsT,
     error: *mut ErrorT,
 ) -> *mut bson_t {
     let error = safe_optional_error_as_mut!(error);
     let database = safe_as_ref_with_error!(database, error);
     let session = safe_optional_as_mut!(session);
-    let opts = safe_optional_bson_opts_with_error!(ListCollectionsOptions, options, error);
+    let options = safe_optional_as_ref!(options);
 
-    let names = safe_error!(database.list_collection_names(session, opts), error);
+    let names = safe_error!(
+        database.list_collection_names(session, options.map(Into::into)),
+        error
+    );
     safe_error!(BsonT::try_from(&names), error).into_raw()
 }
 
@@ -185,7 +195,7 @@ impl DatabaseT {
         options: Option<DatabaseOptions>,
     ) -> Result<Self, mongodb::bson::error::Error> {
         let db = match options {
-            Some(opts) => client.inner().database_with_options(&name, opts),
+            Some(o) => client.inner().database_with_options(&name, o),
             None => client.inner().database(&name),
         };
 

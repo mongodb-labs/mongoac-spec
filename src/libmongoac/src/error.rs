@@ -26,7 +26,7 @@ pub enum ErrorCategoryT {
     Rust = MONGOAC_ERROR_CATEGORY_RUST,
 
     #[num_enum(catch_all)]
-    Unknown(i32) = i32::MIN,
+    Unknown(i32),
 }
 
 #[derive(

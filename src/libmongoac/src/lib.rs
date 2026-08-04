@@ -1,14 +1,30 @@
 #![allow(dead_code)]
-
 pub mod client;
 pub mod client_options;
 pub mod client_session;
 pub mod collection;
+pub mod create_collection_options;
+pub mod credential;
 pub mod cursor;
 pub mod database;
+pub mod database_options;
+pub mod drop_collection_options;
+pub mod drop_database_options;
 pub mod error;
+pub mod find_options;
 pub mod future;
+pub mod insert_many_options;
+pub mod insert_one_options;
+pub mod list_collections_options;
+pub mod list_databases_options;
 mod private;
+pub mod read_concern;
+pub mod read_preference;
 pub mod runtime;
 pub mod sanity_check;
+pub mod server_api;
+pub mod session_options;
+pub mod tls;
+pub mod transaction_options;
 pub mod version;
+pub mod write_concern;

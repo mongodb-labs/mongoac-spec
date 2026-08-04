@@ -143,6 +143,21 @@ macro_rules! safe_cstr_from_ptr_with_error {
 }
 
 #[macro_export]
+macro_rules! safe_optional_cstr_from_ptr {
+    ($ptr:expr) => {{
+        let ptr = $ptr;
+        if ptr.is_null() {
+            None
+        } else {
+            match unsafe { std::ffi::CStr::from_ptr(ptr) }.to_str() {
+                Ok(s) => Some(s.to_string()),
+                Err(_) => None,
+            }
+        }
+    }};
+}
+
+#[macro_export]
 macro_rules! safe_optional_cstr_from_ptr_with_error {
     ($ptr:expr, $error:expr) => {{
         let ptr = $ptr;
@@ -168,8 +183,8 @@ macro_rules! safe_optional_bson_opts_with_error {
     ($target:ty, $options:expr, $error:expr) => {{
         let options = safe_optional_const_bson!($options);
         match options {
-            Some(ref opts) => Some($crate::safe_error!(
-                ::mongodb::bson::deserialize_from_slice::<$target>(opts.as_bytes()),
+            Some(ref o) => Some($crate::safe_error!(
+                ::mongodb::bson::deserialize_from_slice::<$target>(o.as_bytes()),
                 $error
             )),
             None => None,

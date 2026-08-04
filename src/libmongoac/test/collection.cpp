@@ -18,6 +18,7 @@
 #include <mongoac/cursor.h>
 #include <mongoac/database.h>
 #include <mongoac/error.h>
+#include <mongoac/find_options.h>
 #include <mongoac/future.h>
 #include <mongoac/runtime.h>
 #include <test_util/bson.hpp>
@@ -267,7 +268,12 @@ TEST_CASE("find", "[mongoac][collection]")
 
       // Sorting by _id ascending returns the two matches in insertion order;
       // since x is inserted before z, the {x: 1} document precedes {z: 3}.
-      auto const options = REQUIRE_MAKE_OWNING_PTR(bson_from_json(R"({"sort": {"_id": 1}})"), &bson_destroy);
+      auto const options = make_owning_ptr(mongoac_find_options_new(), &mongoac_find_options_destroy);
+      {
+         auto const sort_bson = REQUIRE_MAKE_OWNING_PTR(bson_from_json(R"({"sort": {"_id": 1}})"), &bson_destroy);
+         mongoac_find_options_set_from_bson(options, sort_bson, error);
+         MONGOAC_ERROR_REQUIRE(error);
+      }
 
       auto const check_two_results = [&](mongoac_cursor_t const *cursor) {
          REQUIRE(mongoac_cursor_next(cursor, error));

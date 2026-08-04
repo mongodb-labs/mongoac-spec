@@ -53,39 +53,53 @@ TEST_CASE("set_capture_command_events", "[mongoac][client_options]")
    }
 }
 
-static bson_t *
-build_server_api(const char *version, bool set_strict, bool strict_val, bool set_deprecation, bool deprecation_val)
-{
-   return BCON_NEW("apiVersion",
-                   BCON_UTF8(version),
-                   "apiStrict",
-                   BCON_BOOL(set_strict ? strict_val : false),
-                   "apiDeprecationErrors",
-                   BCON_BOOL(set_deprecation ? deprecation_val : false));
-}
-
 TEST_CASE("set_server_api", "[mongoac][client_options]")
 {
    auto const opts = make_owning_ptr(mongoac_client_options_new(), &mongoac_client_options_destroy);
    REQUIRE(opts != nullptr);
 
-   SECTION("null")
+   SECTION("null options")
    {
       auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
-      auto const bson = make_owning_ptr(build_server_api("1", false, false, false, false), &bson_destroy);
+      auto const api = make_owning_ptr(mongoac_server_api_new(), &mongoac_server_api_destroy);
 
-      mongoac_client_options_set_server_api(nullptr, bson, error);
+      mongoac_client_options_set_server_api(nullptr, api, error);
       CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_MONGOAC);
       CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_INVALID_ARGUMENT);
    }
 
-   SECTION("null ")
+   SECTION("null api clears")
    {
       auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
 
       mongoac_client_options_set_server_api(opts, nullptr, error);
       CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_NONE);
    }
+
+   SECTION("valid default")
+   {
+      auto const api = make_owning_ptr(mongoac_server_api_new(), &mongoac_server_api_destroy);
+
+      mongoac_client_options_set_server_api(opts, api, nullptr);
+   }
+
+   SECTION("valid with strict")
+   {
+      auto const api = make_owning_ptr(mongoac_server_api_new(), &mongoac_server_api_destroy);
+      mongoac_server_api_set_strict(api, true);
+
+      mongoac_client_options_set_server_api(opts, api, nullptr);
+   }
+
+   SECTION("valid with strict and deprecation errors")
+   {
+      auto const api = make_owning_ptr(mongoac_server_api_new(), &mongoac_server_api_destroy);
+      mongoac_server_api_set_strict(api, true);
+      mongoac_server_api_set_deprecation_errors(api, true);
+
+      mongoac_client_options_set_server_api(opts, api, nullptr);
+   }
+}
 
    SECTION("valid")
    {
