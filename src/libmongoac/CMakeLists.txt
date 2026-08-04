@@ -139,7 +139,7 @@ add_custom_command (
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/generate-crate-headers/Cargo.toml"
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/generate-crate-headers/src/main.rs"
 )
-add_custom_target (mongoac_crate_headers_target DEPENDS ${cargo_headers})
+add_custom_target (mongoac_crate_headers_target ALL DEPENDS ${cargo_headers})
 
 set_source_files_properties (${mongoac_headers} ${cargo_headers} PROPERTIES LANGUAGE C)
 
