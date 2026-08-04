@@ -123,10 +123,12 @@ impl FutureT {
         }
     }
 
+    #[must_use]
     pub fn get_runtime(&self) -> &RuntimeT {
         &self.runtime
     }
 
+    #[must_use]
     pub fn is_ready(&self) -> bool {
         future_value_op!(self.value, v => v.is_ready())
     }
@@ -183,6 +185,7 @@ pub struct FutureValueType<T> {
 }
 
 impl<T: Send + 'static> FutureValueType<T> {
+    #[must_use]
     pub fn new(handle: tokio::task::JoinHandle<Result<T, ErrorT>>) -> Self {
         Self {
             result: OnceLock::new(),
@@ -253,16 +256,18 @@ pub struct FutureExt<'a> {
 }
 
 impl<'a> FutureExt<'a> {
+    #[must_use]
     pub fn new(future: &'a FutureT) -> Self {
         Self::new_with_index(future, 0)
     }
 
+    #[must_use]
     pub fn new_with_index(future: &'a FutureT, index: usize) -> Self {
         Self { future, index }
     }
 }
 
-impl<'a> Future for FutureExt<'a> {
+impl Future for FutureExt<'_> {
     type Output = usize;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {

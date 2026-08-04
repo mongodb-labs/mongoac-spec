@@ -79,9 +79,7 @@ pub extern "C" fn mongoac_error_code(error: *const ErrorT) -> i32 {
 pub extern "C" fn mongoac_error_message(error: *const ErrorT) -> *const std::ffi::c_char {
     safe_as_ref!(error)
         .message()
-        .map_or(EMPTY_MSG.as_ptr() as *const std::ffi::c_char, |m| {
-            m.as_ptr()
-        })
+        .map_or(EMPTY_MSG.as_ptr().cast(), |m| m.as_ptr())
 }
 
 #[unsafe(no_mangle)]
@@ -89,10 +87,11 @@ pub extern "C" fn mongoac_error_has_label(
     error: *const ErrorT,
     label: *const std::ffi::c_char,
 ) -> bool {
-    safe_as_ref!(error).has_label(&safe_cstr_from_ptr!(label))
+    safe_as_ref!(error).has_label(safe_cstr_from_ptr!(label))
 }
 
 impl ErrorCodeT {
+    #[must_use]
     pub fn message(self) -> &'static str {
         self.get_message().unwrap_or("unknown mongoac error")
     }
@@ -111,6 +110,7 @@ pub enum ErrorT {
 }
 
 impl ErrorT {
+    #[must_use]
     pub fn new() -> Self {
         Self::None
     }
@@ -126,6 +126,7 @@ impl ErrorT {
         *self = Self::None;
     }
 
+    #[must_use]
     pub fn category(&self) -> ErrorCategoryT {
         match self {
             Self::None => ErrorCategoryT::None,
@@ -135,6 +136,7 @@ impl ErrorT {
         }
     }
 
+    #[must_use]
     pub fn code(&self) -> ErrorCodeT {
         match self {
             Self::None => ErrorCodeT::Ok,
@@ -148,6 +150,7 @@ impl ErrorT {
         }
     }
 
+    #[must_use]
     pub fn message(&self) -> Option<&CString> {
         match self {
             Self::None => None,
@@ -156,6 +159,7 @@ impl ErrorT {
         }
     }
 
+    #[must_use]
     pub fn has_label(&self, label: &str) -> bool {
         match self {
             Self::Rust(err, _) => err.contains_label(label),

@@ -230,7 +230,7 @@ pub extern "C" fn mongoac_client_list_database_names(
 }
 
 impl ClientT {
-    fn new(conn_str: String) -> Result<ClientT, ErrorT> {
+    fn new(conn_str: &str) -> Result<ClientT, ErrorT> {
         let runtime = make_runtime()?;
 
         let client = runtime.block_on(async move {
@@ -252,7 +252,7 @@ impl ClientT {
         let runtime = make_runtime()?;
 
         let command_events: Option<Arc<Mutex<VecDeque<CommandEvent>>>> =
-            if options.map(|o| o.capture_command_events).unwrap_or(false) {
+            if options.is_some_and(|o| o.capture_command_events) {
                 Some(Arc::new(Mutex::new(VecDeque::new())))
             } else {
                 None
@@ -296,14 +296,14 @@ impl ClientT {
 
     fn append_metadata(
         &self,
-        name: String,
-        version: Option<String>,
-        platform: Option<String>,
+        name: &str,
+        version: Option<&str>,
+        platform: Option<&str>,
     ) -> Result<(), mongodb::error::Error> {
         let driver_info = DriverInfo::builder()
             .name(name)
-            .version(version)
-            .platform(platform)
+            .version(version.map(Into::into))
+            .platform(platform.map(Into::into))
             .build();
 
         self.inner.append_metadata(driver_info)
@@ -444,8 +444,8 @@ fn make_runtime() -> Result<RuntimeT, ErrorT> {
 fn build_driver_info() -> DriverInfo {
     DriverInfo::builder()
         .name("mongoac".to_string())
-        .version(MONGOAC_VERSION_FULL.to_string())
-        .platform(MONGOAC_BUILD_PLATFORM.to_string())
+        .version(Some(MONGOAC_VERSION_FULL.into()))
+        .platform(Some(MONGOAC_BUILD_PLATFORM.into()))
         .build()
 }
 

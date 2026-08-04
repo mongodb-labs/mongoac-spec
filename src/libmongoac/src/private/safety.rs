@@ -111,7 +111,7 @@ macro_rules! safe_cstr_from_ptr {
         }
 
         match unsafe { std::ffi::CStr::from_ptr(ptr) }.to_str() {
-            Ok(s) => s.to_string(),
+            Ok(s) => s,
             Err(_) => return Default::default(),
         }
     }};
@@ -130,7 +130,7 @@ macro_rules! safe_cstr_from_ptr_with_error {
         }
 
         match unsafe { std::ffi::CStr::from_ptr(ptr) }.to_str() {
-            Ok(s) => s.to_string(),
+            Ok(s) => s,
             Err(_) => {
                 $crate::private::safety::invalid_argument(
                     $error,
@@ -150,7 +150,7 @@ macro_rules! safe_optional_cstr_from_ptr {
             None
         } else {
             match unsafe { std::ffi::CStr::from_ptr(ptr) }.to_str() {
-                Ok(s) => Some(s.to_string()),
+                Ok(s) => Some(s),
                 Err(_) => None,
             }
         }
@@ -165,7 +165,7 @@ macro_rules! safe_optional_cstr_from_ptr_with_error {
             None
         } else {
             match unsafe { std::ffi::CStr::from_ptr(ptr) }.to_str() {
-                Ok(s) => Some(s.to_string()),
+                Ok(s) => Some(s),
                 Err(_) => {
                     $crate::private::safety::invalid_argument(
                         $error,

@@ -183,7 +183,7 @@ pub extern "C" fn mongoac_collection_insert_many_async(
     let documents: Vec<&RawDocument> = safe_error!(
         documents
             .iter()
-            .map(|d| d.try_into())
+            .map(TryInto::try_into)
             .collect::<Result<_, _>>(),
         error
     );
@@ -212,7 +212,7 @@ pub extern "C" fn mongoac_collection_insert_many(
     let documents: Vec<&RawDocument> = safe_error!(
         documents
             .iter()
-            .map(|d| d.try_into())
+            .map(TryInto::try_into)
             .collect::<Result<_, _>>(),
         error
     );
@@ -227,8 +227,8 @@ pub extern "C" fn mongoac_collection_insert_many(
 }
 
 impl CollectionT {
-    fn new(db: &DatabaseT, name: String) -> Self {
-        let coll = db.inner().collection::<RawDocumentBuf>(&name);
+    fn new(db: &DatabaseT, name: &str) -> Self {
+        let coll = db.inner().collection::<RawDocumentBuf>(name);
 
         CollectionT {
             inner: coll,
@@ -326,7 +326,7 @@ impl CollectionT {
     ) -> FutureT {
         let coll = self.inner.clone();
         let session = session.map(|s| s.clone());
-        let documents: Vec<RawDocumentBuf> = documents.into_iter().map(|d| d.to_owned()).collect(); // Deep-copy!
+        let documents: Vec<RawDocumentBuf> = documents.into_iter().map(ToOwned::to_owned).collect(); // Deep-copy!
 
         spawn!(self, Bson, async move {
             let res = op_with_session!(coll.insert_many(documents).with_options(options), session)?;

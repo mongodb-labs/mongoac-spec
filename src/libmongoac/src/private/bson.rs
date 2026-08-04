@@ -16,7 +16,7 @@ unsafe extern "C" {
 impl bson_t {
     // Library-wide precondition: BSON data is always valid.
     fn as_bytes(&self) -> &[u8] {
-        let data = unsafe { bson_get_data(self as *const bson_t) };
+        let data = unsafe { bson_get_data(std::ptr::from_ref(self)) };
         let raw_len = unsafe { std::slice::from_raw_parts(data, 4) };
         let len = u32::from_le_bytes([raw_len[0], raw_len[1], raw_len[2], raw_len[3]]) as usize;
         unsafe { std::slice::from_raw_parts(data, len) }
@@ -138,21 +138,5 @@ impl TryFrom<&RawDocument> for BsonT {
 
     fn try_from(doc: &RawDocument) -> Result<Self, Self::Error> {
         Self::from_bytes(doc.as_bytes()) // Deep-copy!
-    }
-}
-
-impl TryFrom<&RawDocumentBuf> for ConstBsonT {
-    type Error = mongodb::bson::error::Error;
-
-    fn try_from(doc: &RawDocumentBuf) -> Result<Self, Self::Error> {
-        Ok(Self(doc.as_bytes().as_ptr() as *const bson_t))
-    }
-}
-
-impl TryFrom<&RawDocument> for ConstBsonT {
-    type Error = mongodb::bson::error::Error;
-
-    fn try_from(doc: &RawDocument) -> Result<Self, Self::Error> {
-        Ok(Self(doc.as_bytes().as_ptr() as *const bson_t))
     }
 }

@@ -29,6 +29,7 @@ pub extern "C" fn mongoac_future_get_client_session(
 }
 
 impl ClientSessionT {
+    #[must_use]
     pub fn new(session: ClientSession) -> Self {
         Self {
             state: Arc::new(Mutex::new(session)),

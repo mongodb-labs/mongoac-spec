@@ -37,8 +37,11 @@ pub extern "C" fn mongoac_client_get_database(
     let name = safe_cstr_from_ptr_with_error!(name, error);
     let options = safe_optional_as_ref!(options);
 
-    let db = safe_error!(DatabaseT::new(client, name, options.map(Into::into)), error);
-    Box::into_raw(Box::new(db))
+    Box::into_raw(Box::new(DatabaseT::new(
+        client,
+        name,
+        options.map(Into::into),
+    )))
 }
 
 #[unsafe(no_mangle)]
@@ -189,20 +192,16 @@ pub extern "C" fn mongoac_database_list_collection_names(
 }
 
 impl DatabaseT {
-    fn new(
-        client: &ClientT,
-        name: String,
-        options: Option<DatabaseOptions>,
-    ) -> Result<Self, mongodb::bson::error::Error> {
+    fn new(client: &ClientT, name: &str, options: Option<DatabaseOptions>) -> Self {
         let db = match options {
-            Some(o) => client.inner().database_with_options(&name, o),
-            None => client.inner().database(&name),
+            Some(o) => client.inner().database_with_options(name, o),
+            None => client.inner().database(name),
         };
 
-        Ok(DatabaseT {
+        DatabaseT {
             inner: db,
             runtime: client.get_runtime(),
-        })
+        }
     }
 
     pub(crate) fn inner(&self) -> &Database {
@@ -237,11 +236,12 @@ impl DatabaseT {
 
     fn create_collection_async(
         &self,
-        name: String,
+        name: &str,
         session: Option<&mut ClientSessionT>,
         options: Option<CreateCollectionOptions>,
     ) -> FutureT {
         let db = self.inner.clone();
+        let name = name.to_string();
         let session = session.map(|s| s.clone());
 
         spawn!(self, Void, async move {
@@ -251,7 +251,7 @@ impl DatabaseT {
 
     fn create_collection(
         &self,
-        name: String,
+        name: &str,
         session: Option<&mut ClientSessionT>,
         options: Option<CreateCollectionOptions>,
     ) -> Result<(), ErrorT> {

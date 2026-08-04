@@ -20,8 +20,7 @@ fn generate_config_crate() {
 
     assert!(
         version.len() == 3,
-        "src/libmongoac/VERSION_CURRENT does not contain a valid SemVer string: {}",
-        full
+        "src/libmongoac/VERSION_CURRENT does not contain a valid SemVer string: {full}"
     );
 
     let build_type = match build_type.as_str() {
@@ -60,6 +59,7 @@ fn generate_config_crate() {
     )
     .expect("failed to write config.rs");
 
+    println!("cargo:rerun-if-changed=src/libmongoac/build.rs");
     println!("cargo:rerun-if-changed=VERSION_CURRENT");
     println!("cargo:rerun-if-env-changed=MONGOAC_CMAKE_BUILD_TYPE");
     println!("cargo:rerun-if-env-changed=MONGOAC_LIBRARY_TYPE");
@@ -88,7 +88,7 @@ fn link_with_bson() {
 
         let dir = path
             .parent()
-            .unwrap_or_else(|| panic!("{} has no parent directory", env_var));
+            .unwrap_or_else(|| panic!("{env_var} has no parent directory"));
 
         println!("cargo:rustc-link-search=native={}", dir.display());
 

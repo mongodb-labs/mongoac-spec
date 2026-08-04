@@ -47,7 +47,7 @@ pub extern "C" fn mongoac_runtime_clone(runtime: *const RuntimeT) -> *mut Runtim
 // on a worker thread.
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_runtime_make_progress(runtime: *const RuntimeT) {
-    safe_as_ref!(runtime).make_progress()
+    safe_as_ref!(runtime).make_progress();
 }
 
 // Like `make_progress()`, but (soft) upper-bounded by `timeout_ms`.
@@ -65,7 +65,7 @@ pub extern "C" fn mongoac_runtime_make_progress_with_timeout(
     safe_error!(
         safe_as_ref!(runtime).make_progress_with_timeout(Duration::from_millis(timeout_ms)),
         safe_optional_error_as_mut!(error)
-    )
+    );
 }
 
 // Like `make_progress()`, but lower-bounded by `duration_ms`.
@@ -74,7 +74,7 @@ pub extern "C" fn mongoac_runtime_make_progress_with_timeout(
 // scheduled tasks (conceptually, repeatedly making a "single pass" through the task queue).
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_runtime_make_progress_for(runtime: *const RuntimeT, duration_ms: u64) {
-    safe_as_ref!(runtime).make_progress_for(Duration::from_millis(duration_ms))
+    safe_as_ref!(runtime).make_progress_for(Duration::from_millis(duration_ms));
 }
 
 // Issues a stop request to the runtime.
@@ -113,7 +113,7 @@ pub extern "C" fn mongoac_runtime_wait_with_timeout(
     safe_error!(
         safe_as_ref!(runtime).wait_with_timeout(Duration::from_millis(timeout_ms)),
         safe_optional_error_as_mut!(error)
-    )
+    );
 }
 
 // Block the current thread by making progress until the `future` is ready.
@@ -169,9 +169,8 @@ pub extern "C" fn mongoac_runtime_block_on_any(
     let error = safe_optional_error_as_mut!(error);
     let runtime = safe_as_ref!(runtime);
 
-    let refs = match safe_error!(futures_as_refs_for_any(futures, count, runtime), error) {
-        Some(refs) => refs,
-        None => return Default::default(),
+    let Some(refs) = safe_error!(futures_as_refs_for_any(futures, count, runtime), error) else {
+        return Default::default();
     };
 
     match runtime.block_on_any(&refs) {
@@ -195,9 +194,8 @@ pub extern "C" fn mongoac_runtime_block_on_any_with_timeout(
     let error = safe_optional_error_as_mut!(error);
     let runtime = safe_as_ref!(runtime);
 
-    let refs = match safe_error!(futures_as_refs_for_any(futures, count, runtime), error) {
-        Some(refs) => refs,
-        None => return Default::default(),
+    let Some(refs) = safe_error!(futures_as_refs_for_any(futures, count, runtime), error) else {
+        return Default::default();
     };
 
     match safe_error!(
@@ -223,9 +221,8 @@ pub extern "C" fn mongoac_runtime_block_on_all(
     let error = safe_optional_error_as_mut!(error);
     let runtime = safe_as_ref!(runtime);
 
-    let refs = match safe_error!(futures_as_refs_for_all(futures, count, runtime), error) {
-        Some(refs) => refs,
-        None => return,
+    let Some(refs) = safe_error!(futures_as_refs_for_all(futures, count, runtime), error) else {
+        return;
     };
 
     runtime.block_on_all(&refs);
@@ -245,15 +242,14 @@ pub extern "C" fn mongoac_runtime_block_on_all_with_timeout(
     let error = safe_optional_error_as_mut!(error);
     let runtime = safe_as_ref!(runtime);
 
-    let refs = match safe_error!(futures_as_refs_for_all(futures, count, runtime), error) {
-        Some(refs) => refs,
-        None => return,
+    let Some(refs) = safe_error!(futures_as_refs_for_all(futures, count, runtime), error) else {
+        return;
     };
 
     safe_error!(
         runtime.block_on_all_with_timeout(&refs, Duration::from_millis(timeout_ms)),
         error
-    )
+    );
 }
 
 impl PartialEq for RuntimeT {
@@ -276,7 +272,7 @@ impl RuntimeT {
     }
 
     pub(crate) fn make_progress(&self) {
-        self.state.runtime.block_on(tokio::task::yield_now())
+        self.state.runtime.block_on(tokio::task::yield_now());
     }
 
     pub(crate) fn make_progress_with_timeout(&self, timeout: Duration) -> Result<(), ErrorT> {
@@ -293,7 +289,7 @@ impl RuntimeT {
 
         self.state
             .runtime
-            .block_on(async { tokio::time::sleep_until(deadline).await })
+            .block_on(async { tokio::time::sleep_until(deadline).await });
     }
 
     pub(crate) fn request_stop(&self) -> bool {
