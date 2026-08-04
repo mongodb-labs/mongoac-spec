@@ -23,7 +23,6 @@ TEST_CASE("new", "[mongoac][client]")
 
       CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_MONGOAC);
       CHECK(mongoac_error_message(error) != nullptr);
-
    }
 
    SECTION("invalid URI")
@@ -35,7 +34,6 @@ TEST_CASE("new", "[mongoac][client]")
 
       CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_RUST);
       CHECK(mongoac_error_message(error) != nullptr);
-
    }
 
    SECTION("invalid UTF-8")
@@ -47,7 +45,6 @@ TEST_CASE("new", "[mongoac][client]")
       CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_MONGOAC);
       CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_INVALID_ARGUMENT);
       CHECK_THAT(mongoac_error_message(error), Catch::Matchers::ContainsSubstring("UTF-8"));
-
    }
 
    SECTION("valid URI")
@@ -176,7 +173,6 @@ TEST_CASE("append_metadata", "[mongoac][client]")
 
       CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_MONGOAC);
       CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_INVALID_ARGUMENT);
-
    }
 
    SECTION("null name")
@@ -186,7 +182,6 @@ TEST_CASE("append_metadata", "[mongoac][client]")
 
       CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_NONE);
       CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_OK);
-
    }
 
    SECTION("with delimiter")
@@ -196,7 +191,6 @@ TEST_CASE("append_metadata", "[mongoac][client]")
 
       CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_NONE);
       CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_OK);
-
    }
 
    SECTION("invalid UTF-8 name")
@@ -206,7 +200,6 @@ TEST_CASE("append_metadata", "[mongoac][client]")
 
       CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_MONGOAC);
       CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_INVALID_ARGUMENT);
-
    }
 
    SECTION("invalid UTF-8 version")
@@ -216,7 +209,6 @@ TEST_CASE("append_metadata", "[mongoac][client]")
 
       CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_MONGOAC);
       CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_INVALID_ARGUMENT);
-
    }
 
    SECTION("valid name")
@@ -226,7 +218,6 @@ TEST_CASE("append_metadata", "[mongoac][client]")
 
       CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_NONE);
       CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_OK);
-
    }
 
    SECTION("all valid")
@@ -236,7 +227,6 @@ TEST_CASE("append_metadata", "[mongoac][client]")
 
       CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_NONE);
       CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_OK);
-
    }
 
    mongoac_client_destroy(client);
@@ -260,7 +250,6 @@ TEST_CASE("shutdown", "[mongoac][client]")
 
       CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_MONGOAC);
       CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_INVALID_ARGUMENT);
-
    }
 
    SECTION("valid client")
@@ -295,7 +284,6 @@ TEST_CASE("shutdown_async", "[mongoac][client]")
       CHECK(future == nullptr);
       CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_MONGOAC);
       CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_INVALID_ARGUMENT);
-
    }
 
    SECTION("valid client")

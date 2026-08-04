@@ -87,8 +87,7 @@ TEST_CASE("list_database_names_async", "[mongoac][client]")
 TEST_CASE("list_databases_async returns valid BSON", "[mongoac][client][live-server]")
 {
    auto const error = mongoac_error_new();
-   auto const client =
-      mongoac_client_new("mongodb://localhost:27017/?serverSelectionTimeoutMS=2000", nullptr);
+   auto const client = mongoac_client_new("mongodb://localhost:27017/?serverSelectionTimeoutMS=2000", nullptr);
    REQUIRE(client != nullptr);
 
    auto const runtime = mongoac_client_get_runtime(client);
