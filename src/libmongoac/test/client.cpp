@@ -7,7 +7,7 @@
 #include <mongoac/future.h>
 #include <mongoac/runtime.h>
 #include <mongoac/server_api.h>
-#include <test_util/owning_ptr.hpp>
+#include <test_util/owning_ptr.hh>
 
 using mongoac::test_util::make_owning_ptr;
 

@@ -619,7 +619,9 @@ SDAM runs inside the Rust driver. mongoac does not expose topology state or serv
 
 ##### Server Selection
 
-The Rust driver selects a server automatically for every operation. Client-specific options (`serverSelectionTimeoutMS`, `localThresholdMS`) are available both through the URI and as `mongoac_client_options_t` fields. Non-client-specific options (`readPreference`, `maxStalenessSeconds`, `readPreferenceTags`) map to `SelectionCriteria` and are configured at the database, collection, and operation levels via `mongoac_read_preference_t` with setters for mode, max staleness (seconds), tag sets (BSON array), and hedge. `SelectionCriteria::Predicate` (custom closure) is not FFI-expressible and is not exposed.
+The Rust driver selects a server automatically for every operation. Client-specific options (`serverSelectionTimeoutMS`, `localThresholdMS`) are available both through the URI and as `mongoac_client_options_t` fields. Non-client-specific options (`readPreference`, `maxStalenessSeconds`, `readPreferenceTags`) map to `SelectionCriteria` and are expressed via `mongoac_read_preference_t` with setters for mode, max staleness (seconds), tag sets, and hedge. Read preference is currently supported for `mongoac_client_options_t` and `mongoac_database_options_t`; collection-level and per-operation (e.g. `FindOptions`) support is planned. `SelectionCriteria::Predicate` (custom closure) is not FFI-expressible and is not exposed.
+
+The option setters (`max_staleness`, `tag_set`, `hedge`) reject `Primary` mode with `MONGOAC_ERROR_CODE_INVALID_ARGUMENT`. A non-`Primary` mode must be set before configuring options.
 
 > [!TIP]
 > - [Why typed read preference?](#why-typed-read-preference)
@@ -664,17 +666,17 @@ Read concern and write concern are represented by `mongoac_read_concern_t` and `
 #### CRUD Operations
 
 > [!NOTE]
-> Not yet implemented in the current proof-of-concept. The `mongoac_cursor_t` type and the async/runtime machinery exist, but no CRUD functions are exposed.
+> Partially implemented in the current proof-of-concept. `find`, `insert_one`, and `insert_many` are exposed in both sync and async forms (including session parameters). `aggregate`, `delete`, `replace`, `update`, `count`, `distinct`, and `estimated_document_count` are not yet exposed.
 
-CRUD operations will follow the general async pattern with these conventions:
+CRUD operations follow the general async pattern with these conventions:
 
 - **Session parameter:** Nullable `mongoac_client_session_t *session` (second param; `NULL` = implicit). See [Sessions](#sessions).
-- **Sequence parameters:** `insert_many` and `aggregate` will accept C arrays of `bson_t*` with explicit count.
-- **Result BSON encoding:** `camelCase` field names per CRUD spec.
-- **Cursor:** Single `mongoac_cursor_t` type for `find`, `aggregate`, `run_cursor_command`, wrapping `Cursor<T>` or `SessionCursor<T>`. Session embedded; iteration functions have no session parameter. The cursor implementation currently returns an owning `bson_t*` copy of the current document via `mongoac_cursor_get_document()`; a future non-owning view variant may be added.
-- **Cursor iteration:** Sync `cursor_next()` (blocks). Async variants return a future via `cursor_next_async()`. Document retrieval after async resolution via `cursor_get_document()`. A future `cursor_next_with_timeout()` may be added for tailable cursors.
-- **Cursor lifecycle:** `mongoac_cursor_destroy()` will trigger `killCursors` via `AsyncDropToken`; call `make_progress()` to flush pending killCursors.
-- **Sync find:** `mongoac_collection_find()` will return a cursor directly via `runtime.block_on()`.
+- **Sequence parameters:** `insert_many` accepts a C array of `bson_t*` with explicit count; `aggregate` will follow the same pattern.
+- **Result BSON encoding:** `camelCase` field names per CRUD spec (e.g. `insertedId` for `insert_one`, `insertedIds` for `insert_many`).
+- **Cursor:** Single `mongoac_cursor_t` type for `find`, `aggregate`, `run_cursor_command`, wrapping `Cursor<T>` or `SessionCursor<T>`. Session embedded; iteration functions have no session parameter. The cursor implementation returns an owning `bson_t*` copy of the current document via `mongoac_cursor_current()`; a future non-owning view variant may be added.
+- **Cursor iteration:** Sync `mongoac_cursor_next()` (blocks) advances the cursor; `mongoac_cursor_current()` returns an owning `bson_t*` copy of the current document. Async variants `mongoac_cursor_next_async()` and `mongoac_cursor_current_async()` return futures. A future `cursor_next_with_timeout()` may be added for tailable cursors.
+- **Cursor lifecycle:** `mongoac_cursor_destroy()` triggers `killCursors` via `AsyncDropToken`; call `make_progress()` to flush pending killCursors.
+- **Sync find:** `mongoac_collection_find()` returns a cursor directly via `runtime.block_on()`.
 - **Per-getMore options:** `batchSize` and `maxTimeMS` fixed at cursor creation.
 - **Deferred (Database-level):** `aggregate` on `Database` and client-level `bulkWrite` (MongoDB 8.0+). `run_command` and `run_cursor_command` will be provided as database-level operations (see [Run Command](#run-command-database-level)).
 
@@ -694,7 +696,7 @@ The cursor is backed by the Rust driver's `Cursor<T>` (implicit session) or `Ses
 #### Collation
 
 > [!NOTE]
-> Not yet implemented in the current proof-of-concept. No CRUD or index operations are exposed.
+> Not yet implemented in the current proof-of-concept. Collation is not wired into any exposed CRUD or index operation.
 
 Collation will be passed as a BSON sub-document within options structs (e.g. `mongoac_find_options_t`). The BSON document follows the Rust `Collation` struct fields (`locale` required, plus optional `strength`, `caseLevel`, `caseFirst`, `numericOrdering`, `alternate`, `maxVariable`, `normalization`, `backwards`). Collation will be supported on all CRUD operations except `estimated_document_count`, `insert_one`, and `insert_many`. mongoac will not check `maxWireVersion < 5` for collation; the Rust driver handles server incompatibility.
 
@@ -704,22 +706,19 @@ Collation will be passed as a BSON sub-document within options structs (e.g. `mo
 
 #### Collection Management
 
-> [!NOTE]
-> Partially implemented in the current proof-of-concept. Only `create_collection_async`, `drop_collection_async`, and `drop_database_async` are exposed; the remaining behavior is planned.
+Mongoac provides create and drop operations for collection lifecycle management.
 
-Mongoac provides async create and drop operations for collection lifecycle management. All resolve to void via `mongoac_future_get_void()`.
+- **`create_collection`** — database-level, accepts `mongoac_create_collection_options_t` (capped, validator, `viewOn`/`pipeline` for views, collation, timeseries, clusteredIndex, `encryptedFields`, and other `CreateCollectionOptions` fields).
+- **`drop_collection`** — collection-level, accepts `mongoac_drop_collection_options_t` (write concern).
+- **`drop_database`** — database-level, drops the entire database.
 
-- **`create_collection_async`** — database-level, accepts `mongoac_create_collection_options_t` (capped, validator, `viewOn`/`pipeline` for views, collation, timeseries, clusteredIndex, `encryptedFields`, and other `CreateCollectionOptions` fields). Only the async form is available.
-- **`drop_collection_async`** — collection-level, accepts `mongoac_drop_collection_options_t` (write concern).
-- **`drop_database_async`** — database-level, drops the entire database.
-
-`rename_collection` is not exposed — the Rust driver has no dedicated API. View creation uses `create_collection_async` with `viewOn`+`pipeline`; no separate create-view function. All operations are async-only.
+`rename_collection` is not exposed — the Rust driver has no dedicated API. View creation uses `create_collection` with `viewOn`+`pipeline`; no separate create-view function.
 
 <a id="sessions"></a>
 #### Sessions
 
 > [!NOTE]
-> Partially implemented in the current proof-of-concept. Only `mongoac_client_start_session()`, `mongoac_client_start_session_async()`, and `mongoac_client_session_destroy()` are exposed. Sessions can be passed to `list_databases` and `list_database_names`, but transaction accessors and causal-consistency accessors are not yet implemented.
+> Partially implemented in the current proof-of-concept. Only `mongoac_client_start_session()`, `mongoac_client_start_session_async()`, and `mongoac_client_session_destroy()` are exposed. Sessions can be passed to `list_databases`, `list_database_names`, `list_collections`, `list_collection_names`, `find`, `insert_one`, `insert_many`, and the collection/database create/drop operations, but transaction accessors and causal-consistency accessors are not yet implemented.
 
 Session support follows the [Driver Sessions specification](https://github.com/mongodb/specifications/blob/master/source/sessions/driver-sessions.md). The Rust driver manages server session lifetime internally; the FFI layer exposes explicit session handles for C callers.
 
@@ -1007,7 +1006,9 @@ Consistent with the [partially-transparent error-handling approach](#error-handl
 <a id="why-typed-read-preference"></a>
 ##### Why typed read preference?
 
-`readPreference`, `maxStalenessSeconds`, and `readPreferenceTags` are meaningful at the database, collection, and operation levels in the Rust driver. The `mongodb` crate exposes `SelectionCriteria` on `DatabaseOptions`, `CollectionOptions`, and per-operation option structs such as `FindOptions`. A typed `mongoac_read_preference_t` handle with named setters for mode (`#define` constants), max staleness (seconds), tag sets (BSON array), and hedge provides stronger type checking than a BSON document and unlocks the `selection_criteria` field on `FindOptions` (which is `#[serde(skip)]` and therefore unreachable via BSON deserialization). The same handle is reused for the client-level `selection_criteria` field on `mongoac_client_options_t`. `SelectionCriteria::Predicate` (custom closure) is not exposed.
+`readPreference`, `maxStalenessSeconds`, and `readPreferenceTags` are meaningful at the database, collection, and operation levels in the Rust driver. The `mongodb` crate exposes `SelectionCriteria` on `DatabaseOptions`, `CollectionOptions`, and per-operation option structs such as `FindOptions`. A typed `mongoac_read_preference_t` handle with per-variant setters for mode, max staleness (seconds), tag sets, and hedge provides stronger type checking than a BSON document and reaches `#[serde(skip)]` fields such as `selection_criteria` (unreachable via BSON deserialization). The handle is currently reused for the `selection_criteria` field on `mongoac_client_options_t` and `mongoac_database_options_t`; per-operation option structs such as `FindOptions` will use it once their typed setters are added. `SelectionCriteria::Predicate` (custom closure) is not exposed.
+
+`mongoac_read_preference_t` directly wraps `ReadPreference` (`ReadPreferenceT(ReadPreference)`), matching the struct shape of `mongoac_read_concern_t` and `mongoac_write_concern_t`. Because `ReadPreference::Primary` has no `options` slot, the option setters (`max_staleness`, `tag_sets`, `hedge`) reject `Primary` with `MONGOAC_ERROR_CODE_INVALID_ARGUMENT` — mirroring the Rust driver's `ReadPreference::with_tags` / `with_max_staleness`, which return `Err(InvalidArgument)` for `Primary`. Mode setters carry `ReadPreferenceOptions` forward when switching between non-`Primary` modes; switching to `Primary` discards them (inherent to the enum).
 
 <a id="why-internal-no-api"></a>
 ##### Why do SDAM, retry, and step-down resilience require no C API?
@@ -1266,12 +1267,6 @@ Exposing `rename_collection` as either a client-level or database-level function
 
 A dedicated `mongoac_database_create_view_async` function for discoverability was considered. Rejected in favor of expressing view creation through `create_collection` with `viewOn` and `pipeline` fields in the BSON options — consistent with the Rust driver and the existing BSON-options pattern.
 
-<a id="rejected-collection-type-enum-mgmt"></a>
-
-##### Dedicated C enum for collection lifecycle options
-
-A dedicated struct with typed setters for `CreateCollectionOptions` fields (similar to `mongoac_client_options_t`) was considered. Rejected — all options are passed as BSON documents following the existing deserialization pattern, consistent with other operation options.
-
 #### Sessions
 
 <a id="rejected-sync-only-sessions"></a>
@@ -1370,12 +1365,9 @@ The following `ClientOptions` / `TlsOptions` / `Credential` fields are not expos
 | `credential.mechanism = GSSAPI` | Requires `gssapi-auth` feature, not enabled by mongoac. |
 | `TlsOptions.allow_invalid_hostnames` | Feature-gated (`openssl-tls`), not available under mongoac's `rustls-tls` feature. |
 | `TlsOptions.tls_certificate_key_file_password` | Feature-gated (`cert-key-password`), not enabled by mongoac. |
-| Compressor levels | Typed setters add compressors with default level only. Non-default compression levels are available through the connection string. Adding `with_level` setter variants is an additive change. |
 
 Adding these fields later is an additive change: new setter functions on
 `mongoac_client_options_t` that do not break existing C API or ABI.
-
-#### Rust FFI Design
 
 #### Logging
 

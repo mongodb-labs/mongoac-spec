@@ -7,7 +7,7 @@
 #include <mongoac/future.h>
 #include <mongoac/list_databases_options.h>
 #include <mongoac/runtime.h>
-#include <test_util/owning_ptr.hpp>
+#include <test_util/owning_ptr.hh>
 
 #include <string>
 

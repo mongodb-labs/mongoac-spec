@@ -16,20 +16,27 @@ else ()
   set (bson_target bson::static)
 endif ()
 
+
 add_executable (test-libmongoac)
 target_compile_features (test-libmongoac PRIVATE cxx_std_17)
+target_link_libraries (test-libmongoac PRIVATE "${mongoac_target}" Catch2::Catch2WithMain)
+
+# Suppress compiler warnings emitted by bson headers.
 target_link_libraries (test-libmongoac PRIVATE "${mongoac_target}" "$<LINK_ONLY:${bson_target}>" Catch2::Catch2WithMain)
 target_include_directories (test-libmongoac
-  # Suppress compiler warnings emitted by bson headers.
   SYSTEM PRIVATE "$<TARGET_PROPERTY:${bson_target},INTERFACE_INCLUDE_DIRECTORIES>"
 )
-target_include_directories (test-libmongoac
-  # Allow `#include <mongoac/test/...>`.
-  PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}"
-)
 
-file (GLOB_RECURSE test_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
-target_sources (test-libmongoac PRIVATE ${test_sources})
+file (GLOB_RECURSE mongoac_test_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
+file (GLOB_RECURSE mongoac_test_headers CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.hh")
+target_sources (test-libmongoac
+  PRIVATE
+    ${mongoac_test_sources}
+  PRIVATE
+    FILE_SET HEADERS
+      BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}"
+      FILES ${mongoac_test_headers}
+)
 FetchContent_GetProperties (EP_Catch2)
 list (APPEND CMAKE_MODULE_PATH "${ep_catch2_SOURCE_DIR}/extras")
 include (Catch)

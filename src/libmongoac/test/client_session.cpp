@@ -10,7 +10,7 @@
 #include <mongoac/client_options.h>
 #include <mongoac/cursor.h>
 #include <mongoac/database.h>
-#include <test_util/owning_ptr.hpp>
+#include <test_util/owning_ptr.hh>
 
 #include <cstdint>
 #include <cstring>

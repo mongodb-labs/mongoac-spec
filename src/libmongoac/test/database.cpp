@@ -16,8 +16,8 @@
 #include <mongoac/client.h>
 #include <mongoac/future.h>
 #include <mongoac/runtime.h>
-#include <test_util/bson.hpp>
-#include <test_util/owning_ptr.hpp>
+#include <test_util/bson.hh>
+#include <test_util/owning_ptr.hh>
 
 #include <array>
 

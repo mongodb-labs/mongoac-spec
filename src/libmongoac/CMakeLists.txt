@@ -143,11 +143,6 @@ add_custom_target (mongoac_crate_headers_target ALL DEPENDS ${cargo_headers})
 
 set_source_files_properties (${mongoac_headers} ${cargo_headers} PROPERTIES LANGUAGE C)
 
-set (mongoac_include_dirs
-  "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-  "$<BUILD_INTERFACE:${include_dir}>"
-  "$<INSTALL_INTERFACE:${MONGOAC_INSTALL_INCLUDEDIR}>"
-)
 set (mongoac_file_set_headers
   FILE_SET HEADERS
     BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
@@ -258,7 +253,6 @@ if ("$CACHE{ENABLE_SHARED}")
     SOVERSION "${PROJECT_VERSION_MAJOR}"
   )
   add_dependencies (mongoac_shared mongoac_shared_target mongoac_crate_headers_target)
-  target_include_directories (mongoac_shared INTERFACE ${mongoac_include_dirs})
   target_link_libraries (mongoac_shared INTERFACE
     "$<BUILD_INTERFACE:${library_shared}>"
     "$<INSTALL_INTERFACE:${CMAKE_INSTALL_LIBDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}${soname}${CMAKE_SHARED_LIBRARY_SUFFIX}>"
@@ -311,7 +305,6 @@ if (NOT "$CACHE{ENABLE_STATIC}" STREQUAL "OFF")
   set_target_properties (mongoac_static PROPERTIES EXPORT_NAME mongoac::static)
   add_dependencies (mongoac_static mongoac_static_target mongoac_crate_headers_target)
   target_compile_definitions (mongoac_static INTERFACE MONGOAC_STATIC)
-  target_include_directories (mongoac_static INTERFACE ${mongoac_include_dirs})
   target_link_libraries (mongoac_static INTERFACE
     "$<BUILD_INTERFACE:${library_static}>"
     "$<INSTALL_INTERFACE:${CMAKE_INSTALL_LIBDIR}/${CMAKE_STATIC_LIBRARY_PREFIX}${soname}${CMAKE_STATIC_LIBRARY_SUFFIX}>"

@@ -8,8 +8,7 @@ use crate::write_concern::WriteConcernT;
 use crate::{credential::CredentialT, error::ErrorCodeT};
 
 use mongodb::options::{
-    ClientOptions, Compressor, DriverInfo, SelectionCriteria, ServerAddress, ServerMonitoringMode,
-    Tls,
+    ClientOptions, Compressor, DriverInfo, ServerAddress, ServerMonitoringMode, Tls,
 };
 use std::ffi::c_char;
 use std::time::Duration;
@@ -240,8 +239,7 @@ pub extern "C" fn mongoac_client_options_set_read_preference(
     opts: *mut ClientOptionsT,
     v: *const ReadPreferenceT,
 ) {
-    safe_as_mut!(opts).inner.selection_criteria =
-        safe_optional_as_ref!(v).map(|v| SelectionCriteria::ReadPreference(v.build()));
+    safe_as_mut!(opts).inner.selection_criteria = safe_optional_as_ref!(v).map(Into::into);
 }
 
 #[unsafe(no_mangle)]

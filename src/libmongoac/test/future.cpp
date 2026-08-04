@@ -5,7 +5,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <mongoac/client_session.h>
 #include <mongoac/error.h>
-#include <test_util/owning_ptr.hpp>
+#include <test_util/owning_ptr.hh>
 
 using mongoac::test_util::make_owning_ptr;
 
