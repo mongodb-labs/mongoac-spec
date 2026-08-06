@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+pub mod bson;
 pub mod client;
 pub mod client_options;
 pub mod client_session;

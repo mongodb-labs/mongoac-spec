@@ -1,4 +1,3 @@
-pub mod bson;
 pub mod macros;
 pub mod safety;
 

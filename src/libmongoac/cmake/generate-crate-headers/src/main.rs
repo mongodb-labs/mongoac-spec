@@ -10,6 +10,8 @@ macro_rules! includes {
 fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
     // Rename structs from `ExampleT` to `mongoac_example_t`.
     for (from, to) in [
+        ("BsonT", "mongoac_bson_t"),
+        ("BsonViewT", "mongoac_bson_view_t"),
         ("ClientOptionsT", "mongoac_client_options_t"),
         ("ClientSessionT", "mongoac_client_session_t"),
         ("ClientT", "mongoac_client_t"),
@@ -57,6 +59,7 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
     }
 
     config.sys_includes = match name {
+        "bson" => includes!["mongoac/export.h", "stdint.h"],
         "sanity_check" => includes!["mongoac/export.h", "stdint.h"],
         "client" => includes![
             "mongoac/export.h",
@@ -67,7 +70,7 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
             "mongoac/list_databases_options.h",
             "mongoac/session_options.h",
             "mongoac/runtime.h",
-            "bson/bson_t.h",
+            "mongoac/bson.h",
             "stdbool.h",
             "stdint.h",
         ],
@@ -95,12 +98,12 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
             "mongoac/insert_many_options.h",
             "mongoac/find_options.h",
             "mongoac/collection_options.h",
-            "bson/bson_t.h",
+            "mongoac/bson.h",
             "stdbool.h",
             "stdint.h",
         ],
         "create_collection_options" => {
-            includes!["mongoac/export.h", "mongoac/error.h", "bson/bson_t.h"]
+            includes!["mongoac/export.h", "mongoac/error.h", "mongoac/bson.h"]
         }
         "collection_options" => includes![
             "mongoac/export.h",
@@ -112,14 +115,14 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
         "credential" => includes![
             "mongoac/export.h",
             "mongoac/error.h",
-            "bson/bson_t.h",
+            "mongoac/bson.h",
             "stdint.h",
         ],
         "cursor" => includes![
             "mongoac/export.h",
             "mongoac/error.h",
             "mongoac/future.h",
-            "bson/bson_t.h",
+            "mongoac/bson.h",
             "stdbool.h",
             "stdint.h",
         ],
@@ -134,7 +137,7 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
             "mongoac/drop_database_options.h",
             "mongoac/database_options.h",
             "mongoac/create_collection_options.h",
-            "bson/bson_t.h",
+            "mongoac/bson.h",
             "stdbool.h",
             "stdint.h",
         ],
@@ -148,43 +151,43 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
         "drop_collection_options" => includes!["mongoac/export.h", "mongoac/write_concern.h"],
         "drop_database_options" => includes!["mongoac/export.h", "mongoac/write_concern.h"],
         "error" => includes!["mongoac/export.h", "stdbool.h", "stdint.h"],
-        "find_options" => includes!["mongoac/export.h", "mongoac/error.h", "bson/bson_t.h"],
+        "find_options" => includes!["mongoac/export.h", "mongoac/error.h", "mongoac/bson.h"],
         "future" => includes![
             "mongoac/export.h",
             "mongoac/error.h",
-            "bson/bson_t.h",
+            "mongoac/bson.h",
             "stdint.h",
         ],
         "insert_many_options" => includes![
             "mongoac/export.h",
             "mongoac/write_concern.h",
-            "bson/bson_t.h",
+            "mongoac/bson.h",
             "stdbool.h",
         ],
         "insert_one_options" => includes![
             "mongoac/export.h",
             "mongoac/write_concern.h",
-            "bson/bson_t.h",
+            "mongoac/bson.h",
             "stdbool.h",
         ],
         "list_collections_options" => includes![
             "mongoac/export.h",
             "mongoac/error.h",
-            "bson/bson_t.h",
+            "mongoac/bson.h",
             "stdbool.h",
             "stdint.h",
         ],
         "list_databases_options" => includes![
             "mongoac/export.h",
             "mongoac/error.h",
-            "bson/bson_t.h",
+            "mongoac/bson.h",
             "stdbool.h",
         ],
         "read_concern" => includes!["mongoac/export.h", "mongoac/error.h", "stdint.h"],
         "read_preference" => includes![
             "mongoac/export.h",
             "mongoac/error.h",
-            "bson/bson_t.h",
+            "mongoac/bson.h",
             "stdbool.h",
             "stdint.h",
         ],
@@ -195,7 +198,7 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
             "stdint.h"
         ],
         "server_api" => includes!["mongoac/export.h", "stdbool.h"],
-        "server_info" => includes!["mongoac/export.h", "bson/bson_t.h", "stdint.h",],
+        "server_info" => includes!["mongoac/export.h", "mongoac/bson.h", "stdint.h",],
         "server_selector" => includes![
             "mongoac/export.h",
             "mongoac/server_info.h",

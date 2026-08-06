@@ -1,7 +1,7 @@
+use crate::bson::BsonViewT;
 use crate::client_session::ClientSessionT;
 use crate::error::ErrorT;
 use crate::future::FutureT;
-use crate::private::bson::{BsonT, bson_t};
 use crate::private::macros::*;
 use crate::runtime::RuntimeT;
 use crate::spawn;
@@ -68,14 +68,11 @@ pub extern "C" fn mongoac_cursor_current_async(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn mongoac_cursor_current(
-    cursor: *const CursorT,
-    error: *mut ErrorT,
-) -> *mut bson_t {
+pub extern "C" fn mongoac_cursor_current(cursor: *const CursorT, error: *mut ErrorT) -> BsonViewT {
     let error = safe_optional_error_as_mut!(error);
     let cursor = safe_as_ref_with_error!(cursor, error);
 
-    safe_error!(BsonT::try_from(&cursor.current()), error).into_raw()
+    cursor.current()
 }
 
 impl CursorT {
@@ -118,9 +115,9 @@ impl CursorT {
         })
     }
 
-    fn current(&self) -> RawDocumentBuf {
+    fn current(&self) -> BsonViewT {
         self.runtime
-            .block_on(async { self.state.lock().await.current().to_owned() })
+            .block_on(async { self.state.lock().await.current().into() })
     }
 }
 

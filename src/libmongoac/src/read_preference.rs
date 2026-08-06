@@ -1,5 +1,5 @@
+use crate::bson::BsonViewT;
 use crate::error::ErrorT;
-use crate::private::bson::bson_t;
 use crate::private::macros::*;
 
 use mongodb::bson::deserialize_from_slice;
@@ -83,7 +83,7 @@ pub extern "C" fn mongoac_read_preference_set_max_staleness_seconds(
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_read_preference_add_tag_set(
     rp: *mut ReadPreferenceT,
-    tag_set: *const bson_t,
+    tag_set: BsonViewT,
     error: *mut ErrorT,
 ) {
     let error = safe_optional_error_as_mut!(error);
@@ -97,7 +97,7 @@ pub extern "C" fn mongoac_read_preference_add_tag_set(
         return;
     }
 
-    let tag_set = safe_const_bson_with_error!(tag_set, error);
+    let tag_set = safe_bson_view_with_error!(tag_set, error);
     let ts: TagSet = safe_error!(deserialize_from_slice(tag_set.as_bytes()), error);
 
     if let Some(options) = get_options_as_mut(&mut rp.0) {

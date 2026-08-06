@@ -2,10 +2,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <mongoac/collection.h>
-#include <mongoac/database.h>
 #include <mongoac/error.h>
 #include <mongoac/read_concern.h>
 #include <mongoac/read_preference.h>
+#include <mongoac/server_info.h>
 #include <mongoac/server_selector.h>
 #include <mongoac/write_concern.h>
 #include <test_util/error.hh>
@@ -14,7 +14,7 @@
 using mongoac::test_util::make_owning_ptr;
 
 static bool
-coll_options_predicate(mongoac_server_info_t const *info, void *user_data)
+noop_predicate(mongoac_server_info_t const *info, void *user_data)
 {
    (void)info;
    (void)user_data;
@@ -129,8 +129,8 @@ TEST_CASE("set_server_selector", "[mongoac][collection_options]")
 
    SECTION("null server selector clears")
    {
-      auto const sc = make_owning_ptr(mongoac_server_selector_new(&coll_options_predicate, nullptr),
-                                      &mongoac_server_selector_destroy);
+      auto const sc =
+         make_owning_ptr(mongoac_server_selector_new(&noop_predicate, nullptr), &mongoac_server_selector_destroy);
       mongoac_collection_options_set_server_selector(opts, sc);
       mongoac_collection_options_set_server_selector(opts, nullptr);
       SUCCEED();
@@ -138,8 +138,8 @@ TEST_CASE("set_server_selector", "[mongoac][collection_options]")
 
    SECTION("valid")
    {
-      auto const sc = make_owning_ptr(mongoac_server_selector_new(&coll_options_predicate, nullptr),
-                                      &mongoac_server_selector_destroy);
+      auto const sc =
+         make_owning_ptr(mongoac_server_selector_new(&noop_predicate, nullptr), &mongoac_server_selector_destroy);
       mongoac_collection_options_set_server_selector(opts, sc);
       SUCCEED();
    }
@@ -155,13 +155,5 @@ TEST_CASE("get_collection_with_options", "[mongoac][collection_options]")
       auto *coll = mongoac_database_get_collection_with_options(nullptr, "coll", opts, error);
       REQUIRE(coll == nullptr);
       REQUIRE_MONGOAC_INVALID_ARGUMENT(error);
-   }
-
-   SECTION("null options behaves like plain get_collection")
-   {
-      // Construction with null options should succeed the same as
-      // mongoac_database_get_collection. Requires a client + database; tested
-      // in collection.cpp integration tests with a live server.
-      SUCCEED();
    }
 }

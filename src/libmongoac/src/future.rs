@@ -1,7 +1,7 @@
+use crate::bson::{BsonT, BsonViewT};
 use crate::client_session::ClientSessionT;
 use crate::cursor::CursorT;
 use crate::error::{ErrorCodeT, ErrorT};
-use crate::private::bson::{BsonT, bson_t};
 use crate::private::macros::*;
 use crate::runtime::RuntimeT;
 
@@ -36,15 +36,11 @@ pub extern "C" fn mongoac_future_is_ready(future: *const FutureT) -> bool {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn mongoac_future_get_bson(
-    future: *const FutureT,
-    error: *mut ErrorT,
-) -> *mut bson_t {
+pub extern "C" fn mongoac_future_get_bson(future: *const FutureT, error: *mut ErrorT) -> BsonViewT {
     let error = safe_optional_error_as_mut!(error);
     let future = safe_as_ref_with_error!(future, error);
 
-    let doc = safe_error!(future.get_bson(), error);
-    safe_error!(BsonT::try_from(doc), error).into_raw()
+    safe_error!(future.get_bson(), error).into()
 }
 
 #[unsafe(no_mangle)]
@@ -59,15 +55,15 @@ pub extern "C" fn mongoac_future_get_int32(future: *const FutureT, error: *mut E
 pub extern "C" fn mongoac_future_get_optional_bson(
     future: *const FutureT,
     error: *mut ErrorT,
-) -> *mut bson_t {
+) -> BsonT {
     let error = safe_optional_error_as_mut!(error);
     let future = safe_as_ref_with_error!(future, error);
 
     let doc = safe_error!(future.get_optional_bson(), error);
 
     match doc {
-        Some(doc) => safe_error!(BsonT::try_from(doc), error).into_raw(),
-        None => std::ptr::null_mut(),
+        Some(doc) => doc.into(),
+        None => BsonT::default(),
     }
 }
 

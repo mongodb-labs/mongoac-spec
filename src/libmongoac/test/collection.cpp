@@ -14,6 +14,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+#include <mongoac/bson.h>
 #include <mongoac/client.h>
 #include <mongoac/cursor.h>
 #include <mongoac/database.h>
@@ -26,6 +27,7 @@
 
 #include <array>
 
+using mongoac::test_util::bson_array_contains_string;
 using mongoac::test_util::bson_from_json;
 using mongoac::test_util::make_owning_ptr;
 
@@ -49,8 +51,8 @@ TEST_CASE("drop", "[mongoac][collection]")
       mongoac_database_drop(db, nullptr, nullptr, error);
       {
          auto const names =
-            REQUIRE_MAKE_OWNING_PTR(mongoac_database_list_collection_names(db, nullptr, nullptr, error), &bson_destroy);
-         REQUIRE(bson_empty0(names.get()));
+            REQUIRE_MAKE_OWNING_BSON(mongoac_database_list_collection_names(db, nullptr, nullptr, error));
+         REQUIRE(bson_empty(names.bson_ptr()));
       }
 
       mongoac_database_create_collection(db, nullptr, "a", nullptr, error);
@@ -58,7 +60,7 @@ TEST_CASE("drop", "[mongoac][collection]")
       mongoac_database_create_collection(db, nullptr, "c", nullptr, error);
       {
          auto const names =
-            REQUIRE_MAKE_OWNING_PTR(mongoac_database_list_collection_names(db, nullptr, nullptr, error), &bson_destroy);
+            REQUIRE_MAKE_OWNING_BSON(mongoac_database_list_collection_names(db, nullptr, nullptr, error));
 
          CHECK(bson_array_contains_string(names, "a"));
          CHECK(bson_array_contains_string(names, "b"));
@@ -81,7 +83,7 @@ TEST_CASE("drop", "[mongoac][collection]")
       mongoac_runtime_block_on(runtime, drop_b, error);
       {
          auto const names =
-            REQUIRE_MAKE_OWNING_PTR(mongoac_database_list_collection_names(db, nullptr, nullptr, error), &bson_destroy);
+            REQUIRE_MAKE_OWNING_BSON(mongoac_database_list_collection_names(db, nullptr, nullptr, error));
 
          CHECK(bson_array_contains_string(names, "a"));
          CHECK_FALSE(bson_array_contains_string(names, "b"));
@@ -98,7 +100,7 @@ TEST_CASE("drop", "[mongoac][collection]")
       }
       {
          auto const names =
-            REQUIRE_MAKE_OWNING_PTR(mongoac_database_list_collection_names(db, nullptr, nullptr, error), &bson_destroy);
+            REQUIRE_MAKE_OWNING_BSON(mongoac_database_list_collection_names(db, nullptr, nullptr, error));
 
          CHECK_FALSE(bson_array_contains_string(names, "a"));
          CHECK_FALSE(bson_array_contains_string(names, "b"));
@@ -111,7 +113,7 @@ TEST_CASE("drop", "[mongoac][collection]")
       mongoac_collection_drop(coll_b, nullptr, nullptr, error);
       {
          auto const names =
-            REQUIRE_MAKE_OWNING_PTR(mongoac_database_list_collection_names(db, nullptr, nullptr, error), &bson_destroy);
+            REQUIRE_MAKE_OWNING_BSON(mongoac_database_list_collection_names(db, nullptr, nullptr, error));
 
          CHECK(bson_array_contains_string(names, "a"));
          CHECK_FALSE(bson_array_contains_string(names, "b"));
@@ -122,7 +124,7 @@ TEST_CASE("drop", "[mongoac][collection]")
       mongoac_collection_drop(coll_c, nullptr, nullptr, error);
       {
          auto const names =
-            REQUIRE_MAKE_OWNING_PTR(mongoac_database_list_collection_names(db, nullptr, nullptr, error), &bson_destroy);
+            REQUIRE_MAKE_OWNING_BSON(mongoac_database_list_collection_names(db, nullptr, nullptr, error));
 
          CHECK_FALSE(bson_array_contains_string(names, "a"));
          CHECK_FALSE(bson_array_contains_string(names, "b"));
@@ -161,22 +163,21 @@ TEST_CASE("insert_one", "[mongoac][collection]")
    auto const coll =
       REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, "coll", error), &mongoac_collection_destroy);
 
-   auto const doc = REQUIRE_MAKE_OWNING_PTR(bson_from_json(R"({"x": 1})"), &bson_destroy);
+   auto const doc = make_owning_ptr(bson_from_json(R"({"x": 1})"), &bson_destroy);
 
    SECTION("async")
    {
       auto const future = REQUIRE_MAKE_OWNING_PTR(
-         mongoac_collection_insert_one_async(coll, nullptr, doc, nullptr, error), &mongoac_future_destroy);
+         mongoac_collection_insert_one_async(coll, nullptr, make_bson_view(doc), nullptr, error),
+         &mongoac_future_destroy);
 
       mongoac_runtime_block_on(runtime, future, error);
       MONGOAC_ERROR_REQUIRE(error);
 
-      auto const result = REQUIRE_MAKE_OWNING_PTR(mongoac_future_get_bson(future, error), &bson_destroy);
-
-      CHECK(result);
+      auto const result = REQUIRE_BSON_VIEW(mongoac_future_get_bson(future, error));
 
       bson_iter_t iter = {};
-      REQUIRE(bson_iter_init_find(&iter, result, "insertedId"));
+      REQUIRE(bson_iter_init_find(&iter, &result, "insertedId"));
       CHECK(bson_iter_type(&iter) == BSON_TYPE_OID);
 
       char str[25];
@@ -187,7 +188,7 @@ TEST_CASE("insert_one", "[mongoac][collection]")
    SECTION("sync")
    {
       auto const result =
-         REQUIRE_MAKE_OWNING_PTR(mongoac_collection_insert_one(coll, nullptr, doc, nullptr, error), &bson_destroy);
+         REQUIRE_MAKE_OWNING_BSON(mongoac_collection_insert_one(coll, nullptr, make_bson_view(doc), nullptr, error));
 
       CHECK(result);
 
@@ -229,7 +230,8 @@ TEST_CASE("find", "[mongoac][collection]")
       SECTION("async")
       {
          auto const future = REQUIRE_MAKE_OWNING_PTR(
-            mongoac_collection_find_async(coll, nullptr, filter, nullptr, error), &mongoac_future_destroy);
+            mongoac_collection_find_async(coll, nullptr, make_bson_view(filter), nullptr, error),
+            &mongoac_future_destroy);
          MONGOAC_ERROR_REQUIRE(error);
 
          mongoac_runtime_block_on(runtime, future, error);
@@ -244,8 +246,8 @@ TEST_CASE("find", "[mongoac][collection]")
 
       SECTION("sync")
       {
-         auto const cursor = REQUIRE_MAKE_OWNING_PTR(mongoac_collection_find(coll, nullptr, filter, nullptr, error),
-                                                     &mongoac_cursor_destroy);
+         auto const cursor = REQUIRE_MAKE_OWNING_PTR(
+            mongoac_collection_find(coll, nullptr, make_bson_view(filter), nullptr, error), &mongoac_cursor_destroy);
          MONGOAC_ERROR_REQUIRE(error);
 
          CHECK_FALSE(mongoac_cursor_next(cursor, error));
@@ -259,10 +261,10 @@ TEST_CASE("find", "[mongoac][collection]")
          auto const x = REQUIRE_MAKE_OWNING_PTR(bson_from_json(R"({"x": 1})"), &bson_destroy);
          auto const y = REQUIRE_MAKE_OWNING_PTR(bson_from_json(R"({"y": 2})"), &bson_destroy);
          auto const z = REQUIRE_MAKE_OWNING_PTR(bson_from_json(R"({"z": 3})"), &bson_destroy);
-         auto docs = std::array<const bson_t *, 3>{{x, y, z}};
+         auto docs = std::array<mongoac_bson_view_t, 3>{{make_bson_view(x), make_bson_view(y), make_bson_view(z)}};
 
-         CHECK(REQUIRE_MAKE_OWNING_PTR(
-            mongoac_collection_insert_many(coll, nullptr, docs.data(), docs.size(), nullptr, error), &bson_destroy));
+         CHECK(REQUIRE_MAKE_OWNING_BSON(
+            mongoac_collection_insert_many(coll, nullptr, docs.data(), docs.size(), nullptr, error)));
          MONGOAC_ERROR_REQUIRE(error);
       }
 
@@ -271,38 +273,42 @@ TEST_CASE("find", "[mongoac][collection]")
       auto const options = make_owning_ptr(mongoac_find_options_new(), &mongoac_find_options_destroy);
       {
          auto const sort_bson = REQUIRE_MAKE_OWNING_PTR(bson_from_json(R"({"sort": {"_id": 1}})"), &bson_destroy);
-         mongoac_find_options_set_from_bson(options, sort_bson, error);
+         mongoac_find_options_set_from_bson(options, make_bson_view(sort_bson), error);
          MONGOAC_ERROR_REQUIRE(error);
       }
 
       auto const check_two_results = [&](mongoac_cursor_t const *cursor) {
-         REQUIRE(mongoac_cursor_next(cursor, error));
-         MONGOAC_ERROR_REQUIRE(error);
-         auto const first = REQUIRE_MAKE_OWNING_PTR(mongoac_cursor_current(cursor, error), &bson_destroy);
-         MONGOAC_ERROR_REQUIRE(error);
+         bson_iter_t iter = {};
 
          REQUIRE(mongoac_cursor_next(cursor, error));
          MONGOAC_ERROR_REQUIRE(error);
-         auto const second = REQUIRE_MAKE_OWNING_PTR(mongoac_cursor_current(cursor, error), &bson_destroy);
+         {
+            auto const first = REQUIRE_BSON_VIEW(mongoac_cursor_current(cursor, error));
+            MONGOAC_ERROR_REQUIRE(error);
+            REQUIRE(bson_iter_init_find(&iter, &first, "x"));
+            REQUIRE(bson_iter_type(&iter) == BSON_TYPE_INT32);
+            CHECK(bson_iter_int32(&iter) == 1);
+         }
+
+         REQUIRE(mongoac_cursor_next(cursor, error));
          MONGOAC_ERROR_REQUIRE(error);
+         {
+            auto const second = REQUIRE_BSON_VIEW(mongoac_cursor_current(cursor, error));
+            MONGOAC_ERROR_REQUIRE(error);
+            REQUIRE(bson_iter_init_find(&iter, &second, "z"));
+            REQUIRE(bson_iter_type(&iter) == BSON_TYPE_INT32);
+            CHECK(bson_iter_int32(&iter) == 3);
+         }
 
          CHECK_FALSE(mongoac_cursor_next(cursor, error));
          MONGOAC_ERROR_REQUIRE(error);
-
-         bson_iter_t iter = {};
-         REQUIRE(bson_iter_init_find(&iter, first.get(), "x"));
-         REQUIRE(bson_iter_type(&iter) == BSON_TYPE_INT32);
-         CHECK(bson_iter_int32(&iter) == 1);
-
-         REQUIRE(bson_iter_init_find(&iter, second.get(), "z"));
-         REQUIRE(bson_iter_type(&iter) == BSON_TYPE_INT32);
-         CHECK(bson_iter_int32(&iter) == 3);
       };
 
       SECTION("async")
       {
          auto const future = REQUIRE_MAKE_OWNING_PTR(
-            mongoac_collection_find_async(coll, nullptr, filter, options, error), &mongoac_future_destroy);
+            mongoac_collection_find_async(coll, nullptr, make_bson_view(filter), options, error),
+            &mongoac_future_destroy);
          MONGOAC_ERROR_REQUIRE(error);
 
          mongoac_runtime_block_on(runtime, future, error);
@@ -316,8 +322,8 @@ TEST_CASE("find", "[mongoac][collection]")
 
       SECTION("sync")
       {
-         auto const cursor = REQUIRE_MAKE_OWNING_PTR(mongoac_collection_find(coll, nullptr, filter, options, error),
-                                                     &mongoac_cursor_destroy);
+         auto const cursor = REQUIRE_MAKE_OWNING_PTR(
+            mongoac_collection_find(coll, nullptr, make_bson_view(filter), options, error), &mongoac_cursor_destroy);
          MONGOAC_ERROR_REQUIRE(error);
 
          check_two_results(cursor.get());
@@ -351,7 +357,7 @@ TEST_CASE("insert_many", "[mongoac][collection]")
    auto const y = REQUIRE_MAKE_OWNING_PTR(BCON_NEW("y", BCON_INT32(2)), &bson_destroy);
    auto const z = REQUIRE_MAKE_OWNING_PTR(BCON_NEW("z", BCON_INT32(3)), &bson_destroy);
 
-   auto docs = std::array<const bson_t *, 3>{{x, y, z}};
+   auto docs = std::array<mongoac_bson_view_t, 3u>{{make_bson_view(x), make_bson_view(y), make_bson_view(z)}};
 
    auto const count_inserted_ids = [](bson_t const *result) -> int {
       bson_iter_t iter = {};
@@ -376,17 +382,16 @@ TEST_CASE("insert_many", "[mongoac][collection]")
       mongoac_runtime_block_on(runtime, future, error);
       MONGOAC_ERROR_REQUIRE(error);
 
-      auto const result = REQUIRE_MAKE_OWNING_PTR(mongoac_future_get_bson(future, error), &bson_destroy);
+      auto const result = REQUIRE_BSON_VIEW(mongoac_future_get_bson(future, error));
       MONGOAC_ERROR_REQUIRE(error);
 
-      CHECK(result);
-      CHECK(count_inserted_ids(result) == 3);
+      CHECK(count_inserted_ids(&result) == 3);
    }
 
    SECTION("sync")
    {
-      auto const result = REQUIRE_MAKE_OWNING_PTR(
-         mongoac_collection_insert_many(coll, nullptr, docs.data(), docs.size(), nullptr, error), &bson_destroy);
+      auto const result = REQUIRE_MAKE_OWNING_BSON(
+         mongoac_collection_insert_many(coll, nullptr, docs.data(), docs.size(), nullptr, error));
       MONGOAC_ERROR_REQUIRE(error);
 
       CHECK(result);

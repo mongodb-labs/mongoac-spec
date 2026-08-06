@@ -22,6 +22,7 @@
 #include <array>
 
 using mongoac::test_util::make_owning_ptr;
+using mongoac::test_util::owning_bson;
 
 TEST_CASE("create_collection", "[mongoac][database]")
 {
@@ -39,9 +40,8 @@ TEST_CASE("create_collection", "[mongoac][database]")
    // Clean test state.
    {
       mongoac_database_drop(db, nullptr, nullptr, nullptr);
-      auto const names =
-         make_owning_ptr(mongoac_database_list_collection_names(db, nullptr, nullptr, nullptr), &bson_destroy);
-      REQUIRE(bson_empty0(names.get()));
+      auto const names = owning_bson(mongoac_database_list_collection_names(db, nullptr, nullptr, nullptr));
+      REQUIRE(bson_empty(names.bson_ptr()));
    }
 
    SECTION("async")
@@ -58,8 +58,7 @@ TEST_CASE("create_collection", "[mongoac][database]")
          mongoac_runtime_block_on_all(runtime, futures.data(), futures.size(), nullptr);
       }
 
-      auto const names =
-         make_owning_ptr(mongoac_database_list_collection_names(db, nullptr, nullptr, nullptr), &bson_destroy);
+      auto const names = owning_bson(mongoac_database_list_collection_names(db, nullptr, nullptr, nullptr));
 
       CHECK(bson_array_contains_string(names, "a"));
       CHECK(bson_array_contains_string(names, "b"));
@@ -72,8 +71,7 @@ TEST_CASE("create_collection", "[mongoac][database]")
       mongoac_database_create_collection(db, nullptr, "b", nullptr, nullptr);
       mongoac_database_create_collection(db, nullptr, "c", nullptr, nullptr);
 
-      auto const names =
-         make_owning_ptr(mongoac_database_list_collection_names(db, nullptr, nullptr, nullptr), &bson_destroy);
+      auto const names = owning_bson(mongoac_database_list_collection_names(db, nullptr, nullptr, nullptr));
 
       CHECK(bson_array_contains_string(names, "a"));
       CHECK(bson_array_contains_string(names, "b"));

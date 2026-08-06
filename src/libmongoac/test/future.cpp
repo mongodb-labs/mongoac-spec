@@ -3,6 +3,7 @@
 //
 
 #include <catch2/catch_test_macros.hpp>
+#include <mongoac/bson.h>
 #include <mongoac/client_session.h>
 #include <mongoac/error.h>
 #include <test_util/owning_ptr.hh>
@@ -59,7 +60,7 @@ TEST_CASE("get_bson", "[mongoac][future]")
    SECTION("null future")
    {
       auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
-      CHECK(mongoac_future_get_bson(nullptr, error) == nullptr);
+      CHECK(mongoac_future_get_bson(nullptr, error).data == nullptr);
       CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_INVALID_ARGUMENT);
    }
 }

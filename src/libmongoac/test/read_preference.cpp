@@ -148,21 +148,21 @@ TEST_CASE("add_tag_set", "[mongoac][read_preference]")
    SECTION("null handle")
    {
       auto const t = make_owning_ptr(bson_from_json(R"({"region": "us-east"})"), &bson_destroy);
-      mongoac_read_preference_add_tag_set(nullptr, t, error);
+      mongoac_read_preference_add_tag_set(nullptr, make_bson_view(t), error);
       REQUIRE_MONGOAC_INVALID_ARGUMENT(error);
    }
 
    SECTION("rejects on primary")
    {
       auto const t = make_owning_ptr(bson_from_json(R"({"region": "us-east"})"), &bson_destroy);
-      mongoac_read_preference_add_tag_set(rp, t, error);
+      mongoac_read_preference_add_tag_set(rp, make_bson_view(t), error);
       REQUIRE_MONGOAC_INVALID_ARGUMENT(error);
    }
 
    SECTION("null tag set document")
    {
       mongoac_read_preference_set_secondary(rp);
-      mongoac_read_preference_add_tag_set(rp, nullptr, error);
+      mongoac_read_preference_add_tag_set(rp, {}, error);
       REQUIRE_MONGOAC_INVALID_ARGUMENT(error);
    }
 
@@ -171,11 +171,11 @@ TEST_CASE("add_tag_set", "[mongoac][read_preference]")
       mongoac_read_preference_set_secondary(rp);
 
       auto const t0 = make_owning_ptr(bson_from_json(R"({"region": "us-east"})"), &bson_destroy);
-      mongoac_read_preference_add_tag_set(rp, t0, error);
+      mongoac_read_preference_add_tag_set(rp, make_bson_view(t0), error);
       CHECK_MONGOAC_OK(error);
 
       auto const t1 = make_owning_ptr(bson_from_json(R"({"region": "us-west"})"), &bson_destroy);
-      mongoac_read_preference_add_tag_set(rp, t1, error);
+      mongoac_read_preference_add_tag_set(rp, make_bson_view(t1), error);
       CHECK_MONGOAC_OK(error);
    }
 
@@ -184,7 +184,7 @@ TEST_CASE("add_tag_set", "[mongoac][read_preference]")
       mongoac_read_preference_set_secondary(rp);
 
       auto const t = make_owning_ptr(bson_from_json(R"({"x": 1})"), &bson_destroy);
-      mongoac_read_preference_add_tag_set(rp, t, error);
+      mongoac_read_preference_add_tag_set(rp, make_bson_view(t), error);
       CHECK_MONGOAC_ERROR_CATEGORY(error, MONGOAC_ERROR_CATEGORY_BSON);
    }
 }

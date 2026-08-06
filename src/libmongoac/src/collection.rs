@@ -1,3 +1,4 @@
+use crate::bson::{BsonT, BsonViewT};
 use crate::client_session::ClientSessionT;
 use crate::collection_options::CollectionOptionsT;
 use crate::cursor::CursorT;
@@ -8,7 +9,6 @@ use crate::find_options::FindOptionsT;
 use crate::future::FutureT;
 use crate::insert_many_options::InsertManyOptionsT;
 use crate::insert_one_options::InsertOneOptionsT;
-use crate::private::bson::{BsonT, bson_t};
 use crate::private::macros::*;
 use crate::runtime::RuntimeT;
 use crate::spawn;
@@ -97,14 +97,14 @@ pub extern "C" fn mongoac_collection_drop(
 pub extern "C" fn mongoac_collection_find_async(
     collection: *const CollectionT,
     session: *mut ClientSessionT,
-    filter: *const bson_t,
+    filter: BsonViewT,
     options: *const FindOptionsT,
     error: *mut ErrorT,
 ) -> *mut FutureT {
     let error = safe_optional_error_as_mut!(error);
     let collection = safe_as_ref_with_error!(collection, error);
     let session = safe_optional_as_mut!(session);
-    let filter = safe_const_bson_with_error!(filter, error);
+    let filter = safe_bson_view_with_error!(filter, error);
     let options = safe_optional_as_ref!(options);
 
     Box::into_raw(Box::new(collection.find_async(
@@ -118,14 +118,14 @@ pub extern "C" fn mongoac_collection_find_async(
 pub extern "C" fn mongoac_collection_find(
     collection: *const CollectionT,
     session: *mut ClientSessionT,
-    filter: *const bson_t,
+    filter: BsonViewT,
     options: *const FindOptionsT,
     error: *mut ErrorT,
 ) -> *mut CursorT {
     let error = safe_optional_error_as_mut!(error);
     let collection = safe_as_ref_with_error!(collection, error);
     let session = safe_optional_as_mut!(session);
-    let filter = safe_const_bson_with_error!(filter, error);
+    let filter = safe_bson_view_with_error!(filter, error);
     let options = safe_optional_as_ref!(options);
 
     Box::into_raw(Box::new(safe_error!(
@@ -142,14 +142,14 @@ pub extern "C" fn mongoac_collection_find(
 pub extern "C" fn mongoac_collection_insert_one_async(
     collection: *const CollectionT,
     session: *mut ClientSessionT,
-    document: *const bson_t,
+    document: BsonViewT,
     options: *const InsertOneOptionsT,
     error: *mut ErrorT,
 ) -> *mut FutureT {
     let error = safe_optional_error_as_mut!(error);
     let collection = safe_as_ref_with_error!(collection, error);
     let session = safe_optional_as_mut!(session);
-    let document = safe_const_bson_with_error!(document, error);
+    let document = safe_bson_view_with_error!(document, error);
     let options = safe_optional_as_ref!(options);
 
     Box::into_raw(Box::new(collection.insert_one_async(
@@ -163,33 +163,32 @@ pub extern "C" fn mongoac_collection_insert_one_async(
 pub extern "C" fn mongoac_collection_insert_one(
     collection: *const CollectionT,
     session: *mut ClientSessionT,
-    document: *const bson_t,
+    document: BsonViewT,
     options: *const InsertOneOptionsT,
     error: *mut ErrorT,
-) -> *mut bson_t {
+) -> BsonT {
     let error = safe_optional_error_as_mut!(error);
     let collection = safe_as_ref_with_error!(collection, error);
     let session = safe_optional_as_mut!(session);
-    let document = safe_const_bson_with_error!(document, error);
+    let document = safe_bson_view_with_error!(document, error);
     let options = safe_optional_as_ref!(options);
 
-    let result = safe_error!(
+    safe_error!(
         collection.insert_one(
             session,
             safe_error!((&document).try_into(), error),
             options.map(Into::into)
         ),
         error
-    );
-
-    safe_error!(BsonT::try_from(&result), error).into_raw()
+    )
+    .into()
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_collection_insert_many_async(
     collection: *const CollectionT,
     session: *mut ClientSessionT,
-    documents: *const *const bson_t,
+    documents: *const BsonViewT,
     count: usize,
     options: *const InsertManyOptionsT,
     error: *mut ErrorT,
@@ -197,7 +196,7 @@ pub extern "C" fn mongoac_collection_insert_many_async(
     let error = safe_optional_error_as_mut!(error);
     let collection = safe_as_ref_with_error!(collection, error);
     let session = safe_optional_as_mut!(session);
-    let documents = safe_const_bson_array_as_vec_with_error!(documents, count, error);
+    let documents = safe_bson_view_array_as_vec_with_error!(documents, count, error);
     let documents: Vec<&RawDocument> = safe_error!(
         documents
             .iter()
@@ -218,15 +217,15 @@ pub extern "C" fn mongoac_collection_insert_many_async(
 pub extern "C" fn mongoac_collection_insert_many(
     collection: *const CollectionT,
     session: *mut ClientSessionT,
-    documents: *const *const bson_t,
+    documents: *const BsonViewT,
     count: usize,
     options: *const InsertManyOptionsT,
     error: *mut ErrorT,
-) -> *mut bson_t {
+) -> BsonT {
     let error = safe_optional_error_as_mut!(error);
     let collection = safe_as_ref_with_error!(collection, error);
     let session = safe_optional_as_mut!(session);
-    let documents = safe_const_bson_array_as_vec_with_error!(documents, count, error);
+    let documents = safe_bson_view_array_as_vec_with_error!(documents, count, error);
     let documents: Vec<&RawDocument> = safe_error!(
         documents
             .iter()
@@ -236,12 +235,11 @@ pub extern "C" fn mongoac_collection_insert_many(
     );
     let options = safe_optional_as_ref!(options);
 
-    let result = safe_error!(
+    safe_error!(
         collection.insert_many(session, documents, options.map(Into::into)),
         error
-    );
-
-    safe_error!(BsonT::try_from(&result), error).into_raw()
+    )
+    .into()
 }
 
 impl CollectionT {

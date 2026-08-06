@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <mongoac/read_concern.h>
 #include <mongoac/read_preference.h>
+#include <mongoac/server_info.h>
 #include <mongoac/server_selector.h>
 #include <mongoac/write_concern.h>
 #include <test_util/owning_ptr.hh>
@@ -106,7 +107,7 @@ TEST_CASE("set_read_preference", "[mongoac][database_options]")
 }
 
 static bool
-db_options_predicate(mongoac_server_info_t const *info, void *user_data)
+noop_predicate(mongoac_server_info_t const *info, void *user_data)
 {
    (void)info;
    (void)user_data;
@@ -126,7 +127,7 @@ TEST_CASE("set_server_selector", "[mongoac][database_options]")
    SECTION("null server selector clears")
    {
       auto const sc =
-         make_owning_ptr(mongoac_server_selector_new(&db_options_predicate, nullptr), &mongoac_server_selector_destroy);
+         make_owning_ptr(mongoac_server_selector_new(&noop_predicate, nullptr), &mongoac_server_selector_destroy);
       mongoac_database_options_set_server_selector(opts, sc);
       mongoac_database_options_set_server_selector(opts, nullptr);
       SUCCEED();
@@ -135,7 +136,7 @@ TEST_CASE("set_server_selector", "[mongoac][database_options]")
    SECTION("valid")
    {
       auto const sc =
-         make_owning_ptr(mongoac_server_selector_new(&db_options_predicate, nullptr), &mongoac_server_selector_destroy);
+         make_owning_ptr(mongoac_server_selector_new(&noop_predicate, nullptr), &mongoac_server_selector_destroy);
       mongoac_database_options_set_server_selector(opts, sc);
       SUCCEED();
    }

@@ -39,24 +39,21 @@ TEST_CASE("find_options_set_from_bson", "[mongoac][find_options]")
    SECTION("null handle")
    {
       auto const bson = make_owning_ptr(bson_from_json(R"({"comment": {"x": 1}})"), &bson_destroy);
-      mongoac_find_options_set_from_bson(nullptr, bson, error);
+      mongoac_find_options_set_from_bson(nullptr, make_bson_view(bson), error);
       REQUIRE_MONGOAC_INVALID_ARGUMENT(error);
    }
 
    SECTION("null bson")
    {
-      mongoac_find_options_set_from_bson(opts, nullptr, error);
+      mongoac_find_options_set_from_bson(opts, {}, error);
       CHECK_MONGOAC_OK(error);
    }
 
    SECTION("invalid")
    {
-      std::uint8_t data[] = {12, 0, 0, 0, 16, 'x', '\0', 1, 0, 0, 0, 0}; // {"x": 1}
-      bson_t doc = {};
-      REQUIRE(bson_init_static(&doc, data, sizeof(data)));
-      data[sizeof(data) - 1] = 1; // Corruption.
+      std::uint8_t data[] = {12, 0, 0, 0, 16, 'x', '\0', 1, 0, 0, 0, 1}; // {"x": 1} with last-byte corruption.
 
-      mongoac_find_options_set_from_bson(opts, &doc, error);
+      mongoac_find_options_set_from_bson(opts, {data, sizeof(data)}, error);
       CHECK_FALSE_MONGOAC_OK(error);
       CHECK_MONGOAC_ERROR_CATEGORY(error, MONGOAC_ERROR_CATEGORY_BSON);
    }
@@ -64,7 +61,7 @@ TEST_CASE("find_options_set_from_bson", "[mongoac][find_options]")
    SECTION("valid")
    {
       auto const bson = make_owning_ptr(bson_from_json(R"({"comment": {"x": 1}})"), &bson_destroy);
-      mongoac_find_options_set_from_bson(opts, bson, error);
+      mongoac_find_options_set_from_bson(opts, make_bson_view(bson), error);
       CHECK_MONGOAC_OK(error);
    }
 }

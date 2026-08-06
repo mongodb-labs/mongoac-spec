@@ -12,6 +12,7 @@
 #include <cstdint>
 
 using mongoac::test_util::bson_from_json;
+using mongoac::test_util::make_bson_view;
 using mongoac::test_util::make_owning_ptr;
 
 TEST_CASE("new", "[mongoac][insert_one_options]")
@@ -89,24 +90,21 @@ TEST_CASE("set_comment", "[mongoac][insert_one_options]")
    SECTION("null handle")
    {
       auto const comment = make_owning_ptr(bson_from_json(R"({"x": 1})"), &bson_destroy);
-      mongoac_insert_one_options_set_comment(nullptr, comment, error);
+      mongoac_insert_one_options_set_comment(nullptr, make_bson_view(comment), error);
       REQUIRE_MONGOAC_INVALID_ARGUMENT(error);
    }
 
    SECTION("null bson clears")
    {
-      mongoac_insert_one_options_set_comment(opts, nullptr, error);
+      mongoac_insert_one_options_set_comment(opts, {}, error);
       CHECK_MONGOAC_OK(error);
    }
 
    SECTION("invalid")
    {
-      std::uint8_t data[] = {12, 0, 0, 0, 16, 'x', '\0', 1, 0, 0, 0, 0}; // {"x": 1}
-      bson_t doc = {};
-      REQUIRE(bson_init_static(&doc, data, sizeof(data)));
-      data[sizeof(data) - 1] = 1; // Corruption.
+      std::uint8_t data[] = {12, 0, 0, 0, 16, 'x', '\0', 1, 0, 0, 0, 1}; // {"x": 1} with last-byte corruption
 
-      mongoac_insert_one_options_set_comment(opts, &doc, error);
+      mongoac_insert_one_options_set_comment(opts, {data, sizeof(data)}, error);
       CHECK_FALSE_MONGOAC_OK(error);
       CHECK_MONGOAC_ERROR_CATEGORY(error, MONGOAC_ERROR_CATEGORY_BSON);
    }
@@ -114,7 +112,7 @@ TEST_CASE("set_comment", "[mongoac][insert_one_options]")
    SECTION("valid")
    {
       auto const comment = make_owning_ptr(bson_from_json(R"({"x": 1})"), &bson_destroy);
-      mongoac_insert_one_options_set_comment(opts, comment, error);
+      mongoac_insert_one_options_set_comment(opts, make_bson_view(comment), error);
       CHECK_MONGOAC_OK(error);
    }
 }

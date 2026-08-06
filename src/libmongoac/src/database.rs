@@ -1,3 +1,4 @@
+use crate::bson::BsonT;
 use crate::client_session::ClientSessionT;
 use crate::create_collection_options::CreateCollectionOptionsT;
 use crate::cursor::CursorT;
@@ -6,7 +7,6 @@ use crate::drop_database_options::DropDatabaseOptionsT;
 use crate::error::ErrorT;
 use crate::future::FutureT;
 use crate::list_collections_options::ListCollectionsOptionsT;
-use crate::private::bson::{BsonT, bson_t};
 use crate::private::macros::*;
 use crate::runtime::RuntimeT;
 use crate::spawn;
@@ -178,17 +178,17 @@ pub extern "C" fn mongoac_database_list_collection_names(
     session: *mut ClientSessionT,
     options: *const ListCollectionsOptionsT,
     error: *mut ErrorT,
-) -> *mut bson_t {
+) -> BsonT {
     let error = safe_optional_error_as_mut!(error);
     let database = safe_as_ref_with_error!(database, error);
     let session = safe_optional_as_mut!(session);
     let options = safe_optional_as_ref!(options);
 
-    let names = safe_error!(
+    safe_error!(
         database.list_collection_names(session, options.map(Into::into)),
         error
-    );
-    safe_error!(BsonT::try_from(&names), error).into_raw()
+    )
+    .into()
 }
 
 impl DatabaseT {

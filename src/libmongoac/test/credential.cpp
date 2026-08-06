@@ -128,18 +128,15 @@ TEST_CASE("set_mechanism_properties", "[mongoac][credential]")
 
    SECTION("null properties clears")
    {
-      mongoac_credential_set_mechanism_properties(cred, nullptr, error);
+      mongoac_credential_set_mechanism_properties(cred, {}, error);
       CHECK_MONGOAC_OK(error);
    }
 
    SECTION("invalid document")
    {
-      std::uint8_t data[] = {12, 0, 0, 0, 16, 'x', '\0', 1, 0, 0, 0, 0}; // {"x": 1}
-      bson_t doc = {};
-      REQUIRE(bson_init_static(&doc, data, sizeof(data)));
-      data[sizeof(data) - 1] = 1; // Corruption.
+      std::uint8_t data[] = {12, 0, 0, 0, 16, 'x', '\0', 1, 0, 0, 0, 1}; // {"x": 1} with last-byte corruption.
 
-      mongoac_credential_set_mechanism_properties(cred, &doc, error);
+      mongoac_credential_set_mechanism_properties(cred, {data, sizeof(data)}, error);
       CHECK_FALSE_MONGOAC_OK(error);
       CHECK_MONGOAC_ERROR_CATEGORY(error, MONGOAC_ERROR_CATEGORY_BSON);
    }
@@ -147,7 +144,7 @@ TEST_CASE("set_mechanism_properties", "[mongoac][credential]")
    SECTION("valid document")
    {
       auto const doc = make_owning_ptr(bson_from_json(R"({"x": 1})"), &bson_destroy);
-      mongoac_credential_set_mechanism_properties(cred, doc, error);
+      mongoac_credential_set_mechanism_properties(cred, make_bson_view(doc), error);
       CHECK_MONGOAC_OK(error);
    }
 }

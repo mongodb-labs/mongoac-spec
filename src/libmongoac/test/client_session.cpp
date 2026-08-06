@@ -6,16 +6,19 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+#include <mongoac/bson.h>
 #include <mongoac/client.h>
 #include <mongoac/client_options.h>
 #include <mongoac/cursor.h>
 #include <mongoac/database.h>
+#include <test_util/bson.hh>
 #include <test_util/owning_ptr.hh>
 
 #include <cstdint>
 #include <cstring>
 
 using mongoac::test_util::make_owning_ptr;
+using mongoac::test_util::owning_bson;
 
 namespace
 {
@@ -40,11 +43,11 @@ struct lsid {
 };
 
 const char *
-get_command_name(const bson_t *event)
+get_command_name(bson_t const &event)
 {
    bson_iter_t iter = {};
 
-   if (!bson_iter_init(&iter, event) || !bson_iter_find_descendant(&iter, "commandName", &iter) ||
+   if (!bson_iter_init(&iter, &event) || !bson_iter_find_descendant(&iter, "commandName", &iter) ||
        !BSON_ITER_HOLDS_UTF8(&iter)) {
       return nullptr;
    }
@@ -53,21 +56,21 @@ get_command_name(const bson_t *event)
 }
 
 const char *
-get_event_type(const bson_t *event)
+get_event_type(bson_t const &event)
 {
    bson_iter_t iter = {};
 
    {
-      auto const json = make_owning_ptr(bson_as_canonical_extended_json(event, nullptr), &bson_free);
+      auto const json = make_owning_ptr(bson_as_canonical_extended_json(&event, nullptr), &bson_free);
       UNSCOPED_INFO(json);
    }
 
-   if (bson_iter_init_find(&iter, event, "commandName")) {
-      if (bson_iter_init_find(&iter, event, "reply")) {
+   if (bson_iter_init_find(&iter, &event, "commandName")) {
+      if (bson_iter_init_find(&iter, &event, "reply")) {
          return "CommandSucceededEvent";
       }
 
-      if (bson_iter_init_find(&iter, event, "failure")) {
+      if (bson_iter_init_find(&iter, &event, "failure")) {
          return "CommandFailedEvent";
       }
 
@@ -78,11 +81,11 @@ get_event_type(const bson_t *event)
 }
 
 bool
-get_lsid(const bson_t *event, lsid *out)
+get_lsid(bson_t const &event, lsid *out)
 {
    bson_iter_t iter = {};
 
-   if (!bson_iter_init(&iter, event) || !bson_iter_find_descendant(&iter, "command.lsid.id", &iter) ||
+   if (!bson_iter_init(&iter, &event) || !bson_iter_find_descendant(&iter, "command.lsid.id", &iter) ||
        !BSON_ITER_HOLDS_BINARY(&iter)) {
       return false;
    }
@@ -114,9 +117,8 @@ TEST_CASE("sessions", "[mongoac][client_session]")
    // Clean test state.
    {
       mongoac_database_drop(db, nullptr, nullptr, nullptr);
-      auto const names =
-         make_owning_ptr(mongoac_database_list_collection_names(db, nullptr, nullptr, nullptr), &bson_destroy);
-      REQUIRE(bson_empty0(names.get()));
+      auto const names = owning_bson(mongoac_database_list_collection_names(db, nullptr, nullptr, nullptr));
+      REQUIRE(names);
       mongoac_client_clear_command_events(client, mongoac_client_count_command_events(client));
    }
 
@@ -124,10 +126,15 @@ TEST_CASE("sessions", "[mongoac][client_session]")
       size_t const count = mongoac_client_count_command_events(client);
       REQUIRE(count == 4); // CommandStarted + CommandSucceeded for each listCollections operation.
 
-      auto const e0 = make_owning_ptr(mongoac_client_get_command_event(client, 0, nullptr), &bson_destroy);
-      auto const e1 = make_owning_ptr(mongoac_client_get_command_event(client, 1, nullptr), &bson_destroy);
-      auto const e2 = make_owning_ptr(mongoac_client_get_command_event(client, 2, nullptr), &bson_destroy);
-      auto const e3 = make_owning_ptr(mongoac_client_get_command_event(client, 3, nullptr), &bson_destroy);
+      auto const e0 = owning_bson(mongoac_client_get_command_event(client, 0));
+      auto const e1 = owning_bson(mongoac_client_get_command_event(client, 1));
+      auto const e2 = owning_bson(mongoac_client_get_command_event(client, 2));
+      auto const e3 = owning_bson(mongoac_client_get_command_event(client, 3));
+
+      REQUIRE(e0);
+      REQUIRE(e1);
+      REQUIRE(e2);
+      REQUIRE(e3);
 
       CHECK_THAT(get_command_name(e0), Catch::Matchers::Equals("listCollections"));
       CHECK_THAT(get_command_name(e1), Catch::Matchers::Equals("listCollections"));

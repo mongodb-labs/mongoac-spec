@@ -1,5 +1,5 @@
+use crate::bson::BsonViewT;
 use crate::error::{ErrorCodeT, ErrorT};
-use crate::private::bson::bson_t;
 use crate::private::macros::*;
 
 use mongodb::bson::Document;
@@ -90,7 +90,7 @@ pub extern "C" fn mongoac_credential_set_mechanism(
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_credential_set_mechanism_properties(
     cred: *mut CredentialT,
-    v: *const bson_t,
+    v: BsonViewT,
     error: *mut ErrorT,
 ) {
     let error = safe_optional_error_as_mut!(error);

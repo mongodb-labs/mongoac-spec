@@ -181,7 +181,7 @@ macro_rules! safe_optional_cstr_from_ptr_with_error {
 #[macro_export]
 macro_rules! safe_optional_bson_opts_with_error {
     ($target:ty, $options:expr, $error:expr) => {{
-        let options = safe_optional_const_bson!($options);
+        let options = safe_optional_bson_view!($options);
         match options {
             Some(ref o) => Some($crate::safe_error!(
                 ::mongodb::bson::deserialize_from_slice::<$target>(o.as_bytes()),
@@ -193,37 +193,36 @@ macro_rules! safe_optional_bson_opts_with_error {
 }
 
 #[macro_export]
-macro_rules! safe_const_bson_with_error {
+macro_rules! safe_bson_view_with_error {
     ($ptr:expr, $error:expr) => {{
-        let ptr = $ptr;
-        match unsafe { ptr.as_ref() } {
-            Some(r) => $crate::private::bson::ConstBsonT::from(r),
-            None => {
-                $crate::private::safety::invalid_argument(
-                    $error,
-                    concat!(stringify!($ptr), ": must not be null"),
-                );
-                return Default::default();
-            }
+        let bson: $crate::bson::BsonViewT = $ptr;
+        if bson.data.is_null() {
+            $crate::private::safety::invalid_argument(
+                $error,
+                concat!(stringify!($ptr), ": must not be null"),
+            );
+            return Default::default();
         }
+        bson
     }};
 }
 
 #[macro_export]
-macro_rules! safe_optional_const_bson {
+macro_rules! safe_optional_bson_view {
     ($ptr:expr) => {{
-        let ptr = $ptr;
-        match unsafe { ptr.as_ref() } {
-            Some(r) => Some($crate::private::bson::ConstBsonT::from(r)),
-            None => None,
+        let bson: $crate::bson::BsonViewT = $ptr;
+        if bson.data.is_null() {
+            None
+        } else {
+            Some(bson)
         }
     }};
 }
 
 #[macro_export]
-macro_rules! safe_const_bson_array_as_vec_with_error {
+macro_rules! safe_bson_view_array_as_vec_with_error {
     ($ptr:expr, $len:expr, $error:expr) => {{
-        let ptr: *const *const $crate::private::bson::bson_t = $ptr;
+        let ptr: *const $crate::bson::BsonViewT = $ptr;
         let len: usize = $len;
 
         if ptr.is_null() || len == 0 {
@@ -233,20 +232,16 @@ macro_rules! safe_const_bson_array_as_vec_with_error {
         // SAFETY: `ptr` and `len` validity is an uncheckable precondition.
         let arr = unsafe { std::slice::from_raw_parts(ptr, len) };
 
-        let mut vec = Vec::with_capacity(len);
+        let mut vec: Vec<$crate::bson::BsonViewT> = Vec::with_capacity(len);
         for (i, e) in arr.iter().enumerate() {
-            match unsafe { e.as_ref() } {
-                Some(e) => {
-                    vec.push($crate::private::bson::ConstBsonT::from(e));
-                }
-                None => {
-                    $crate::private::safety::invalid_argument(
-                        $error,
-                        &format!("BSON array element at index {i}: must not be null"),
-                    );
-                    return Default::default();
-                }
+            if e.data.is_null() {
+                $crate::private::safety::invalid_argument(
+                    $error,
+                    &format!("BSON array element at index {i}: must not be null"),
+                );
+                return Default::default();
             }
+            vec.push(*e);
         }
         vec
     }};

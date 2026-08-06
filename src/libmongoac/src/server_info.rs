@@ -1,6 +1,4 @@
-
 use mongodb::ServerInfo;
-
 
 #[allow(non_camel_case_types)]
 pub type mongoac_server_type_t = i32;

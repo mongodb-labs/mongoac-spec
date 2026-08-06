@@ -7,9 +7,11 @@
 #include <mongoac/future.h>
 #include <mongoac/runtime.h>
 #include <mongoac/server_api.h>
+#include <test_util/bson.hh>
 #include <test_util/owning_ptr.hh>
 
 using mongoac::test_util::make_owning_ptr;
+using mongoac::test_util::owning_bson;
 
 TEST_CASE("new", "[mongoac][client]")
 {
@@ -224,7 +226,7 @@ TEST_CASE("shutdown", "[mongoac][client]")
       CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_OK);
 
       {
-         CHECK(mongoac_client_list_databases(client, nullptr, nullptr, error) == nullptr);
+         CHECK_FALSE(owning_bson(mongoac_client_list_databases(client, nullptr, nullptr, error)));
          CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_RUST);
          CHECK(mongoac_error_code(error) != MONGOAC_ERROR_CODE_OK);
          CHECK_THAT(mongoac_error_message(error), Catch::Matchers::ContainsSubstring("shut down"));
@@ -265,7 +267,7 @@ TEST_CASE("shutdown_async", "[mongoac][client]")
       CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_OK);
 
       {
-         CHECK(mongoac_client_list_databases(client, nullptr, nullptr, error) == nullptr);
+         CHECK_FALSE(owning_bson(mongoac_client_list_databases(client, nullptr, nullptr, error)));
          CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_RUST);
          CHECK(mongoac_error_code(error) != MONGOAC_ERROR_CODE_OK);
          CHECK_THAT(mongoac_error_message(error), Catch::Matchers::ContainsSubstring("shut down"));

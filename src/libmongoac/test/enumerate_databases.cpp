@@ -7,8 +7,10 @@
 #include <mongoac/future.h>
 #include <mongoac/list_databases_options.h>
 #include <mongoac/runtime.h>
+#include <test_util/bson.hh>
 #include <test_util/owning_ptr.hh>
 
+#include <cstdint>
 #include <string>
 
 using mongoac::test_util::make_owning_ptr;
@@ -101,18 +103,14 @@ TEST_CASE("list_databases_async returns valid BSON", "[mongoac][client][live-ser
    mongoac_runtime_block_on(runtime, future, error);
    REQUIRE(mongoac_error_code(error) == MONGOAC_ERROR_CODE_OK);
 
-   bson_t *const result = mongoac_future_get_bson(future, error);
-   REQUIRE(mongoac_error_code(error) == MONGOAC_ERROR_CODE_OK);
-   REQUIRE(result != nullptr);
+   auto const result = REQUIRE_BSON_VIEW(mongoac_future_get_bson(future, error));
 
-   // Regression test: verify `mongoac_future_get_bson` returns a valid pointer.
-   char *const json = bson_as_relaxed_extended_json(result, nullptr);
+   // Regression test: verify `mongoac_future_get_bson` returns valid bytes.
+   auto const json = make_owning_ptr(bson_as_relaxed_extended_json(&result, nullptr), &bson_free);
    REQUIRE(json != nullptr);
    // list_databases returns an indexed array: {"0": { ... }, ...}.
-   CHECK_THAT(std::string(json), Catch::Matchers::ContainsSubstring("\"0\""));
-   bson_free(json);
+   CHECK_THAT(json.get(), Catch::Matchers::ContainsSubstring("\"0\""));
 
-   bson_destroy(result);
    mongoac_future_destroy(future);
    mongoac_runtime_destroy(runtime);
    mongoac_client_destroy(client);

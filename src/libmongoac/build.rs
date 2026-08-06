@@ -65,49 +65,6 @@ fn generate_config_crate() {
     println!("cargo:rerun-if-env-changed=MONGOAC_LIBRARY_TYPE");
 }
 
-// Ensure mongoac links with the correct bson library.
-fn link_with_bson() {
-    use std::path::Path;
-
-    fn emit_linkage(env_var: &str, is_shared: bool) {
-        let path = std::env::var(env_var).unwrap();
-        let path = Path::new(&path);
-
-        assert!(
-            path.is_absolute(),
-            "{} must be an absolute path, got: {}",
-            env_var,
-            path.display()
-        );
-
-        assert!(
-            path.exists(),
-            "expected BSON library not found: {}",
-            path.display()
-        );
-
-        let dir = path
-            .parent()
-            .unwrap_or_else(|| panic!("{env_var} has no parent directory"));
-
-        println!("cargo:rustc-link-search=native={}", dir.display());
-
-        if is_shared {
-            println!("cargo:rustc-link-lib=bson2");
-            println!("cargo:rustc-link-arg=-Wl,-rpath,{}", dir.display());
-        } else {
-            println!("cargo:rustc-link-lib=static=bson2");
-        }
-    }
-
-    if std::env::var("MONGOAC_BSON_SHARED_LIBRARY_FILENAME").is_ok() {
-        emit_linkage("MONGOAC_BSON_SHARED_LIBRARY_FILENAME", true);
-    } else if std::env::var("MONGOAC_BSON_STATIC_LIBRARY_FILENAME").is_ok() {
-        emit_linkage("MONGOAC_BSON_STATIC_LIBRARY_FILENAME", false);
-    }
-}
-
 fn main() {
     generate_config_crate();
-    link_with_bson();
 }

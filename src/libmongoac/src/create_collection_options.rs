@@ -1,5 +1,5 @@
+use crate::bson::BsonViewT;
 use crate::error::ErrorT;
-use crate::private::bson::bson_t;
 use crate::private::macros::*;
 
 use mongodb::options::CreateCollectionOptions;
@@ -21,7 +21,7 @@ pub extern "C" fn mongoac_create_collection_options_destroy(opts: *mut CreateCol
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_create_collection_options_set_from_bson(
     opts: *mut CreateCollectionOptionsT,
-    v: *const bson_t,
+    v: BsonViewT,
     error: *mut ErrorT,
 ) {
     let error = safe_optional_error_as_mut!(error);

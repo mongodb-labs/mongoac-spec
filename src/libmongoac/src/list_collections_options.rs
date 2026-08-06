@@ -1,8 +1,8 @@
+use crate::bson::BsonViewT;
 use crate::error::ErrorT;
-use crate::private::bson::bson_t;
 use crate::private::macros::*;
 
-use mongodb::bson::{Bson, Document};
+use mongodb::bson::Bson;
 use mongodb::options::ListCollectionsOptions;
 
 pub struct ListCollectionsOptionsT(ListCollectionsOptions);
@@ -38,15 +38,15 @@ pub extern "C" fn mongoac_list_collections_options_set_authorized_collections(
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_list_collections_options_set_filter(
     opts: *mut ListCollectionsOptionsT,
-    v: *const bson_t,
+    v: BsonViewT,
     error: *mut ErrorT,
 ) {
     let error = safe_optional_error_as_mut!(error);
     let opts = safe_as_mut_with_error!(opts, error);
-    let v = safe_optional_const_bson!(v);
+    let v = safe_optional_bson_view!(v);
 
     opts.0.filter = match v {
-        Some(ref b) => Some(safe_error!(Document::try_from(b), error)),
+        Some(ref v) => Some(safe_error!(v.try_into(), error)),
         None => None,
     };
 }
@@ -54,15 +54,15 @@ pub extern "C" fn mongoac_list_collections_options_set_filter(
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_list_collections_options_set_comment(
     opts: *mut ListCollectionsOptionsT,
-    v: *const bson_t,
+    v: BsonViewT,
     error: *mut ErrorT,
 ) {
     let error = safe_optional_error_as_mut!(error);
     let opts = safe_as_mut_with_error!(opts, error);
-    let v = safe_optional_const_bson!(v);
+    let v = safe_optional_bson_view!(v);
 
     opts.0.comment = match v {
-        Some(ref b) => Some(Bson::Document(safe_error!(Document::try_from(b), error))),
+        Some(ref v) => Some(Bson::Document(safe_error!(v.try_into(), error))),
         None => None,
     };
 }

@@ -6,6 +6,7 @@
 #include <mongoac/read_concern.h>
 #include <mongoac/read_preference.h>
 #include <mongoac/server_api.h>
+#include <mongoac/server_info.h>
 #include <mongoac/server_selector.h>
 #include <mongoac/tls.h>
 #include <mongoac/write_concern.h>

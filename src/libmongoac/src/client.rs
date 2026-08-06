@@ -1,11 +1,11 @@
 use crate::private::macros::*;
 
+use crate::bson::BsonT;
 use crate::client_options::ClientOptionsT;
 use crate::client_session::ClientSessionT;
 use crate::error::ErrorT;
 use crate::future::FutureT;
 use crate::list_databases_options::ListDatabasesOptionsT;
-use crate::private::bson::{BsonT, bson_t};
 use crate::runtime::RuntimeT;
 use crate::session_options::SessionOptionsT;
 use crate::version::{MONGOAC_BUILD_PLATFORM, MONGOAC_VERSION_FULL};
@@ -83,17 +83,12 @@ pub extern "C" fn mongoac_client_count_command_events(client: *const ClientT) ->
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn mongoac_client_get_command_event(
-    client: *const ClientT,
-    index: usize,
-    error: *mut ErrorT,
-) -> *mut bson_t {
-    let error = safe_optional_error_as_mut!(error);
+pub extern "C" fn mongoac_client_get_command_event(client: *const ClientT, index: usize) -> BsonT {
     let client = safe_as_ref!(client);
 
     match client.get_command_event(index) {
-        Some(doc) => safe_error!(BsonT::try_from(&doc), error).into_raw(),
-        None => Default::default(),
+        Some(doc) => doc.into(),
+        None => BsonT::default(),
     }
 }
 
@@ -180,17 +175,17 @@ pub extern "C" fn mongoac_client_list_databases(
     session: *mut ClientSessionT,
     options: *const ListDatabasesOptionsT,
     error: *mut ErrorT,
-) -> *mut bson_t {
+) -> BsonT {
     let error = safe_optional_error_as_mut!(error);
     let client = safe_as_ref_with_error!(client, error);
     let session = safe_optional_as_mut!(session);
     let options = safe_optional_as_ref!(options);
 
-    let docs = safe_error!(
+    safe_error!(
         client.list_databases(session, options.map(Into::into)),
         error
-    );
-    safe_error!(BsonT::try_from(&docs), error).into_raw()
+    )
+    .into()
 }
 
 #[unsafe(no_mangle)]
@@ -216,17 +211,17 @@ pub extern "C" fn mongoac_client_list_database_names(
     session: *mut ClientSessionT,
     options: *const ListDatabasesOptionsT,
     error: *mut ErrorT,
-) -> *mut bson_t {
+) -> BsonT {
     let error = safe_optional_error_as_mut!(error);
     let client = safe_as_ref_with_error!(client, error);
     let session = safe_optional_as_mut!(session);
     let options = safe_optional_as_ref!(options);
 
-    let names = safe_error!(
+    safe_error!(
         client.list_database_names(session, options.map(Into::into)),
         error
-    );
-    safe_error!(BsonT::try_from(&names), error).into_raw()
+    )
+    .into()
 }
 
 impl ClientT {
