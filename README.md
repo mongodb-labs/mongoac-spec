@@ -6,7 +6,7 @@ This project is the initial design specification for the new MongoDB Async C Dri
 
 > [!CAUTION]
 > This specification is still in a drafting state!
-> As a Proof of Concept, this project uses heavy LLM-assistance using Kimi K2.7 Code and DeepSeek V4 Flash.
+> As a Proof of Concept, this project uses heavy LLM-assistance.
 > Details in this README.md are still being reviewed and the reference implementation under `src/libmongoac` is still
 >   being audited.
 > Contents above the `<!-- Audit Progress -->` marker comment in this file have been manually reviewed, audited, and
