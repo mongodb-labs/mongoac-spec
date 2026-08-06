@@ -2,11 +2,9 @@ use crate::error::{ErrorCodeT, ErrorT};
 use crate::future::{FutureExt, FutureT};
 use crate::private::macros::*;
 
-use event_listener::{Event, Listener};
 use futures_util::stream::{FuturesUnordered, StreamExt};
 use std::future::Future;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 #[macro_export]
@@ -75,45 +73,6 @@ pub extern "C" fn mongoac_runtime_make_progress_with_timeout(
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_runtime_make_progress_for(runtime: *const RuntimeT, duration_ms: u64) {
     safe_as_ref!(runtime).make_progress_for(Duration::from_millis(duration_ms));
-}
-
-// Issues a stop request to the runtime.
-//
-// All threads waiting on the runtime are notified; all subsequent calls to `wait*()` return immediately.
-#[unsafe(no_mangle)]
-pub extern "C" fn mongoac_runtime_request_stop(runtime: *const RuntimeT) -> bool {
-    safe_as_ref!(runtime).request_stop()
-}
-
-// Return true when a stop has been requested.
-//
-// Use this function to check when an event loop or worker thread should stop making progress on this runtime.
-#[unsafe(no_mangle)]
-pub extern "C" fn mongoac_runtime_stop_requested(runtime: *const RuntimeT) -> bool {
-    safe_as_ref!(runtime).stop_requested()
-}
-
-// Suspend the current thread until a new asynchronous task is spawned on this runtime (or a stop is requested).
-//
-// Use this function in an event loop or worker thread to avoid spin-looping while the runtime is idle.
-#[unsafe(no_mangle)]
-pub extern "C" fn mongoac_runtime_wait(runtime: *const RuntimeT) {
-    safe_as_ref!(runtime).wait();
-}
-
-// Like wait(), but (soft) upper-bounded by `timeout_ms`.
-//
-// Use this function when a (soft) upper bound is required on the time spent potentially blocked on `wait()`.
-#[unsafe(no_mangle)]
-pub extern "C" fn mongoac_runtime_wait_with_timeout(
-    runtime: *const RuntimeT,
-    timeout_ms: u64,
-    error: *mut ErrorT,
-) {
-    safe_error!(
-        safe_as_ref!(runtime).wait_with_timeout(Duration::from_millis(timeout_ms)),
-        safe_optional_error_as_mut!(error)
-    );
 }
 
 // Block the current thread by making progress until the `future` is ready.
@@ -292,25 +251,6 @@ impl RuntimeT {
             .block_on(async { tokio::time::sleep_until(deadline).await });
     }
 
-    pub(crate) fn request_stop(&self) -> bool {
-        let already_requested = self.state.stop_requested.swap(true, Ordering::AcqRel);
-        self.state.wait_flag.store(true, Ordering::Release);
-        self.state.wait_event.notify(usize::MAX); // All waiters must receive the stop request.
-        !already_requested
-    }
-
-    pub(crate) fn stop_requested(&self) -> bool {
-        self.state.stop_requested.load(Ordering::Acquire)
-    }
-
-    pub(crate) fn wait(&self) {
-        let _ = self.wait_impl(None);
-    }
-
-    pub(crate) fn wait_with_timeout(&self, timeout: Duration) -> Result<(), ErrorT> {
-        self.wait_impl(Some(timeout))
-    }
-
     pub(crate) fn block_on<F: Future>(&self, future: F) -> F::Output {
         self.state.runtime.block_on(future)
     }
@@ -418,68 +358,17 @@ impl RuntimeT {
         F: Future + Send + 'static,
         F::Output: Send + 'static,
     {
-        let handle = self.state.runtime.spawn(future);
-        self.state.wait_flag.store(true, Ordering::Release);
-        self.state.wait_event.notify(usize::MAX); // All waiters must be notified even when only one can make progress.
-        handle
-    }
-
-    fn wait_impl(&self, timeout: Option<Duration>) -> Result<(), ErrorT> {
-        // Double-checked predicate against listener registration.
-        if self.state.consume_wake() {
-            return Ok(());
-        }
-
-        let listener = self.state.wait_event.listen();
-
-        // Double-checked predicate against listener registration.
-        if self.state.consume_wake() {
-            return Ok(());
-        }
-
-        match timeout {
-            None => {
-                listener.wait();
-                Ok(())
-            }
-            Some(timeout) => {
-                if listener.wait_timeout(timeout).is_some() {
-                    Ok(())
-                } else {
-                    Err(ErrorT::from_mongoac(
-                        ErrorCodeT::Timeout,
-                        "runtime wait timed out",
-                    ))
-                }
-            }
-        }
+        self.state.runtime.spawn(future)
     }
 }
 
 struct RuntimeState {
     runtime: tokio::runtime::Runtime,
-    // Used to signal waiting threads that no more work should be done.
-    stop_requested: AtomicBool,
-    // Used to signal waiting threads when work is available.
-    wait_flag: AtomicBool,
-    // used to wake waiting threads when work is available or stop is requested.
-    wait_event: Event,
 }
 
 impl RuntimeState {
     fn new(runtime: tokio::runtime::Runtime) -> Self {
-        Self {
-            runtime,
-            stop_requested: AtomicBool::new(false),
-            wait_flag: AtomicBool::new(false),
-            wait_event: Event::new(),
-        }
-    }
-
-    // Return true when the runtime has been requested to stop or when a new wake notification is received.
-    // The wake notification is consumed by this call.
-    fn consume_wake(&self) -> bool {
-        self.stop_requested.load(Ordering::Acquire) || self.wait_flag.swap(false, Ordering::Acquire)
+        Self { runtime }
     }
 }
 
@@ -644,215 +533,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn wait_returns_immediately_when_work_already_available() {
-        let runtime = make_runtime();
-        runtime.spawn(tokio::task::yield_now());
-
-        let t0 = Instant::now();
-        runtime.wait();
-        let elapsed = t0.elapsed();
-
-        assert!(
-            elapsed < Duration::from_millis(10),
-            "expected immediate return, but call took {elapsed:?}"
-        );
-    }
-
-    #[test]
-    fn wait_blocks_until_work_is_spawned() {
-        let runtime = make_runtime();
-        let ready = Arc::new(AtomicBool::new(false));
-
-        let worker = thread::spawn({
-            let runtime = runtime.clone();
-            let ready = ready.clone();
-
-            move || {
-                runtime.wait();
-                ready.store(true, Ordering::Release);
-            }
-        });
-
-        thread::sleep(Duration::from_millis(10));
-        assert!(!ready.load(Ordering::Acquire));
-
-        runtime.spawn(tokio::task::yield_now());
-        worker.join().unwrap();
-
-        assert!(ready.load(Ordering::Acquire));
-    }
-
-    #[test]
-    fn wait_with_timeout_returns_err_when_no_work() {
-        let runtime = make_runtime();
-
-        let t0 = Instant::now();
-        assert!(
-            runtime
-                .wait_with_timeout(Duration::from_millis(10))
-                .is_err()
-        );
-        let elapsed = t0.elapsed();
-
-        assert!(
-            elapsed >= Duration::from_millis(10),
-            "expected full 10ms timeout, but got {elapsed:?}"
-        );
-    }
-
-    #[test]
-    fn wait_with_timeout_returns_ok_when_work_is_spawned() {
-        let runtime = make_runtime();
-
-        let worker = thread::spawn({
-            let runtime = runtime.clone();
-            move || {
-                assert!(runtime.wait_with_timeout(Duration::from_secs(10)).is_ok());
-            }
-        });
-
-        thread::sleep(Duration::from_millis(10));
-        runtime.spawn(tokio::task::yield_now());
-
-        worker.join().unwrap();
-    }
-
-    #[test]
-    fn wait_can_be_reused_after_wake() {
-        let runtime = make_runtime();
-
-        for _ in 0..3 {
-            let rt = runtime.clone();
-            let worker = thread::spawn(move || {
-                rt.wait();
-            });
-
-            thread::sleep(Duration::from_millis(1));
-            runtime.spawn(tokio::task::yield_now());
-
-            worker.join().unwrap();
-        }
-    }
-
-    #[test]
-    fn request_stop_wakes_all_waiting_workers() {
-        let runtime = make_runtime();
-        let num_workers = 3;
-        let mut handles = Vec::new();
-
-        for _ in 0..num_workers {
-            let rt = runtime.clone();
-            handles.push(thread::spawn(move || {
-                rt.wait();
-                rt.stop_requested()
-            }));
-        }
-
-        // Give workers time to start waiting on the runtime.
-        thread::sleep(Duration::from_millis(50));
-
-        assert!(!runtime.stop_requested());
-        runtime.request_stop();
-
-        let stopped = handles
-            .into_iter()
-            .map(|handle| handle.join().unwrap())
-            .filter(|result| *result)
-            .count();
-
-        assert_eq!(
-            stopped, num_workers,
-            "request_stop should wake all workers and each should observe the stop request"
-        );
-        assert!(runtime.stop_requested());
-    }
-
-    #[test]
-    fn request_stop_makes_subsequent_wait_return_immediately() {
-        let runtime = make_runtime();
-
-        runtime.request_stop();
-        let t0 = Instant::now();
-        runtime.wait();
-        let elapsed = t0.elapsed();
-
-        assert!(
-            elapsed < Duration::from_millis(10),
-            "wait should return immediately after request_stop, but took {elapsed:?}"
-        );
-        assert!(runtime.stop_requested());
-    }
-
-    #[test]
-    fn request_stop_makes_wait_with_timeout_return_ok() {
-        let runtime = make_runtime();
-
-        runtime.request_stop();
-        let t0 = Instant::now();
-        assert!(runtime.wait_with_timeout(Duration::from_secs(10)).is_ok());
-        let elapsed = t0.elapsed();
-
-        assert!(
-            elapsed < Duration::from_millis(10),
-            "wait_with_timeout should return immediately after request_stop, but took {elapsed:?}"
-        );
-    }
-
-    #[test]
-    fn wait_does_not_wake_for_timer_without_running_runtime() {
-        let runtime = make_runtime();
-        let done = Arc::new(AtomicBool::new(false));
-        let done_clone = done.clone();
-
-        runtime.spawn(async move {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            done_clone.store(true, Ordering::Release);
-        });
-
-        // spawn() leaves the work-available flag true. Consume it first so that the
-        // next wait() is actually waiting for a new signal, not the stale one.
-        runtime.wait();
-
-        // Park outside the runtime for 200ms. The timer deadline is 100ms, but the
-        // current_thread runtime is not being driven, so the timer cannot fire.
-        let start = Instant::now();
-        assert!(
-            runtime
-                .wait_with_timeout(Duration::from_millis(200))
-                .is_err(),
-            "wait should time out because no new task was spawned"
-        );
-        let elapsed = start.elapsed();
-        assert!(
-            elapsed >= Duration::from_millis(180),
-            "wait should have parked for the full 200ms (elapsed: {elapsed:?})"
-        );
-
-        // The timer task has not run yet because the runtime was not driven.
-        assert!(
-            !done.load(Ordering::Acquire),
-            "timer should not fire while the runtime is parked outside make_progress"
-        );
-
-        // After the wait timeout, make_progress() must be called repeatedly to drive
-        // the runtime enough to notice the expired timer and run the task to completion.
-        let start = Instant::now();
-        while !done.load(Ordering::Acquire) {
-            runtime.make_progress();
-            if start.elapsed() > Duration::from_secs(5) {
-                break;
-            }
-        }
-        assert!(
-            done.load(Ordering::Acquire),
-            "timer task should complete after make_progress drives the runtime"
-        );
-    }
-
-    /// Viability check: a current_thread Tokio runtime can block_on a future that
-    /// selects over multiple spawned tasks. Verifies both that the first ready task
-    /// is returned promptly and that the remaining task is still driven to completion.
     #[test]
     fn current_thread_runtime_can_select_over_multiple_futures() {
         let runtime = make_runtime();
@@ -1019,48 +699,6 @@ mod tests {
         runtime.block_on_future(&future);
         handle.join().unwrap();
         assert!(future.is_ready());
-    }
-
-    #[test]
-    fn request_stop_and_stop_requested_are_safe_while_runtime_is_driven() {
-        let runtime = make_runtime();
-        let rt = runtime.clone();
-
-        let handle = thread::spawn(move || {
-            let start = Instant::now();
-            while start.elapsed() < Duration::from_millis(100) {
-                rt.request_stop();
-                let _ = rt.stop_requested();
-                rt.request_stop();
-                thread::sleep(Duration::from_millis(5));
-            }
-        });
-
-        runtime.block_on(async {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        });
-
-        handle.join().unwrap();
-    }
-
-    #[test]
-    fn wait_is_safe_while_runtime_is_driven() {
-        let runtime = make_runtime();
-        let rt = runtime.clone();
-
-        let handle = thread::spawn(move || {
-            let start = Instant::now();
-            while start.elapsed() < Duration::from_millis(100) {
-                let _ = rt.wait_with_timeout(Duration::from_millis(1));
-                thread::sleep(Duration::from_millis(1));
-            }
-        });
-
-        runtime.block_on(async {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        });
-
-        handle.join().unwrap();
     }
 
     // -- Tokio-current_thread behavior: concurrent progress-driving is allowed --
