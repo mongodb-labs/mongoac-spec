@@ -155,39 +155,6 @@ set (mongoac_file_set_headers
     FILES "${include_dir}/mongoac/version.h"
 )
 
-function (mongoac_get_target_library_path bson_target outvar)
-  if (NOT TARGET "${bson_target}")
-    message (FATAL_ERROR "'${bson_target}' does not exist")
-  endif ()
-
-  # bson_shared or bson_static targets in this CMake configuration.
-  get_target_property (real_target "${bson_target}" ALIASED_TARGET)
-  if (real_target)
-    set ("${outvar}" "$<TARGET_FILE:${real_target}>" PARENT_SCOPE)
-    return ()
-  endif ()
-
-  # Imported bson::shared or bson::static targets from a system bson library.
-  get_target_property (filename "${bson_target}" IMPORTED_LOCATION)
-  if (NOT filename)
-    get_target_property (filename "${bson_target}" "IMPORTED_LOCATION_${CMAKE_BUILD_TYPE}")
-  endif ()
-
-  if (NOT filename)
-    message (FATAL_ERROR "Could not determine library path for target '${bson_target}'")
-  endif ()
-
-  set ("${outvar}" "${filename}" PARENT_SCOPE)
-endfunction ()
-
-if (TARGET bson::shared)
-  set (bson_library_env_var "MONGOAC_BSON_SHARED_LIBRARY_FILENAME")
-  mongoac_get_target_library_path (bson::shared bson_library_filename)
-else ()
-  set (bson_library_env_var "MONGOAC_BSON_STATIC_LIBRARY_FILENAME")
-  mongoac_get_target_library_path (bson::static bson_library_filename)
-endif ()
-
 if ("$CACHE{ENABLE_SHARED}")
   if (LINUX)
     if (PATCHELF_EXECUTABLE)
@@ -212,7 +179,6 @@ if ("$CACHE{ENABLE_SHARED}")
     COMMENT "Building the mongoac shared library"
     COMMAND
       "${CMAKE_COMMAND}" -E env
-        "${bson_library_env_var}=${bson_library_filename}"
         "MONGOAC_CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
         "MONGOAC_LIBRARY_TYPE=shared"
       "${CARGO_EXECUTABLE}" rustc
@@ -256,7 +222,6 @@ if ("$CACHE{ENABLE_SHARED}")
   target_link_libraries (mongoac_shared INTERFACE
     "$<BUILD_INTERFACE:${library_shared}>"
     "$<INSTALL_INTERFACE:${CMAKE_INSTALL_LIBDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}${soname}${CMAKE_SHARED_LIBRARY_SUFFIX}>"
-    bson::shared
   )
   target_sources (mongoac_shared INTERFACE ${mongoac_file_set_headers})
   add_library (mongoac::shared ALIAS mongoac_shared)
@@ -279,7 +244,6 @@ if (NOT "$CACHE{ENABLE_STATIC}" STREQUAL "OFF")
     COMMENT "Building the mongoac static library"
     COMMAND
       "${CMAKE_COMMAND}" -E env
-        "${bson_library_env_var}=${bson_library_filename}"
         "MONGOAC_CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
         "MONGOAC_LIBRARY_TYPE=static"
       "${CARGO_EXECUTABLE}" rustc
@@ -308,7 +272,6 @@ if (NOT "$CACHE{ENABLE_STATIC}" STREQUAL "OFF")
   target_link_libraries (mongoac_static INTERFACE
     "$<BUILD_INTERFACE:${library_static}>"
     "$<INSTALL_INTERFACE:${CMAKE_INSTALL_LIBDIR}/${CMAKE_STATIC_LIBRARY_PREFIX}${soname}${CMAKE_STATIC_LIBRARY_SUFFIX}>"
-    bson::static
   )
   target_sources (mongoac_static INTERFACE ${mongoac_file_set_headers})
   add_library (mongoac::static ALIAS mongoac_static)
