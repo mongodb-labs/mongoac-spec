@@ -1,5 +1,5 @@
 use crate::private::macros::*;
-use std::ffi::CString;
+use crate::string::StringT;
 use strum::EnumMessage;
 
 #[allow(non_camel_case_types)]
@@ -76,10 +76,11 @@ pub extern "C" fn mongoac_error_code(error: *const ErrorT) -> i32 {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn mongoac_error_message(error: *const ErrorT) -> *const std::ffi::c_char {
+pub extern "C" fn mongoac_error_message(error: *const ErrorT) -> StringT {
     safe_as_ref!(error)
         .message()
-        .map_or(EMPTY_MSG.as_ptr().cast(), |m| m.as_ptr())
+        .map(Into::into)
+        .unwrap_or_default()
 }
 
 #[unsafe(no_mangle)]
@@ -103,10 +104,10 @@ pub enum ErrorT {
     None,
     MongoAC {
         code: ErrorCodeT,
-        message: Option<CString>,
+        message: Option<String>,
     },
-    Bson(mongodb::bson::error::Error, Option<CString>),
-    Rust(mongodb::error::Error, Option<CString>),
+    Bson(mongodb::bson::error::Error),
+    Rust(mongodb::error::Error),
 }
 
 impl ErrorT {
@@ -118,7 +119,7 @@ impl ErrorT {
     pub(crate) fn from_mongoac(code: ErrorCodeT, msg: &str) -> Self {
         Self::MongoAC {
             code,
-            message: CString::new(msg).ok(),
+            message: Some(msg.to_owned()),
         }
     }
 
@@ -143,7 +144,7 @@ impl ErrorT {
             // mongodb::bson::error::Error does not use integral error codes.
             Self::Bson(..) => ErrorCodeT::Unknown(i32::MIN),
             Self::MongoAC { code, .. } => *code,
-            Self::Rust(err, _) => match err.kind.as_ref() {
+            Self::Rust(err) => match err.kind.as_ref() {
                 mongodb::error::ErrorKind::Command(cmd) => ErrorCodeT::from(cmd.code),
                 _ => ErrorCodeT::Unknown(i32::MIN),
             },
@@ -151,18 +152,19 @@ impl ErrorT {
     }
 
     #[must_use]
-    pub fn message(&self) -> Option<&CString> {
+    pub fn message(&self) -> Option<String> {
         match self {
             Self::None => None,
-            Self::MongoAC { message, .. } => message.as_ref(),
-            Self::Bson(_, msg) | Self::Rust(_, msg) => msg.as_ref(),
+            Self::MongoAC { message, .. } => message.clone(),
+            Self::Bson(err) => Some(err.to_string()),
+            Self::Rust(err) => Some(err.to_string()),
         }
     }
 
     #[must_use]
     pub fn has_label(&self, label: &str) -> bool {
         match self {
-            Self::Rust(err, _) => err.contains_label(label),
+            Self::Rust(err) => err.contains_label(label),
             _ => false,
         }
     }
@@ -171,26 +173,21 @@ impl ErrorT {
 // TODO: remove in favor of descriptive mongoac errors?
 impl From<mongodb::bson::error::Error> for ErrorT {
     fn from(err: mongodb::bson::error::Error) -> Self {
-        let msg = CString::new(err.to_string()).ok();
-        Self::Bson(err, msg)
+        Self::Bson(err)
     }
 }
 
 impl From<mongodb::error::Error> for ErrorT {
     fn from(err: mongodb::error::Error) -> Self {
-        let msg = CString::new(err.to_string()).ok();
-        Self::Rust(err, msg)
+        Self::Rust(err)
     }
 }
 
 impl From<tokio::time::error::Elapsed> for ErrorT {
     fn from(error: tokio::time::error::Elapsed) -> Self {
-        let msg = CString::new(error.to_string()).ok();
         Self::MongoAC {
             code: ErrorCodeT::Timeout,
-            message: msg,
+            message: Some(error.to_string()),
         }
     }
 }
-
-static EMPTY_MSG: [u8; 1] = [0];

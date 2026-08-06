@@ -16,6 +16,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <string_view>
 
 using mongoac::test_util::make_owning_ptr;
 using mongoac::test_util::owning_bson;
@@ -42,20 +43,21 @@ struct lsid {
    }
 };
 
-const char *
+std::string_view
 get_command_name(bson_t const &event)
 {
    bson_iter_t iter = {};
 
    if (!bson_iter_init(&iter, &event) || !bson_iter_find_descendant(&iter, "commandName", &iter) ||
        !BSON_ITER_HOLDS_UTF8(&iter)) {
-      return nullptr;
+      return {};
    }
 
-   return bson_iter_utf8(&iter, nullptr);
+   std::uint32_t len = {};
+   return {bson_iter_utf8(&iter, &len), len};
 }
 
-const char *
+std::string_view
 get_event_type(bson_t const &event)
 {
    bson_iter_t iter = {};
@@ -136,15 +138,15 @@ TEST_CASE("sessions", "[mongoac][client_session]")
       REQUIRE(e2);
       REQUIRE(e3);
 
-      CHECK_THAT(get_command_name(e0), Catch::Matchers::Equals("listCollections"));
-      CHECK_THAT(get_command_name(e1), Catch::Matchers::Equals("listCollections"));
-      CHECK_THAT(get_command_name(e2), Catch::Matchers::Equals("listCollections"));
-      CHECK_THAT(get_command_name(e3), Catch::Matchers::Equals("listCollections"));
+      CHECK(get_command_name(e0) == "listCollections");
+      CHECK(get_command_name(e1) == "listCollections");
+      CHECK(get_command_name(e2) == "listCollections");
+      CHECK(get_command_name(e3) == "listCollections");
 
-      CHECK_THAT(get_event_type(e0), Catch::Matchers::Equals("CommandStartedEvent"));
-      CHECK_THAT(get_event_type(e1), Catch::Matchers::Equals("CommandSucceededEvent"));
-      CHECK_THAT(get_event_type(e2), Catch::Matchers::Equals("CommandStartedEvent"));
-      CHECK_THAT(get_event_type(e3), Catch::Matchers::Equals("CommandSucceededEvent"));
+      CHECK(get_event_type(e0) == "CommandStartedEvent");
+      CHECK(get_event_type(e1) == "CommandSucceededEvent");
+      CHECK(get_event_type(e2) == "CommandStartedEvent");
+      CHECK(get_event_type(e3) == "CommandSucceededEvent");
 
       lsid lsid_a = {};
       lsid lsid_b = {};

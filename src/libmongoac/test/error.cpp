@@ -4,6 +4,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+#include <test_util/string.hh>
+
+using mongoac::test_util::to_string;
 
 TEST_CASE("new", "[mongoac][error]")
 {
@@ -13,7 +16,7 @@ TEST_CASE("new", "[mongoac][error]")
 
    CHECK(mongoac_error_category(error) == 0);
    CHECK(mongoac_error_code(error) == 0);
-   CHECK(mongoac_error_message(error) != nullptr);
+   CHECK(to_string(mongoac_error_message(error)).empty());
 
    mongoac_error_destroy(error);
 }

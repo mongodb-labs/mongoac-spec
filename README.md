@@ -1469,18 +1469,6 @@ Current approach: **raw pass-through** — only mongoac-internal category consta
 
 For multi-error variants (`InsertMany`, `BulkWrite`), write concern errors are preferred over individual write errors when both are present. This priority is deferrable: changing it does not break the C API or ABI.
 
-#### String API: C strings vs. string views
-
-Which representation should mongoac use for all string parameters and return values that cross the FFI boundary?
-
-- **`const char*`:** the de facto standard for C libraries; Rust's `CStr`/`CString` handle it safely. However, embedded NUL bytes are ambiguous, every call requires `strlen()`, and retrofitting to a view-based API later is an ABI-breaking change.
-- **`const char* + size_t`:** avoids embedded NUL issues and removes `strlen()`. However, every string parameter becomes two parameters, which is verbose and inconsistent with struct-based API patterns elsewhere in mongoac.
-- **`mongoac_string_view_t`:** a `#[repr(C)]` struct encapsulating pointer + length; consistent with modern C APIs, avoids embedded NUL issues, and avoids `strlen()`. However, C callers must construct a struct for every string argument, adding friction for the common case.
-
-This is an all-or-nothing decision at design time: once `const char*` is in the public API, it cannot be replaced without breaking ABI.
-
-Current approach: **`const char*`** — all public APIs currently use null-terminated byte strings. This choice is effectively irreversible: switching to `const char* + size_t` or `mongoac_string_view_t` would be an ABI-breaking change.
-
 <a id="error-handling-transparency"></a>
 #### Error-handling transparency
 

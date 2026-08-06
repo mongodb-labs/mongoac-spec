@@ -4,6 +4,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+#include <test_util/string.hh>
+
+#include <string_view>
+
+using mongoac::test_util::to_string_view;
 
 TEST_CASE("macros", "[mongoac][version]")
 {
@@ -13,8 +18,8 @@ TEST_CASE("macros", "[mongoac][version]")
       CHECK(MONGOAC_VERSION_MINOR == mongoac_version_minor());
       CHECK(MONGOAC_VERSION_PATCH == mongoac_version_patch());
 
-      CHECK_THAT(mongoac_version(), Catch::Matchers::Equals(MONGOAC_VERSION));
-      CHECK_THAT(mongoac_version_prerelease(), Catch::Matchers::Equals(MONGOAC_VERSION_PRERELEASE));
+      CHECK(to_string_view(mongoac_version()) == MONGOAC_VERSION);
+      CHECK(to_string_view(mongoac_version_prerelease()) == MONGOAC_VERSION_PRERELEASE);
    }
 
    SECTION("hex")

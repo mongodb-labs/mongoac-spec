@@ -9,9 +9,11 @@
 #include <mongoac/server_api.h>
 #include <test_util/bson.hh>
 #include <test_util/owning_ptr.hh>
+#include <test_util/string.hh>
 
 using mongoac::test_util::make_owning_ptr;
 using mongoac::test_util::owning_bson;
+using mongoac::test_util::to_string;
 
 TEST_CASE("new", "[mongoac][client]")
 {
@@ -23,7 +25,7 @@ TEST_CASE("new", "[mongoac][client]")
       CHECK(client == nullptr);
 
       CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_MONGOAC);
-      CHECK(mongoac_error_message(error) != nullptr);
+      CHECK(to_string(mongoac_error_message(error)) != "");
    }
 
    SECTION("invalid URI")
@@ -34,7 +36,7 @@ TEST_CASE("new", "[mongoac][client]")
       CHECK(client == nullptr);
 
       CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_RUST);
-      CHECK(mongoac_error_message(error) != nullptr);
+      CHECK(to_string(mongoac_error_message(error)) != "");
    }
 
    SECTION("invalid UTF-8")
@@ -45,7 +47,7 @@ TEST_CASE("new", "[mongoac][client]")
       CHECK(client == nullptr);
       CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_MONGOAC);
       CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_INVALID_ARGUMENT);
-      CHECK_THAT(mongoac_error_message(error), Catch::Matchers::ContainsSubstring("UTF-8"));
+      CHECK_THAT(to_string(mongoac_error_message(error)), Catch::Matchers::ContainsSubstring("UTF-8"));
    }
 
    SECTION("valid URI")
@@ -229,7 +231,7 @@ TEST_CASE("shutdown", "[mongoac][client]")
          CHECK_FALSE(owning_bson(mongoac_client_list_databases(client, nullptr, nullptr, error)));
          CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_RUST);
          CHECK(mongoac_error_code(error) != MONGOAC_ERROR_CODE_OK);
-         CHECK_THAT(mongoac_error_message(error), Catch::Matchers::ContainsSubstring("shut down"));
+         CHECK_THAT(to_string(mongoac_error_message(error)), Catch::Matchers::ContainsSubstring("shut down"));
       }
    }
 }
@@ -270,7 +272,7 @@ TEST_CASE("shutdown_async", "[mongoac][client]")
          CHECK_FALSE(owning_bson(mongoac_client_list_databases(client, nullptr, nullptr, error)));
          CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_RUST);
          CHECK(mongoac_error_code(error) != MONGOAC_ERROR_CODE_OK);
-         CHECK_THAT(mongoac_error_message(error), Catch::Matchers::ContainsSubstring("shut down"));
+         CHECK_THAT(to_string(mongoac_error_message(error)), Catch::Matchers::ContainsSubstring("shut down"));
       }
    }
 }

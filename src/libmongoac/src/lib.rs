@@ -28,6 +28,7 @@ pub mod server_api;
 pub mod server_info;
 pub mod server_selector;
 pub mod session_options;
+pub mod string;
 pub mod tls;
 pub mod transaction_options;
 pub mod version;

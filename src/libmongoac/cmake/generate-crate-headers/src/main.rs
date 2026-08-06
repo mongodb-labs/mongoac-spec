@@ -48,6 +48,8 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
         ("ServerSelectorT", "mongoac_server_selector_t"),
         ("ServerTypeT", "mongoac_server_type_t"),
         ("SessionOptionsT", "mongoac_session_options_t"),
+        ("StringT", "mongoac_string_t"),
+        ("StringViewT", "mongoac_string_view_t"),
         ("TransactionOptionsT", "mongoac_transaction_options_t"),
         ("TlsOptionsT", "mongoac_tls_options_t"),
         ("WriteConcernT", "mongoac_write_concern_t"),
@@ -150,7 +152,12 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
         ],
         "drop_collection_options" => includes!["mongoac/export.h", "mongoac/write_concern.h"],
         "drop_database_options" => includes!["mongoac/export.h", "mongoac/write_concern.h"],
-        "error" => includes!["mongoac/export.h", "stdbool.h", "stdint.h"],
+        "error" => includes![
+            "mongoac/export.h",
+            "mongoac/string.h",
+            "stdbool.h",
+            "stdint.h"
+        ],
         "find_options" => includes!["mongoac/export.h", "mongoac/error.h", "mongoac/bson.h"],
         "future" => includes![
             "mongoac/export.h",
@@ -211,6 +218,7 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
             "stdbool.h",
             "stdint.h",
         ],
+        "string" => includes!["mongoac/export.h", "stdint.h"],
         "tls" => includes!["mongoac/export.h", "mongoac/error.h", "stdbool.h"],
         "transaction_options" => includes![
             "mongoac/export.h",

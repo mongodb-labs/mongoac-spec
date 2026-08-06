@@ -33,6 +33,9 @@ function(fetch_catch2)
         set_property(DIRECTORY "${ep_catch2_SOURCE_DIR}" PROPERTY EXCLUDE_FROM_ALL ON)
 
         # Catch2 config vars.
+        set_property(CACHE CATCH_CONFIG_CPP11_TO_STRING PROPERTY VALUE ON)
+        set_property(CACHE CATCH_CONFIG_CPP17_OPTIONAL PROPERTY VALUE ON)
+        set_property(CACHE CATCH_CONFIG_CPP17_STRING_VIEW PROPERTY VALUE ON)
         set_property(CACHE CATCH_INSTALL_DOCS PROPERTY VALUE OFF)
         set_property(CACHE CATCH_INSTALL_EXTRAS PROPERTY VALUE OFF)
 

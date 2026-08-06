@@ -24,12 +24,14 @@
 #include <mongoac/runtime.h>
 #include <test_util/bson.hh>
 #include <test_util/owning_ptr.hh>
+#include <test_util/string.hh>
 
 #include <array>
 
 using mongoac::test_util::bson_array_contains_string;
 using mongoac::test_util::bson_from_json;
 using mongoac::test_util::make_owning_ptr;
+using mongoac::test_util::to_string;
 
 TEST_CASE("drop", "[mongoac][collection]")
 {
@@ -137,7 +139,7 @@ TEST_CASE("drop", "[mongoac][collection]")
    if (1) {                                                          \
       CHECKED_IF(mongoac_error_code(error) != MONGOAC_ERROR_CODE_OK) \
       {                                                              \
-         FAIL(mongoac_error_message(error));                         \
+         FAIL(to_string(mongoac_error_message(error)));              \
       }                                                              \
    } else                                                            \
       ((void)0)

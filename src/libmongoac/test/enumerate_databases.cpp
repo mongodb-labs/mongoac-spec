@@ -10,7 +10,6 @@
 #include <test_util/bson.hh>
 #include <test_util/owning_ptr.hh>
 
-#include <cstdint>
 #include <string>
 
 using mongoac::test_util::make_owning_ptr;
