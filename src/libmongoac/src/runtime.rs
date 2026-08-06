@@ -25,7 +25,7 @@ macro_rules! safe_from_runtime_with_error {
 
 #[derive(Clone)]
 pub struct RuntimeT {
-    state: Arc<RuntimeState>,
+    runtime: Arc<tokio::runtime::Runtime>,
 }
 
 #[unsafe(no_mangle)]
@@ -213,7 +213,7 @@ pub extern "C" fn mongoac_runtime_block_on_all_with_timeout(
 
 impl PartialEq for RuntimeT {
     fn eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.state, &other.state)
+        Arc::ptr_eq(&self.runtime, &other.runtime)
     }
 }
 
@@ -226,18 +226,18 @@ impl RuntimeT {
             .build()?;
 
         Ok(Self {
-            state: Arc::new(RuntimeState::new(runtime)),
+            runtime: Arc::new(runtime),
         })
     }
 
     pub(crate) fn make_progress(&self) {
-        self.state.runtime.block_on(tokio::task::yield_now());
+        self.runtime.block_on(tokio::task::yield_now());
     }
 
     pub(crate) fn make_progress_with_timeout(&self, timeout: Duration) -> Result<(), ErrorT> {
         let deadline = tokio::time::Instant::now() + timeout;
 
-        self.state.runtime.block_on(async {
+        self.runtime.block_on(async {
             tokio::time::timeout_at(deadline, tokio::task::yield_now()).await?;
             Ok(())
         })
@@ -246,13 +246,12 @@ impl RuntimeT {
     pub(crate) fn make_progress_for(&self, duration: Duration) {
         let deadline = tokio::time::Instant::now() + duration;
 
-        self.state
-            .runtime
+        self.runtime
             .block_on(async { tokio::time::sleep_until(deadline).await });
     }
 
     pub(crate) fn block_on<F: Future>(&self, future: F) -> F::Output {
-        self.state.runtime.block_on(future)
+        self.runtime.block_on(future)
     }
 
     pub(crate) fn block_on_future(&self, future: &FutureT) {
@@ -260,7 +259,7 @@ impl RuntimeT {
             return; // No work to do.
         }
 
-        self.state.runtime.block_on(future.poll());
+        self.runtime.block_on(future.poll());
     }
 
     pub(crate) fn block_on_future_with_timeout(
@@ -274,7 +273,7 @@ impl RuntimeT {
             return Ok(()); // No work to do.
         }
 
-        self.state.runtime.block_on(async {
+        self.runtime.block_on(async {
             tokio::time::timeout_at(deadline, future.poll()).await?;
             Ok(())
         })
@@ -286,8 +285,7 @@ impl RuntimeT {
             return Some(i);
         }
 
-        self.state
-            .runtime
+        self.runtime
             .block_on(futures_unordered_for_any(futures).next())
     }
 
@@ -303,7 +301,7 @@ impl RuntimeT {
             return Ok(Some(i));
         }
 
-        self.state.runtime.block_on(async {
+        self.runtime.block_on(async {
             Ok(
                 tokio::time::timeout_at(deadline, futures_unordered_for_any(futures).next())
                     .await?,
@@ -317,7 +315,7 @@ impl RuntimeT {
             return;
         }
 
-        self.state.runtime.block_on(async {
+        self.runtime.block_on(async {
             let mut fut_set = futures_unordered_for_all(futures);
             while fut_set.next().await.is_some() {}
         });
@@ -335,7 +333,7 @@ impl RuntimeT {
             return Ok(());
         }
 
-        self.state.runtime.block_on(async {
+        self.runtime.block_on(async {
             let mut fut_set = futures_unordered_for_all(futures);
             tokio::time::timeout_at(deadline, async { while fut_set.next().await.is_some() {} })
                 .await?;
@@ -345,12 +343,12 @@ impl RuntimeT {
 
     pub(crate) fn from_raw(runtime: tokio::runtime::Runtime) -> Self {
         Self {
-            state: Arc::new(RuntimeState::new(runtime)),
+            runtime: Arc::new(runtime),
         }
     }
 
     pub(crate) fn get_runtime(&self) -> &tokio::runtime::Runtime {
-        &self.state.runtime
+        &self.runtime
     }
 
     pub(crate) fn spawn<F>(&self, future: F) -> tokio::task::JoinHandle<F::Output>
@@ -358,17 +356,7 @@ impl RuntimeT {
         F: Future + Send + 'static,
         F::Output: Send + 'static,
     {
-        self.state.runtime.spawn(future)
-    }
-}
-
-struct RuntimeState {
-    runtime: tokio::runtime::Runtime,
-}
-
-impl RuntimeState {
-    fn new(runtime: tokio::runtime::Runtime) -> Self {
-        Self { runtime }
+        self.runtime.spawn(future)
     }
 }
 
