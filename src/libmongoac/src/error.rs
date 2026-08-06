@@ -119,7 +119,7 @@ impl ErrorT {
     pub(crate) fn from_mongoac(code: ErrorCodeT, msg: &str) -> Self {
         Self::MongoAC {
             code,
-            message: Some(msg.to_owned()),
+            message: Some(msg.to_string()),
         }
     }
 
