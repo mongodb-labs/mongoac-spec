@@ -3,6 +3,7 @@ use crate::private::macros::*;
 use crate::read_concern::ReadConcernT;
 use crate::read_preference::ReadPreferenceT;
 use crate::server_api::ServerApiT;
+use crate::server_selector::ServerSelectorT;
 use crate::tls::TlsOptionsT;
 use crate::write_concern::WriteConcernT;
 use crate::{credential::CredentialT, error::ErrorCodeT};
@@ -238,6 +239,14 @@ pub extern "C" fn mongoac_client_options_set_write_concern(
 pub extern "C" fn mongoac_client_options_set_read_preference(
     opts: *mut ClientOptionsT,
     v: *const ReadPreferenceT,
+) {
+    safe_as_mut!(opts).inner.selection_criteria = safe_optional_as_ref!(v).map(Into::into);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_client_options_set_server_selector(
+    opts: *mut ClientOptionsT,
+    v: *const ServerSelectorT,
 ) {
     safe_as_mut!(opts).inner.selection_criteria = safe_optional_as_ref!(v).map(Into::into);
 }

@@ -561,7 +561,6 @@ URI options are parsed by `ClientOptions::parse()`. All supported options config
 
 > [!TIP]
 > - [Why no URI option getters?](#why-no-uri-getters)
-> - [Why no callback-based auth API?](#why-no-callback-auth)
 
 #### Client Metadata
 
@@ -607,7 +606,7 @@ Events are the Rust driver's serde-serialized event types, returned as BSON docu
 > - [Why is event capture opt-in?](#why-capture-all-events-by-default)
 > - [Why owning event document access?](#why-owning-event-doc-access)
 > - [Why pass through Rust driver event shapes?](#why-pass-through-event-shapes)
-> - [Why not callback-based events?](#rejected-callback-events)
+> - [Why not callback-based APIs?](#rejected-callbacks)
 
 #### Server Discovery, Selection & Operations
 
@@ -619,11 +618,23 @@ SDAM runs inside the Rust driver. mongoac does not expose topology state or serv
 
 ##### Server Selection
 
-The Rust driver selects a server automatically for every operation. Client-specific options (`serverSelectionTimeoutMS`, `localThresholdMS`) are available both through the URI and as `mongoac_client_options_t` fields. Non-client-specific options (`readPreference`, `maxStalenessSeconds`, `readPreferenceTags`) map to `SelectionCriteria` and are expressed via `mongoac_read_preference_t` with setters for mode, max staleness (seconds), tag sets, and hedge. Read preference is currently supported for `mongoac_client_options_t` and `mongoac_database_options_t`; collection-level and per-operation (e.g. `FindOptions`) support is planned. `SelectionCriteria::Predicate` (custom closure) is not FFI-expressible and is not exposed.
+The Rust driver selects a server automatically for every operation. Client-specific options (`serverSelectionTimeoutMS`, `localThresholdMS`) are available both through the URI and as `mongoac_client_options_t` fields. Non-client-specific options (`readPreference`, `maxStalenessSeconds`, `readPreferenceTags`) map to `SelectionCriteria` and are expressed via `mongoac_read_preference_t` with setters for mode, max staleness (seconds), tag sets, and hedge. Read preference is supported for `mongoac_client_options_t`, `mongoac_database_options_t`, and `mongoac_collection_options_t`; per-operation (e.g. `FindOptions`) support is planned.
+
+For custom server selection logic that cannot be expressed by read preference, mongoac exposes `SelectionCriteria::Predicate` via a synchronous C callback. A `mongoac_server_selector_t` handle wraps a C function pointer (`mongoac_server_predicate_t`) and an opaque `user_data` pointer. The callback receives a borrowed opaque `mongoac_server_info_t` pointer and inspects server metadata via getter functions (`mongoac_server_info_get_address`, `mongoac_server_info_get_average_rtt_ms`, `mongoac_server_info_get_server_type`, `mongoac_server_info_get_max_wire_version`, `mongoac_server_info_get_min_wire_version`, `mongoac_server_info_get_replica_set_name`, `mongoac_server_info_get_tags`). All returned pointers are valid only for the duration of the callback. Setters are provided on `mongoac_client_options_t`, `mongoac_database_options_t`, and `mongoac_collection_options_t` via `set_server_selector`. The server selector and `set_read_preference` both set the same underlying `selection_criteria` field and are mutually exclusive (last-write-wins). The callback must be non-blocking, non-reentrant (must not call any mongoac API), and must not retain borrowed pointers after return.
+
+`RuntimeT` ensures the predicate is only potentially-invoked during `make_progress*()` or `block_on*()`. The callback must be non-blocking, non-reentrant, and retain no pointers to values passed to the callback beyond the scope of the invocation. Any panic, deadlock, or failure-mode that may occur within the callback is undefined behavior.
+
+> [!NOTE]
+> If the FFI is ever used by a runtime-based language (e.g. Python, Java, JavaScript, etc.), the caller must ensure that
+>   any user-provided values used by the callback function are accessible and synchronized with consideration for the
+>   thread responsible for making progress.
+> If the values accessed by the callback function are on the same thread as the one making progress, synchronization
+>   should not be necessary.
 
 The option setters (`max_staleness`, `tag_set`, `hedge`) reject `Primary` mode with `MONGOAC_ERROR_CODE_INVALID_ARGUMENT`. A non-`Primary` mode must be set before configuring options.
 
 > [!TIP]
+> - [Why use a callback for custom server selection?](#why-server-selection-callback)
 > - [Why typed read preference?](#why-typed-read-preference)
 
 ##### Retryable Reads & Writes
@@ -933,6 +944,17 @@ A dedicated pointer locks the ABI from day one: callers pass `NULL` until sessio
 
 `FindOptions` currently uses a transitional `set_from_bson()` that deserializes a BSON document into the Rust struct via serde, which handles the string-to-enum mapping for `CursorType`. An integer enum would require a parallel C `#define` set and manual conversion code that duplicates serde's work. Once full typed setters are added to `mongoac_find_options_t`, `CursorType` will be exposed as a `#define` enum with a typed setter.
 
+<a id="why-server-selection-callback"></a>
+#### Why use a callback for custom server selection
+
+`SelectionCriteria::Predicate` is the only method by which the Rust Driver supports custom server selection.
+There is no meaningful non-callback-based alternative approach to be considered in this circumstance (i.e. index-based
+  Event API).
+However, this callback function is somewhat unique compared to other potential callback-based APIs: no substantial
+  "work" is expected to occur in this callback function (only accepts or rejects the given server candidate), and the
+  `bool` result is for use by Rust Driver internals, not by the user (the user is the one providing the result).
+Therefore, an exemption to the [no callback-based API](#rejected-callbacks) principle is justifiable.
+
 ### Supported Features
 
 #### Connection Strings (URI)
@@ -956,14 +978,6 @@ The `mongodb` crate's `ClientOptions::parse()` is the authoritative parser. Call
 
 `ClientOptions` fields are consumed during `Client::with_options()`. Exposing them back would require storing a copy inside `mongoac_client_t` for rarely-accessed data. The common workflow (connect, operate, disconnect) does not need post-construction URI inspection.
 
-<a id="why-no-callback-auth"></a>
-##### Why no callback-based auth API?
-
-Rust-to-C callbacks would require the Rust driver to invoke caller-supplied C functions during async authentication on the per-client Tokio runtime, creating re-entrancy, cancellation, and lifetime hazards across the FFI boundary. The built-in OIDC environment integrations (Azure, GCP, k8s) and standard URI-driven mechanisms cover the common cases without callbacks. `mongoac_credential_t` exposes all non-callback `Credential` fields but omits `oidc_callback` for this reason.
-
-> [!TIP]
-> - [Why not callback-based auth?](#rejected-callback-auth)
-
 <a id="why-build-platform-metadata"></a>
 #### Client Metadata
 
@@ -974,10 +988,10 @@ mongoac appends the C build configuration to the handshake `client.platform` fie
 
 ##### Why index-based events?
 
-Index-based access keeps the FFI boundary one-directional: C pulls BSON documents from Rust-owned buffers on the same thread that drives the runtime. No C callbacks are invoked from internal tokio threads, avoiding re-entrancy, lifetime, and synchronization hazards. The BSON documents are produced by serde-serializing the Rust driver events directly, avoiding custom wrapper types and keeping the FFI implementation minimal.
+Index-based access keeps the FFI boundary one-directional: C pulls BSON documents from Rust-owned buffers at safe points of its own choosing, so no C code runs during `make_progress()`. The `current_thread` runtime means command, CMAP, and SDAM events all fire on the driving thread (not from hidden worker threads), but they fire spontaneously during `make_progress()` — whenever monitoring or connection-pool activity progresses, potentially while the caller is awaiting an unrelated operation. The spontaneity is strongest for SDAM (topology and heartbeat changes fire during background monitoring) and CMAP pool-lifecycle events; command events and CMAP checkout/checkin are more request-scoped. A single pull model is adopted uniformly across all three categories so the caller consumes every event at safe points rather than handling some at spontaneous moments deep inside the runtime's task queue, and to avoid splitting the event API into two delivery idioms. The BSON documents are produced by serde-serializing the Rust driver events directly, avoiding custom wrapper types and keeping the FFI implementation minimal.
 
 > [!TIP]
-> - [Why not callback-based events?](#rejected-callback-events)
+> - [Why not callback-based events?](#rejected-callbacks)
 > - [Event buffer limits](#event-buffer-limits)
 
 <a id="why-ring-buffer-storage"></a>
@@ -1003,10 +1017,12 @@ Events are serialized to BSON at `get()` time and returned as an owning `*mut bs
 
 Consistent with the [partially-transparent error-handling approach](#error-handling-transparency): the FFI layer validates pointer safety and encoding, but defers semantic choices (including event serialization format) to the Rust driver. Normalizing event shapes to spec-expected conventions would require duplicating or transforming Rust driver internals, adding complexity and risk of divergence from the upstream crate. Known spec-level divergences (e.g., `topologyId` serde skip, untagged serialization, duration subdocuments, string `failure`, `connectionId` and `databaseName` shapes) are accepted as-is and documented in the investigation reports.
 
+#### Server Discovery, Selection & Operations
+
 <a id="why-typed-read-preference"></a>
 ##### Why typed read preference?
 
-`readPreference`, `maxStalenessSeconds`, and `readPreferenceTags` are meaningful at the database, collection, and operation levels in the Rust driver. The `mongodb` crate exposes `SelectionCriteria` on `DatabaseOptions`, `CollectionOptions`, and per-operation option structs such as `FindOptions`. A typed `mongoac_read_preference_t` handle with per-variant setters for mode, max staleness (seconds), tag sets, and hedge provides stronger type checking than a BSON document and reaches `#[serde(skip)]` fields such as `selection_criteria` (unreachable via BSON deserialization). The handle is currently reused for the `selection_criteria` field on `mongoac_client_options_t` and `mongoac_database_options_t`; per-operation option structs such as `FindOptions` will use it once their typed setters are added. `SelectionCriteria::Predicate` (custom closure) is not exposed.
+`readPreference`, `maxStalenessSeconds`, and `readPreferenceTags` are meaningful at the database, collection, and operation levels in the Rust driver. The `mongodb` crate exposes `SelectionCriteria` on `DatabaseOptions`, `CollectionOptions`, and per-operation option structs such as `FindOptions`. A typed `mongoac_read_preference_t` handle with per-variant setters for mode, max staleness (seconds), tag sets, and hedge provides stronger type checking than a BSON document and reaches `#[serde(skip)]` fields such as `selection_criteria` (unreachable via BSON deserialization). The handle is currently reused for the `selection_criteria` field on `mongoac_client_options_t`, `mongoac_database_options_t`, and `mongoac_collection_options_t`; per-operation option structs such as `FindOptions` will use it once their typed setters are added. `SelectionCriteria::Predicate` (custom closure) is exposed via a separate `mongoac_server_selector_t` handle — see [Why callbacks are avoided](#rejected-callbacks).
 
 `mongoac_read_preference_t` directly wraps `ReadPreference` (`ReadPreferenceT(ReadPreference)`), matching the struct shape of `mongoac_read_concern_t` and `mongoac_write_concern_t`. Because `ReadPreference::Primary` has no `options` slot, the option setters (`max_staleness`, `tag_sets`, `hedge`) reject `Primary` with `MONGOAC_ERROR_CODE_INVALID_ARGUMENT` — mirroring the Rust driver's `ReadPreference::with_tags` / `with_max_staleness`, which return `Err(InvalidArgument)` for `Primary`. Mode setters carry `ReadPreferenceOptions` forward when switching between non-`Primary` modes; switching to `Primary` discards them (inherent to the enum).
 
@@ -1014,6 +1030,12 @@ Consistent with the [partially-transparent error-handling approach](#error-handl
 ##### Why do SDAM, retry, and step-down resilience require no C API?
 
 These behaviors are managed entirely inside the Rust driver, which exposes no public API to read topology state, toggle per-operation retry, or manually clear connection pools. Because the C caller cannot influence them through any Rust API, there is no C API surface to expose.
+
+> [!TIP]
+> - The server selection predicate is a callback exception — see [Why callbacks are avoided](#rejected-callbacks).
+> - [Why not snapshot-and-select for custom server selection?](#rejected-snapshot-select)
+> - [Why not a BSON declarative server filter?](#rejected-bson-server-filter)
+> - [Why not a precedence-list for custom server selection?](#rejected-precedence-list)
 
 #### Collation
 
@@ -1051,15 +1073,6 @@ The Rust driver's action builders consume `&mut ClientSession` for the operation
 ##### Why fire-and-forget async abort on session destroy?
 
 This is inherent to the Rust driver's `ClientSession::Drop`. Diverging would require a synchronous abort path absent from the upstream driver.
-
-<a id="why-defer-and-run"></a>
-##### Why defer the `and_run()` transaction retry convenience?
-
-Exposing `and_run()` would require Rust-to-C callback invocation — re-entrancy, cancellation, and lifetime hazards that every other mongoac feature deliberately avoids.
-
-> [!TIP]
-> - [Why not callback-based auth?](#rejected-callback-auth)
-> - [Why not callback-based events?](#rejected-callback-events)
 
 <a id="why-session-drop-sends-endsessions"></a>
 ##### Why is no explicit `endSessions` C API needed?
@@ -1197,14 +1210,38 @@ Rejected: the per-client runtime already exists at parse time. Using it eliminat
 
 The Rust driver's dual-cursor type is a borrow-checker artifact. C lacks Rust's lifetime system, so the distinction cannot be enforced at compile time. A single cursor type with an embedded session provides the same capabilities with a simpler API and fewer opportunities for caller error.
 
+<a id="rejected-callbacks"></a>
+#### Callback-based APIs
+
+The Rust Driver expects callback functions to be asynchronous.
+Asynchronous callback functions are impossible to express using a straightforward C callback function.
+Without introducing significant complexity, such callback functions would force an inverted "async implemented by sync"
+  situation (antithetical to the purpose of supporting an async API) that necessitates further API contracts concerning
+  lifetime and control flow.
+Due to the Tokio current-thread runtime model, _any_ synchronous callback function invoked within the Rust Driver
+  internals may block _all_ other tasks making progress on the same runtime.
+Therefore, callback-based APIs are avoided library-wide whenever possible.
+
 ### Supported Features
 
 #### Connection Strings (URI)
 
-<a id="rejected-callback-auth"></a>
-##### Callback-based authentication API
+#### Server Discovery, Selection & Operations
 
-Rust-to-C callbacks during async authentication introduce re-entrancy, cancellation, and lifetime hazards across the FFI boundary. Standard URI-driven mechanisms and the Rust driver's built-in OIDC integrations cover common cases.
+<a id="rejected-snapshot-select"></a>
+##### Snapshot-and-select for custom server selection
+
+Exposing a read-only topology snapshot (list of servers with metadata) and letting the C caller pick a server would require duplicating the driver's server selection logic on the C side. A point-in-time snapshot pins the selection to stale topology state and does not auto-adapt when topology changes (server goes down, new primary elected, RTT shifts). The snapshot would need its own lifetime management and invalidation strategy, adding complexity without solving the adaptation problem.
+
+<a id="rejected-bson-server-filter"></a>
+##### BSON declarative server filter
+
+A BSON document expressing filter criteria (e.g., `{"server_type": "Mongos", "tags.region": "us-east"}`) would avoid callbacks but reinvents a query language for server metadata. The filter semantics would need to match the Rust driver's `ServerInfo` field types, support nested tag lookups, and handle missing fields — all without the driver's existing query infrastructure. Extending the filter to cover new use cases would grow the schema incrementally, never reaching the full expressiveness of a predicate.
+
+<a id="rejected-precedence-list"></a>
+##### Precedence-list for custom server selection
+
+A sorted list of preferred server addresses or tags would let the caller express preference order without a callback. However, this bakes in a fallback policy (what happens when no preferred server is available) that the driver already handles via suitability rules and latency windows. The list would need to interact with read preference, tags, and max staleness — duplicating or conflicting with existing selection criteria. The predicate callback lets the caller express any preference logic, including fallback, without mongoac prescribing the policy.
 
 #### Read Concern, Write Concern & Read Preference
 
@@ -1214,12 +1251,7 @@ Rust-to-C callbacks during async authentication introduce re-entrancy, cancellat
 
 The CRUD spec permits sending `readConcern: {}` to reset a parent-level concern to server default. The Rust driver's public API cannot produce this — `ReadConcern.level` is not `Option<ReadConcernLevel>`, conflating "not set" with "explicit server default". A raw-BSON workaround would need to replicate the driver's serde and wire-protocol serialization, creating a fragile internal divergence.
 
-<a id="rejected-callback-events"></a>
 #### Event API
-
-##### Callback-based event handlers
-
-Rust-to-C callbacks from internal tokio threads would require `Send + Sync`, re-entrancy safety, and non-blocking guarantees — a complex cross-language concurrency contract. Index-based buffers avoid invoking C code from Rust threads entirely.
 
 <a id="rejected-event-shape-normalization"></a>
 
@@ -1286,12 +1318,6 @@ Locking the session mutex only to configure the action builder before `.await` w
 ##### Using `std::sync::Mutex` or `parking_lot::Mutex` for session state
 
 Both produce `!Send` guards, which cannot be held across `.await` in a spawned task (`tokio::spawn` requires `Send`). `tokio::sync::Mutex` is the only standard choice producing a `Send` guard.
-
-<a id="rejected-callback-and-run"></a>
-
-##### Callback-based `and_run()` transaction retry API
-
-Exposing the Rust driver's `and_run()` / `and_run2()` retry-loop convenience as a C callback was considered but rejected. Rust-to-C callbacks from inside async code introduce re-entrancy, cancellation, and lifetime hazards across the FFI boundary that every other mongoac feature deliberately avoids. C callers implement their own retry loop using explicit `start`/`commit`/`abort`.
 
 <a id="rejected-async-only-transaction"></a>
 
@@ -1412,7 +1438,8 @@ The current `list_collection_names` implementation eagerly collects all results 
 
 ##### Callback-based transaction retry callback (`and_run`)
 
-Exposing `and_run()` would require Rust-to-C callback invocation, which is deliberately avoided elsewhere in mongoac. Deferred — C callers use explicit `start`/`commit`/`abort`.
+See [Rejected: Callback-based API](#rejected-callbacks).
+Users may implement their own retry behavior using explicit `start`/`commit`/`abort`.
 
 <a id="deferred-transaction-timeoutms"></a>
 

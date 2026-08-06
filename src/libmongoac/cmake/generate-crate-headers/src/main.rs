@@ -14,6 +14,7 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
         ("ClientSessionT", "mongoac_client_session_t"),
         ("ClientT", "mongoac_client_t"),
         ("CollectionT", "mongoac_collection_t"),
+        ("CollectionOptionsT", "mongoac_collection_options_t"),
         ("CredentialT", "mongoac_credential_t"),
         (
             "CreateCollectionOptionsT",
@@ -41,6 +42,9 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
         ("ReadPreferenceT", "mongoac_read_preference_t"),
         ("RuntimeT", "mongoac_runtime_t"),
         ("ServerApiT", "mongoac_server_api_t"),
+        ("ServerInfoT", "mongoac_server_info_t"),
+        ("ServerSelectorT", "mongoac_server_selector_t"),
+        ("ServerTypeT", "mongoac_server_type_t"),
         ("SessionOptionsT", "mongoac_session_options_t"),
         ("TransactionOptionsT", "mongoac_transaction_options_t"),
         ("TlsOptionsT", "mongoac_tls_options_t"),
@@ -58,7 +62,6 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
             "mongoac/export.h",
             "mongoac/client_options.h",
             "mongoac/client_session.h",
-            "mongoac/cursor.h",
             "mongoac/error.h",
             "mongoac/future.h",
             "mongoac/list_databases_options.h",
@@ -75,6 +78,7 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
             "mongoac/read_concern.h",
             "mongoac/write_concern.h",
             "mongoac/read_preference.h",
+            "mongoac/server_selector.h",
             "mongoac/tls.h",
             "mongoac/credential.h",
             "stdbool.h",
@@ -90,6 +94,7 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
             "mongoac/insert_one_options.h",
             "mongoac/insert_many_options.h",
             "mongoac/find_options.h",
+            "mongoac/collection_options.h",
             "bson/bson_t.h",
             "stdbool.h",
             "stdint.h",
@@ -97,6 +102,13 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
         "create_collection_options" => {
             includes!["mongoac/export.h", "mongoac/error.h", "bson/bson_t.h"]
         }
+        "collection_options" => includes![
+            "mongoac/export.h",
+            "mongoac/read_concern.h",
+            "mongoac/write_concern.h",
+            "mongoac/read_preference.h",
+            "mongoac/server_selector.h",
+        ],
         "credential" => includes![
             "mongoac/export.h",
             "mongoac/error.h",
@@ -131,6 +143,7 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
             "mongoac/read_concern.h",
             "mongoac/write_concern.h",
             "mongoac/read_preference.h",
+            "mongoac/server_selector.h",
         ],
         "drop_collection_options" => includes!["mongoac/export.h", "mongoac/write_concern.h"],
         "drop_database_options" => includes!["mongoac/export.h", "mongoac/write_concern.h"],
@@ -182,6 +195,13 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
             "stdint.h"
         ],
         "server_api" => includes!["mongoac/export.h", "stdbool.h"],
+        "server_info" => includes!["mongoac/export.h", "bson/bson_t.h", "stdint.h",],
+        "server_selector" => includes![
+            "mongoac/export.h",
+            "mongoac/server_info.h",
+            "stdbool.h",
+            "stdint.h",
+        ],
         "session_options" => includes![
             "mongoac/export.h",
             "mongoac/transaction_options.h",

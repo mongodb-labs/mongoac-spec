@@ -1,4 +1,5 @@
 use crate::client_session::ClientSessionT;
+use crate::collection_options::CollectionOptionsT;
 use crate::cursor::CursorT;
 use crate::database::DatabaseT;
 use crate::drop_collection_options::DropCollectionOptionsT;
@@ -36,6 +37,23 @@ pub extern "C" fn mongoac_database_get_collection(
     let name = safe_cstr_from_ptr_with_error!(name, error);
 
     Box::into_raw(Box::new(CollectionT::new(database, name)))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_database_get_collection_with_options(
+    database: *const DatabaseT,
+    name: *const c_char,
+    options: *const CollectionOptionsT,
+    error: *mut ErrorT,
+) -> *mut CollectionT {
+    let error = safe_optional_error_as_mut!(error);
+    let database = safe_as_ref_with_error!(database, error);
+    let name = safe_cstr_from_ptr_with_error!(name, error);
+    let options = safe_optional_as_ref!(options);
+
+    Box::into_raw(Box::new(CollectionT::new_with_options(
+        database, name, options,
+    )))
 }
 
 #[unsafe(no_mangle)]
@@ -229,6 +247,20 @@ pub extern "C" fn mongoac_collection_insert_many(
 impl CollectionT {
     fn new(db: &DatabaseT, name: &str) -> Self {
         let coll = db.inner().collection::<RawDocumentBuf>(name);
+
+        CollectionT {
+            inner: coll,
+            runtime: db.get_runtime(),
+        }
+    }
+
+    fn new_with_options(db: &DatabaseT, name: &str, options: Option<&CollectionOptionsT>) -> Self {
+        let coll = match options {
+            Some(opts) => db
+                .inner()
+                .collection_with_options::<RawDocumentBuf>(name, opts.into()),
+            None => db.inner().collection::<RawDocumentBuf>(name),
+        };
 
         CollectionT {
             inner: coll,
