@@ -498,7 +498,7 @@ Furthermore, all `block_on*()` and `make_progress*()` functions support a `*_wit
 
 Client options are represented by `mongoac_client_options_t`.
 
-The connection string remains the primary configuration path; typed setters **overlay** on the URI-parsed values. Fields left at their default (`None`/empty) defer to the connection string; fields set explicitly override the corresponding URI option.
+Client options are used with `mongoac_client_new_with_options()`, which takes no connection string — all settings are configured via the typed setters on the options struct. `mongoac_client_new()` instead parses a connection string directly and does not accept options. The two construction paths are distinct; there is no URI-into-options parsing step that would let typed setters overlay URI-parsed values.
 
 The mongoac library adds boolean fields to toggle event monitoring fields for commands, SDAM, and CMAP.
 
@@ -528,7 +528,7 @@ Mongoac accepts connection strings directly in `mongoac_client_new()`. There is 
 
 ##### Construction
 
-`mongoac_client_new(uri_string, error)` and `mongoac_client_new_with_options(uri_string, options, error)` accept a null-terminated UTF-8 connection string, an optional `mongoac_client_options_t*` (pass `NULL` for defaults), and an optional error out-parameter. They return an opaque handle on success, `NULL` on failure. Construction **blocks** the caller for URI parsing (including DNS SRV/TXT for `mongodb+srv://`) but does not connect to the server.
+`mongoac_client_new(uri_string, error)` accepts a null-terminated UTF-8 connection string and an optional error out-parameter. `mongoac_client_new_with_options(options, error)` accepts a `mongoac_client_options_t*` (pass `NULL` for defaults) and an optional error out-parameter; hosts and all other settings are configured via the [typed setters](#client-options) on the options struct rather than a connection string. Both return an opaque handle on success, `NULL` on failure. `mongoac_client_new` **blocks** the caller for URI parsing (including DNS SRV/TXT for `mongodb+srv://`) but does not connect to the server; `mongoac_client_new_with_options` performs no URI or DNS parsing.
 
 > [!TIP]
 > - [Why no separate URI type?](#why-no-uri-type)
@@ -536,7 +536,7 @@ Mongoac accepts connection strings directly in `mongoac_client_new()`. There is 
 
 ##### URI Options
 
-URI options are parsed by `ClientOptions::parse()`. All supported options configure the Rust driver's internal behavior. Supported categories include DNS seedlist, SRV polling, SDAM, server selection, read preference, read concern, compression, load balancers, retryable reads/writes, backpressure, connection pool sizing, auth (SCRAM, X509, GSSAPI, PLAIN, AWS, OIDC), and write concern. Unsupported options (`waitQueueTimeoutMS`, `serverSelectionTryOnce`) are silently ignored. `socketTimeoutMS` is rejected by the Rust driver. Every URI-expressible field can also be set programmatically via the [typed setters](#client-options) on `mongoac_client_options_t`, which overlay on the URI-parsed values.
+URI options are parsed by `ClientOptions::parse()` in `mongoac_client_new()`. All supported options configure the Rust driver's internal behavior. Supported categories include DNS seedlist, SRV polling, SDAM, server selection, read preference, read concern, compression, load balancers, retryable reads/writes, backpressure, connection pool sizing, auth (SCRAM, X509, GSSAPI, PLAIN, AWS, OIDC), and write concern. Unsupported options (`waitQueueTimeoutMS`, `serverSelectionTryOnce`) are silently ignored. `socketTimeoutMS` is rejected by the Rust driver. Most URI-expressible fields can also be set programmatically via the [typed setters](#client-options) on `mongoac_client_options_t` for use with `mongoac_client_new_with_options()`; the two construction paths are independent (there is no shared URI-into-options parse step).
 
 > [!TIP]
 > - [Why no URI option getters?](#why-no-uri-getters)
