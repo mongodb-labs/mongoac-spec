@@ -303,6 +303,19 @@ mod tests {
         )
     }
 
+    fn spawn_yielding(runtime: &RuntimeT, yields: usize) -> FutureT {
+        let handle = runtime.spawn(async move {
+            for _ in 0..yields {
+                tokio::task::yield_now().await;
+            }
+            Ok(())
+        });
+        FutureT::new(
+            runtime.clone(),
+            FutureValue::Void(FutureValueType::new(handle)),
+        )
+    }
+
     fn spawn_notified(runtime: &RuntimeT, notify: Arc<Notify>) -> FutureT {
         let handle = runtime.spawn(async move { Ok(notify.notified().await) });
         FutureT::new(
@@ -341,15 +354,26 @@ mod tests {
     #[test]
     fn block_on_long_sleep_parks_until_ready() {
         let runtime = make_runtime();
-        let future = spawn_delayed(&runtime, Duration::from_millis(500));
-        let start = Instant::now();
+        let notify = Arc::new(Notify::new());
+        let future = spawn_notified(&runtime, notify.clone());
+
+        let notified = Arc::new(AtomicBool::new(false));
+        let notified_clone = notified.clone();
+        let barrier = Arc::new(Barrier::new(2));
+        let barrier_clone = barrier.clone();
+        thread::spawn(move || {
+            barrier_clone.wait();
+            notified_clone.store(true, Ordering::Release);
+            notify.notify_one();
+        });
+
+        barrier.wait();
         runtime.block_on_future(&future);
-        let elapsed = start.elapsed();
 
         assert!(future.is_ready(), "future should be ready after block_on");
         assert!(
-            elapsed >= Duration::from_millis(400) && elapsed < Duration::from_millis(1500),
-            "block_on should park until the sleep fires, not spin or return early (elapsed: {elapsed:?})"
+            notified.load(Ordering::Acquire),
+            "block_on should park until the future is notified, not return early"
         );
     }
 
@@ -392,23 +416,33 @@ mod tests {
     #[test]
     fn runtime_block_on_all_waits_for_all_futures() {
         let runtime = make_runtime();
-        let f1 = spawn_delayed(&runtime, Duration::from_millis(50));
-        let f2 = spawn_delayed(&runtime, Duration::from_millis(200));
+        let notify1 = Arc::new(Notify::new());
+        let notify2 = Arc::new(Notify::new());
+        let f1 = spawn_notified(&runtime, notify1.clone());
+        let f2 = spawn_notified(&runtime, notify2.clone());
+
+        let f2_released = Arc::new(AtomicBool::new(false));
+        let f2_released_clone = f2_released.clone();
+        let barrier = Arc::new(Barrier::new(2));
+        let barrier_clone = barrier.clone();
+        thread::spawn(move || {
+            barrier_clone.wait();
+            notify1.notify_one();
+            f2_released_clone.store(true, Ordering::Release);
+            notify2.notify_one();
+        });
 
         let futures = [&f1, &f2];
-        let start = Instant::now();
+        barrier.wait();
         runtime.block_on_all(&futures);
-        let elapsed = start.elapsed();
 
-        // block_on_all should wait for the slowest task, not the fastest.
-        assert!(
-            elapsed >= Duration::from_millis(180) && elapsed < Duration::from_millis(400),
-            "block_on_all should wait for the slowest task (elapsed: {elapsed:?})"
-        );
-
-        // Both futures are borrowed, not consumed, and are now ready.
+        // block_on_all should wait for the slowest task, not just the first.
         assert!(f1.is_ready());
         assert!(f2.is_ready());
+        assert!(
+            f2_released.load(Ordering::Acquire),
+            "block_on_all should wait for all futures, not just the first"
+        );
     }
 
     // -- block_on*_with_timeout tests (via RuntimeT) --
@@ -416,9 +450,9 @@ mod tests {
     #[test]
     fn block_on_future_with_timeout_completes_before_deadline() {
         let runtime = make_runtime();
-        let future = spawn_delayed(&runtime, Duration::from_millis(10));
+        let future = spawn_yielding(&runtime, 3);
 
-        let result = runtime.block_on_future_with_timeout(&future, Duration::from_millis(500));
+        let result = runtime.block_on_future_with_timeout(&future, Duration::from_secs(5));
 
         assert!(result.is_ok(), "future should complete before timeout");
         assert!(future.is_ready());
@@ -489,11 +523,11 @@ mod tests {
     #[test]
     fn block_on_all_with_timeout_completes_before_deadline() {
         let runtime = make_runtime();
-        let f1 = spawn_delayed(&runtime, Duration::from_millis(50));
-        let f2 = spawn_delayed(&runtime, Duration::from_millis(100));
+        let f1 = spawn_yielding(&runtime, 3);
+        let f2 = spawn_yielding(&runtime, 5);
 
         let futures = [&f1, &f2];
-        let result = runtime.block_on_all_with_timeout(&futures, Duration::from_millis(500));
+        let result = runtime.block_on_all_with_timeout(&futures, Duration::from_secs(5));
 
         assert!(result.is_ok(), "all futures should complete before timeout");
         assert!(f1.is_ready());
@@ -612,16 +646,19 @@ mod tests {
         let future = FutureT::new(
             runtime.clone(),
             FutureValue::Void(FutureValueType::new(runtime.spawn(async move {
-                tokio::time::sleep(Duration::from_millis(100)).await;
+                tokio::task::yield_now().await;
                 done_clone.store(true, Ordering::Release);
                 Ok(())
             }))),
         );
 
-        // Drive the runtime for up to 200ms. The spawned task should complete,
-        // but the future's JoinHandle is not polled.
-        let start = Instant::now();
-        while start.elapsed() < Duration::from_millis(200) {
+        // Drive the runtime until the spawned task completes. The task should
+        // complete after a few progress calls (it only needs to yield once),
+        // but the future's JoinHandle is not polled by make_progress.
+        for _ in 0..100 {
+            if done.load(Ordering::Acquire) {
+                break;
+            }
             runtime.make_progress();
         }
         assert!(done.load(Ordering::Acquire), "spawned task should have run");

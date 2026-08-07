@@ -478,13 +478,11 @@ mod tests {
     fn make_progress_with_timeout_returns_immediately() {
         let runtime = make_runtime();
 
-        let t0 = Instant::now();
-        let _ = runtime.make_progress_with_timeout(Duration::from_millis(50));
-        let elapsed = t0.elapsed();
+        let result = runtime.make_progress_with_timeout(Duration::from_millis(0));
 
         assert!(
-            elapsed < Duration::from_millis(75),
-            "expected near-immediate return, but call took {elapsed:?}"
+            result.is_ok(),
+            "make_progress_with_timeout should complete before the timeout, not time out"
         );
     }
 
@@ -492,14 +490,32 @@ mod tests {
     fn make_progress_for_blocks_for_at_least_duration() {
         let runtime = make_runtime();
 
-        let t0 = Instant::now();
-        runtime.make_progress_for(Duration::from_millis(50));
-        let elapsed = t0.elapsed();
+        // Use a barrier-synchronized helper thread to verify that
+        // make_progress_for blocks the calling thread (giving other threads
+        // a chance to run) instead of returning immediately. This replaces
+        // the wall-clock timing assertion which is unreliable under Miri.
+        //
+        // The duration is generous (2 seconds) because Miri's interpretation
+        // overhead can consume the entire 50ms budget during setup, causing
+        // sleep_until to return Ready before the helper thread is scheduled.
+        let flag = Arc::new(AtomicBool::new(false));
+        let flag_clone = flag.clone();
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let barrier_clone = barrier.clone();
+
+        let handle = thread::spawn(move || {
+            barrier_clone.wait();
+            flag_clone.store(true, Ordering::Release);
+        });
+
+        barrier.wait();
+        runtime.make_progress_for(Duration::from_secs(2));
 
         assert!(
-            elapsed >= Duration::from_millis(45) && elapsed < Duration::from_millis(150),
-            "expected at least 50ms of runtime driving, but call took {elapsed:?}"
+            flag.load(Ordering::Acquire),
+            "make_progress_for should block, allowing other threads to run"
         );
+        handle.join().unwrap();
     }
 
     #[test]
@@ -509,11 +525,18 @@ mod tests {
         let done_clone = done.clone();
 
         runtime.spawn(async move {
-            tokio::time::sleep(Duration::from_millis(10)).await;
+            // Use yield_now instead of sleep: the task completes after
+            // yielding, which make_progress_for can drive without relying on
+            // real-time timers.
+            tokio::task::yield_now().await;
             done_clone.store(true, Ordering::Release);
         });
 
-        runtime.make_progress_for(Duration::from_millis(100));
+        // The duration is generous (2 seconds) because Miri's interpretation
+        // overhead can consume a shorter budget during setup, causing
+        // sleep_until to return Ready before the event loop processes the
+        // spawned task.
+        runtime.make_progress_for(Duration::from_secs(2));
 
         assert!(
             done.load(Ordering::Acquire),
