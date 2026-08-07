@@ -1,4 +1,12 @@
-use mongodb::ServerInfo;
+use std::ffi::c_char;
+
+use mongodb::bson::serialize_to_raw_document_buf;
+use mongodb::options::ServerAddress;
+use mongodb::{ServerInfo, ServerType};
+
+use crate::bson::BsonT;
+use crate::private::macros::*;
+use crate::string::StringViewT;
 
 #[allow(non_camel_case_types)]
 pub type mongoac_server_type_t = i32;
@@ -38,6 +46,156 @@ impl<'a> From<&ServerInfo<'a>> for ServerInfoT<'a> {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn mongoac_server_info_get_type(_info: *const ServerInfoT) -> mongoac_server_type_t {
-    unimplemented!();
+pub extern "C" fn mongoac_server_info_get_type(info: *const ServerInfoT) -> mongoac_server_type_t {
+    ServerTypeT::from(safe_as_ref!(info).0.server_type()).into()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_server_info_get_host(info: *const ServerInfoT) -> StringViewT {
+    match safe_as_ref!(info).0.address() {
+        ServerAddress::Tcp { host, .. } => host.as_str().into(),
+        #[cfg(unix)]
+        ServerAddress::Unix { path } => {
+            use std::os::unix::ffi::OsStrExt;
+            let bytes = path.as_os_str().as_bytes();
+            StringViewT {
+                data: bytes.as_ptr().cast::<c_char>(),
+                len: bytes.len(),
+            }
+        }
+        _ => StringViewT::default(), // #[non_exhaustive]
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_server_info_get_port(info: *const ServerInfoT) -> u16 {
+    match safe_as_ref!(info).0.address() {
+        ServerAddress::Tcp { port, .. } => port.unwrap_or(DEFAULT_PORT),
+        #[cfg(unix)]
+        ServerAddress::Unix { .. } => 0,
+        _ => Default::default(), // #[non_exhaustive]
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_server_info_get_average_round_trip_time_secs(
+    info: *const ServerInfoT,
+) -> u64 {
+    safe_as_ref!(info)
+        .0
+        .average_round_trip_time()
+        .map(|d| d.as_secs())
+        .unwrap_or_default()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_server_info_get_average_round_trip_time_nanos(
+    info: *const ServerInfoT,
+) -> u32 {
+    safe_as_ref!(info)
+        .0
+        .average_round_trip_time()
+        .map(|d| d.subsec_nanos())
+        .unwrap_or_default()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_server_info_average_round_trip_time_has_value(
+    info: *const ServerInfoT,
+) -> bool {
+    safe_as_ref!(info).0.average_round_trip_time().is_some()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_server_info_get_last_update_time(info: *const ServerInfoT) -> i64 {
+    safe_as_ref!(info)
+        .0
+        .last_update_time()
+        .map(mongodb::bson::DateTime::timestamp_millis)
+        .unwrap_or_default()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_server_info_last_update_time_has_value(info: *const ServerInfoT) -> bool {
+    safe_as_ref!(info).0.last_update_time().is_some()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_server_info_get_max_wire_version(info: *const ServerInfoT) -> i32 {
+    safe_as_ref!(info).0.max_wire_version().unwrap_or_default()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_server_info_max_wire_version_has_value(info: *const ServerInfoT) -> bool {
+    safe_as_ref!(info).0.max_wire_version().is_some()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_server_info_get_min_wire_version(info: *const ServerInfoT) -> i32 {
+    safe_as_ref!(info).0.min_wire_version().unwrap_or_default()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_server_info_min_wire_version_has_value(info: *const ServerInfoT) -> bool {
+    safe_as_ref!(info).0.min_wire_version().is_some()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_server_info_get_replica_set_name(
+    info: *const ServerInfoT,
+) -> StringViewT {
+    safe_as_ref!(info)
+        .0
+        .replica_set_name()
+        .map(StringViewT::from)
+        .unwrap_or_default()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_server_info_get_replica_set_version(info: *const ServerInfoT) -> i32 {
+    safe_as_ref!(info)
+        .0
+        .replica_set_version()
+        .unwrap_or_default()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_server_info_replica_set_version_has_value(
+    info: *const ServerInfoT,
+) -> bool {
+    safe_as_ref!(info).0.replica_set_version().is_some()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_server_info_get_tags(info: *const ServerInfoT) -> BsonT {
+    safe_as_ref!(info)
+        .0
+        .tags()
+        .and_then(|tags| serialize_to_raw_document_buf(tags).ok())
+        .map(Into::into)
+        .unwrap_or_default()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_server_info_has_error(info: *const ServerInfoT) -> bool {
+    safe_as_ref!(info).0.error().is_some()
+}
+
+// Same as `mongodb::client::options::DEFAULT_PORT`.
+const DEFAULT_PORT: u16 = 27017;
+
+impl From<ServerType> for ServerTypeT {
+    fn from(t: ServerType) -> Self {
+        match t {
+            ServerType::Standalone => Self::Standalone,
+            ServerType::Mongos => Self::Mongos,
+            ServerType::RsPrimary => Self::RsPrimary,
+            ServerType::RsSecondary => Self::RsSecondary,
+            ServerType::RsArbiter => Self::RsArbiter,
+            ServerType::RsOther => Self::RsOther,
+            ServerType::RsGhost => Self::RsGhost,
+            ServerType::LoadBalancer => Self::LoadBalancer,
+            ServerType::Unknown | _ => Self::Unknown, // #[non_exhaustive]
+        }
+    }
 }

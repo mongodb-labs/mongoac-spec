@@ -205,7 +205,13 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
             "stdint.h"
         ],
         "server_api" => includes!["mongoac/export.h", "stdbool.h"],
-        "server_info" => includes!["mongoac/export.h", "mongoac/bson.h", "stdint.h",],
+        "server_info" => includes![
+            "mongoac/export.h",
+            "mongoac/bson.h",
+            "mongoac/string.h",
+            "stdbool.h",
+            "stdint.h",
+        ],
         "server_selector" => includes![
             "mongoac/export.h",
             "mongoac/server_info.h",
