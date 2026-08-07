@@ -426,7 +426,7 @@ A given future may make progress by a call to `block_on*()` on its associated ru
 >   task.
 
 > [!IMPORTANT]
-> The Rust Driver may spawn [background tasks](#why-runtime-wait-and-make-progress) when certain objects are destroyed
+> The Rust Driver may spawn [background tasks](#why-runtime-make-progress) when certain objects are destroyed
 >   which have no `mongoac_future_t` handle, e.g.:
 >
 > - `mongoac_cursor_destroy()`: spawns a background task to execute a `killCursors` command.
@@ -444,16 +444,13 @@ All async tasks must "make progress" by invoking one of the following `mongoac_r
 - `make_progress*()`: make progress on all scheduled tasks without indefinitely blocking the current thread.
 
 The `make_progress*()` functions are also required to make progress on
-  [background tasks](#why-runtime-wait-and-make-progress) which may have no corresponding `mongoac_future_t`.
+  [background tasks](#why-runtime-make-progress) which may have no corresponding `mongoac_future_t`.
 These have no C++26 Execution equivalents; instead, they are comparable to `io_context::poll_one()` from Boost ASIO,
   `uv_run(loop, UV_RUN_NOWAIT)` from libuv, or `loop._run_once()` from Python's `asyncio`.
 
-To avoid spin-looping on pending tasks on a worker thread, `wait*()` functions suspend the current thread until a new
-  async task is spawned with the given runtime.
+The `make_progress_for*()` variant makes progress for at least a given duration without spin-looping.
 Furthermore, all `block_on*()` and `make_progress*()` functions support a `*_with_timeout()` variant to avoid
   indefinitely blocking the current thread.
-However, only async tasks explicitly spawned by the mongoac library (or a stop request) are able to notify the waiting
-  thread.
 
 > [!NOTE]
 > In terms of C++26 Execution, `block_on*()`, `block_on_any*()`, and `block_on_all*()` are similar to consuming senders
@@ -492,7 +489,7 @@ However, only async tasks explicitly spawned by the mongoac library (or a stop r
 >     using `make_progress*()` or scheduling a non-urgent `block_on*()`.
 
 > [!TIP]
-> - [Why runtime wait and make_progress?](#why-runtime-wait-and-make-progress)
+> - [Why runtime make_progress?](#why-runtime-make-progress)
 > - [Why defer cancellation?](#why-defer-cancellation)
 
 <!-- Audit Progress -->
@@ -884,18 +881,14 @@ Returning the result value directly avoids forcing callers to declare extra vari
 > [!TIP]
 > - [Error-handling transparency trade-off](#error-handling-transparency)
 
-<a id="why-runtime-wait-and-make-progress"></a>
-#### Why runtime wait and make_progress?
+<a id="why-runtime-make-progress"></a>
+#### Why runtime make_progress?
 
 A dedicated worker thread must repeatedly call `make_progress*()` or `block_on*()` to make progress on scheduled tasks.
-Without a `wait*()` function, the worker thread will need to spin-loop or spin-sleep (with timeouts) even when no
-  meaningful work can be done.
-The condvar-backed `wait*()` allows the worker thread to more efficiently suspend the thread until new work is made
-  available by an async operation spawning a new task in the associated runtime.
-The `make_progress_for*()` variants also allow the worker thread or event loop to efficiently make progress for
-  *at least* a given duration without spin-looping.
+The `make_progress_for*()` variants allow the worker thread or event loop to efficiently make progress for *at least* a
+  given duration without spin-looping, and all `block_on*()` and `make_progress*()` functions support a
+  `*_with_timeout()` variant to avoid indefinitely blocking the current thread.
 
-Unfortunately, `wait*()` can only wait for tasks spawned through `RuntimeT::spawn()` (or a stop request).
 The Rust Driver may internally spawn background tasks which have no visible mechanism to query their in-progress state.
 These background tasks include CMAP workers, SDAM monitors, and cleanup routines when dropping certain objects (e.g. a
   background `killCursors` command for `mongoac_cursor_t`, a background `endSessions` command for `mongoac_client_t`,
