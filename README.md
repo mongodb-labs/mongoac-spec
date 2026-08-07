@@ -302,8 +302,8 @@ impl ExampleT {
 <a id="bson-structs"></a>
 #### BSON Documents
 
-BSON documents are passed through the FFI as raw bytes represented by simple `(ptr, len)` structs (for now, these are
-  the _only_ non-opaque structs declared in the public API).
+BSON documents are passed through the FFI as raw bytes represented by simple `(ptr, len)` structs.
+Alongside the [string structs](#string-structs), these are the only non-opaque structs declared in the public API.
 `mongoac_bson_t` represents an owning BSON document and `mongoac_bson_view_t` represents a non-owning BSON document;
   `mongoac_bson_t` must be destroyed, whereas `mongoac_bson_view_t` does not need to be destroyed.
 Both contain a `void const*` pointer and do *not* permit mutability of BSON bytes in any circumstance.
@@ -333,9 +333,21 @@ Structs such as `mongoac_cursor_t` will need to clearly document which operation
 > [!TIP]
 > - [Why raw bytes to represent BSON documents?](#why-bson-raw-bytes)
 
+<a id="string-structs"></a>
+#### Strings
+
+Strings returned by the FFI (e.g. `mongoac_future_get_string()`) are represented by simple `(ptr, len)` structs.
+Alongside the [string structs](#string-structs), these are the only non-opaque structs declared in the public API.
+Their behavior mirrors that of the BSON document structs, including the **library-wide invariant** that the ptr+len pair
+  satisfies the same validity and accessibility requirements as the BSON structs.
+Strings as input parameters remain simple null-terminated byte strings.
+
+> [!TIP]
+> - [Why ptr+len for strings?](#why-ptr-len-strings)
+
 #### Opaque Pointers
 
-All structs owned and returned by mongoac ([except BSON structs](#bson-structs)) are opaque.
+All structs owned and returned by mongoac (except the [BSON](#bson-structs) and [string](#string-structs) structs) are opaque.
 Safety macros enforce not-null requirements as graceful errors returned via `mongoac_error_t *error` out-params.
 Owning pointers to mongoac structs are returned using `Box::into_raw()` and destroyed by `drop(Box::from_raw(ptr))`
   within a dedicated `mongoac_*_destroy()` function using `safe_drop!(ptr)`.
@@ -837,6 +849,32 @@ Rust tests exercise internal logic without cbindgen/C compilation overhead. C++ 
 
 ### Rust FFI Design
 
+<a id="why-ptr-len-strings"></a>
+#### Why ptr+len for strings?
+
+It is not possible to represent internal `str` or `String` without unnecessarily incurring deep-copies just to guarantee
+  null-termination or forcing the use out-parameters to return both a pointer and length.
+Given `str`/`String` (UTF-8, ptr+len) is the native representation used by the Rust language, the FFI must reflect this
+  in its API to avoid expensive conversions into null-terminated byte strings and dealing with ambiguous memory
+  ownership (a plain `char const*` which must be freed via mongoac instead of `free()` or `delete`).
+Using an out-parameter for one or both of the ptr+len pair would break consistency with library-wide avoidance of
+  out-parameters without solving the ambiguous memory ownership problem.
+
+Input parameters (e.g. the connection string passed to `mongoac_client_new()`) use non-owning, null-terminated
+  `char const*` to avoid burdening callers with conversions to `mongoac_string_view_t`:
+
+```c
+// With char const* (current proposal):
+mongoac_client_t const* client = mongoac_client_new("mongodb://localhost:27017");
+
+// With mongoac_string_view_t:
+char const* conn_str = "mongodb://localhost:27017";
+mongoac_client_t const* client = mongoac_client_new((mongoac_string_view_t){conn_str, strlen(conn_str)});
+
+// With mongoac_string_view_t + convenient internal `strlen()`:
+mongoac_client_t const* client = mongoac_client_new((mongoac_string_view_t){"mongodb://localhost:27017"});
+```
+
 <a id="why-typed-options"></a>
 #### Why typed options structs?
 
@@ -855,7 +893,7 @@ Only options fields which are fundamentally BSON documents (e.g. `filter`, `comm
 <a id="why-opaque-error-handle"></a>
 #### Why opaque errors?
 
-Opaque handles provide ABI stability (internal layout can change without breaking callers) and avoid truncation — unlike mongoc's 504-byte inline `bson_error_t`, a heap-allocated `CString` supports arbitrary-length messages.
+Opaque handles provide ABI stability (internal layout can change without breaking callers) and avoid truncation — unlike mongoc's 504-byte inline `bson_error_t`, a heap-allocated `String` returned as an owning `mongoac_string_t` supports arbitrary-length messages.
 
 > [!TIP]
 > - [Why not Box<dyn Error>?](#rejected-box-dyn-error)
