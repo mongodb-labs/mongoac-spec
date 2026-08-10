@@ -574,7 +574,7 @@ C callers may also append wrapping-library metadata at runtime via `mongoac_clie
 
 > [!NOTE]
 > `mongoac_client_append_metadata()` validates immediate FFI safety (non-null client) and UTF-8 encoding for each non-`NULL` string argument. The [Driver Handshake spec](https://github.com/mongodb/specifications/blob/master/source/mongodb-handshake/handshake.md) requires `name` to be present, rejects `|` in driver-info strings, and limits the metadata document to 512 bytes; these spec-level checks are **delegated to the Rust driver**, not the FFI layer.
->
+
 > [!TIP]
 > - [Why append C build metadata to the platform field?](#why-build-platform-metadata)
 
