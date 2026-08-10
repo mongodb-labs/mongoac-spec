@@ -672,7 +672,7 @@ CRUD operations follow the general async pattern with these conventions:
 - **Cursor lifecycle:** `mongoac_cursor_destroy()` triggers `killCursors` via `AsyncDropToken`; call `make_progress()` to flush pending killCursors.
 - **Per-getMore options:** `batchSize` and `maxTimeMS` fixed at cursor creation.
 - **Estimated document count:** Uses collection metadata (legacy `count` command); no session parameter; options are `mongoac_estimated_document_count_options_t`.
-- **Deferred (Database-level):** `aggregate` on `Database` and client-level `bulkWrite` (MongoDB 8.0+). `run_command` and `run_cursor_command` will be provided as database-level operations (see [Run Command](#run-command-database-level)).
+- **Deferred (Database-level):** `aggregate` on `Database` and client-level `bulkWrite` (MongoDB 8.0+).
 
 > [!TIP]
 > - [Why a single `mongoac_cursor_t` type?](#why-single-cursor-type)

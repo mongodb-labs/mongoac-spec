@@ -1,4 +1,5 @@
 use crate::bson::BsonT;
+use crate::bson::BsonViewT;
 use crate::client_session::ClientSessionT;
 use crate::create_collection_options::CreateCollectionOptionsT;
 use crate::cursor::CursorT;
@@ -8,6 +9,8 @@ use crate::error::ErrorT;
 use crate::future::FutureT;
 use crate::list_collections_options::ListCollectionsOptionsT;
 use crate::private::macros::*;
+use crate::run_command_options::RunCommandOptionsT;
+use crate::run_cursor_command_options::RunCursorCommandOptionsT;
 use crate::runtime::RuntimeT;
 use crate::spawn;
 use crate::{cursor_op_with_session, op_with_session};
@@ -17,6 +20,7 @@ use mongodb::Database;
 use mongodb::bson::RawDocumentBuf;
 use mongodb::options::{
     CreateCollectionOptions, DatabaseOptions, DropDatabaseOptions, ListCollectionsOptions,
+    RunCommandOptions, RunCursorCommandOptions,
 };
 use std::ffi::c_char;
 
@@ -191,6 +195,89 @@ pub extern "C" fn mongoac_database_list_collection_names(
     .into()
 }
 
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_database_run_command_async(
+    database: *const DatabaseT,
+    session: *mut ClientSessionT,
+    command: BsonViewT,
+    options: *const RunCommandOptionsT,
+    error: *mut ErrorT,
+) -> *mut FutureT {
+    let error = safe_optional_error_as_mut!(error);
+    let database = safe_as_ref_with_error!(database, error);
+    let session = safe_optional_as_mut!(session);
+    let command = safe_bson_view_with_error!(command, error);
+    let options = safe_optional_as_ref!(options);
+
+    Box::into_raw(Box::new(database.run_command_async(
+        session,
+        safe_error!((&command).try_into(), error),
+        options.map(Into::into),
+    )))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_database_run_command(
+    database: *const DatabaseT,
+    session: *mut ClientSessionT,
+    command: BsonViewT,
+    options: *const RunCommandOptionsT,
+    error: *mut ErrorT,
+) -> BsonT {
+    let error = safe_optional_error_as_mut!(error);
+    let database = safe_as_ref_with_error!(database, error);
+    let session = safe_optional_as_mut!(session);
+    let command = safe_bson_view_with_error!(command, error);
+    let options = safe_optional_as_ref!(options);
+
+    safe_error!(
+        database.run_command(session, safe_error!((&command).try_into(), error), options.map(Into::into)),
+        error
+    )
+    .into()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_database_run_cursor_command_async(
+    database: *const DatabaseT,
+    session: *mut ClientSessionT,
+    command: BsonViewT,
+    options: *const RunCursorCommandOptionsT,
+    error: *mut ErrorT,
+) -> *mut FutureT {
+    let error = safe_optional_error_as_mut!(error);
+    let database = safe_as_ref_with_error!(database, error);
+    let session = safe_optional_as_mut!(session);
+    let command = safe_bson_view_with_error!(command, error);
+    let options = safe_optional_as_ref!(options);
+
+    Box::into_raw(Box::new(database.run_cursor_command_async(
+        session,
+        safe_error!((&command).try_into(), error),
+        options.map(Into::into),
+    )))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_database_run_cursor_command(
+    database: *const DatabaseT,
+    session: *mut ClientSessionT,
+    command: BsonViewT,
+    options: *const RunCursorCommandOptionsT,
+    error: *mut ErrorT,
+) -> *mut CursorT {
+    let error = safe_optional_error_as_mut!(error);
+    let database = safe_as_ref_with_error!(database, error);
+    let session = safe_optional_as_mut!(session);
+    let command = safe_bson_view_with_error!(command, error);
+    let options = safe_optional_as_ref!(options);
+
+    Box::into_raw(Box::new(safe_error!(
+        database.run_cursor_command(session, safe_error!((&command).try_into(), error), options.map(Into::into)),
+        error
+    )))
+}
+
 impl DatabaseT {
     fn new(client: &ClientT, name: &str, options: Option<DatabaseOptions>) -> Self {
         let db = match options {
@@ -320,6 +407,72 @@ impl DatabaseT {
                 session
             )?;
             strings_to_bson(&res)
+        })
+    }
+
+    fn run_command_async(
+        &self,
+        session: Option<&mut ClientSessionT>,
+        command: RawDocumentBuf,
+        options: Option<RunCommandOptions>,
+    ) -> FutureT {
+        let db = self.inner.clone();
+        let session = session.map(|s| s.clone());
+
+        spawn!(self, Bson, async move {
+            let doc = op_with_session!(db.run_raw_command(command).with_options(options), session)?;
+            RawDocumentBuf::try_from(&doc).map_err(Into::into)
+        })
+    }
+
+    fn run_command(
+        &self,
+        session: Option<&mut ClientSessionT>,
+        command: RawDocumentBuf,
+        options: Option<RunCommandOptions>,
+    ) -> Result<RawDocumentBuf, ErrorT> {
+        self.runtime.block_on(async {
+            let doc = op_with_session!(
+                self.inner.run_raw_command(command).with_options(options),
+                session
+            )?;
+            RawDocumentBuf::try_from(&doc).map_err(Into::into)
+        })
+    }
+
+    fn run_cursor_command_async(
+        &self,
+        session: Option<&mut ClientSessionT>,
+        command: RawDocumentBuf,
+        options: Option<RunCursorCommandOptions>,
+    ) -> FutureT {
+        let db = self.inner.clone();
+        let session = session.map(|s| s.clone());
+        let runtime = self.runtime.clone();
+
+        spawn!(self, Cursor, async move {
+            cursor_op_with_session!(
+                db.run_raw_cursor_command(command).with_options(options),
+                session,
+                runtime
+            )
+        })
+    }
+
+    fn run_cursor_command(
+        &self,
+        session: Option<&mut ClientSessionT>,
+        command: RawDocumentBuf,
+        options: Option<RunCursorCommandOptions>,
+    ) -> Result<CursorT, ErrorT> {
+        self.runtime.block_on(async {
+            cursor_op_with_session!(
+                self.inner
+                    .run_raw_cursor_command(command)
+                    .with_options(options),
+                session,
+                self.runtime.clone()
+            )
         })
     }
 }
