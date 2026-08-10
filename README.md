@@ -1421,9 +1421,19 @@ The handshake spec permits setting the application name on the `MongoClient` bef
 
 #### Collation
 
-##### Separate `mongoac_collation_t` type
+<a id="deferred-typed-options-subfields"></a>
 
-A dedicated collation handle with typed setters for each field would provide discoverability and type safety, following the same pattern as the existing typed read-preference/concern/write-concern handles. The existing BSON sub-document approach (passing `mongoac_bson_view_t` within typed options structs) covers all common cases. Adding a `mongoac_collation_t` later is an additive change.
+##### Dedicated typed handles for non-trivial subfields
+
+`FindOptions` and `CreateCollectionOptions` currently use a transitional `new_from_bson()` via serde. Migrating to per-field typed setters requires dedicated handle structs for non-trivial subfields, following the `mongoac_read_concern_t` / `mongoac_write_concern_t` pattern:
+
+| Handle | Wraps | Used by |
+|---|---|---|
+| `mongoac_collation_t` | `Collation` | `FindOptions`, `CreateCollectionOptions` |
+| `mongoac_clustered_index_t` | `ClusteredIndex` | `CreateCollectionOptions` |
+| `mongoac_timeseries_options_t` | `TimeseriesOptions` | `CreateCollectionOptions` |
+
+Fundamentally-BSON fields (`sort`, `projection`, `filter`, `validator`, `pipeline`) stay as `mongoac_bson_view_t`; scalars get direct typed setters; enum-typed fields use `#define` C constants. Each handle is an additive change.
 
 ##### Bulk write collation helper
 
