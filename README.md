@@ -604,7 +604,7 @@ Server discovery, selection, retry, client backpressure, and connection resilien
 
 ##### Server Discovery and Monitoring
 
-SDAM runs inside the Rust driver. mongoac does not expose topology state or server descriptions.
+SDAM runs inside the Rust driver.
 
 ##### Server Selection
 
