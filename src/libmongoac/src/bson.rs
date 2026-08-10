@@ -36,7 +36,17 @@ pub extern "C" fn mongoac_bson_view_destroy(_bson: BsonViewT) {
     // No-op: this function is only to force cbindgen to declare `BsonViewT` in the crate header.
 }
 
+pub(crate) const EMPTY_DOC: [u8; 5] = [5, 0, 0, 0, 0];
+
 impl BsonViewT {
+    #[must_use]
+    pub const fn empty_doc() -> Self {
+        BsonViewT {
+            data: EMPTY_DOC.as_ptr(),
+            len: EMPTY_DOC.len(),
+        }
+    }
+
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
         if self.data.is_null() {

@@ -10,6 +10,7 @@ macro_rules! includes {
 fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
     // Rename structs from `ExampleT` to `mongoac_example_t`.
     for (from, to) in [
+        ("AggregateOptionsT", "mongoac_aggregate_options_t"),
         ("BsonT", "mongoac_bson_t"),
         ("BsonViewT", "mongoac_bson_view_t"),
         ("ClientOptionsT", "mongoac_client_options_t"),
@@ -17,6 +18,7 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
         ("ClientT", "mongoac_client_t"),
         ("CollectionT", "mongoac_collection_t"),
         ("CollectionOptionsT", "mongoac_collection_options_t"),
+        ("CountOptionsT", "mongoac_count_options_t"),
         ("CredentialT", "mongoac_credential_t"),
         (
             "CreateCollectionOptionsT",
@@ -25,13 +27,20 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
         ("CursorT", "mongoac_cursor_t"),
         ("DatabaseT", "mongoac_database_t"),
         ("DatabaseOptionsT", "mongoac_database_options_t"),
+        ("DeleteOptionsT", "mongoac_delete_options_t"),
+        ("DistinctOptionsT", "mongoac_distinct_options_t"),
         ("DropDatabaseOptionsT", "mongoac_drop_database_options_t"),
         (
             "DropCollectionOptionsT",
             "mongoac_drop_collection_options_t",
         ),
+        (
+            "EstimatedDocumentCountOptionsT",
+            "mongoac_estimated_document_count_options_t",
+        ),
         ("ErrorT", "mongoac_error_t"),
         ("FindOptionsT", "mongoac_find_options_t"),
+        ("FindOneOptionsT", "mongoac_find_one_options_t"),
         ("FutureT", "mongoac_future_t"),
         ("InsertManyOptionsT", "mongoac_insert_many_options_t"),
         ("InsertOneOptionsT", "mongoac_insert_one_options_t"),
@@ -42,6 +51,7 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
         ),
         ("ReadConcernT", "mongoac_read_concern_t"),
         ("ReadPreferenceT", "mongoac_read_preference_t"),
+        ("ReplaceOptionsT", "mongoac_replace_options_t"),
         ("RuntimeT", "mongoac_runtime_t"),
         ("ServerApiT", "mongoac_server_api_t"),
         ("ServerInfoT", "mongoac_server_info_t"),
@@ -52,6 +62,7 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
         ("StringViewT", "mongoac_string_view_t"),
         ("TransactionOptionsT", "mongoac_transaction_options_t"),
         ("TlsOptionsT", "mongoac_tls_options_t"),
+        ("UpdateOptionsT", "mongoac_update_options_t"),
         ("WriteConcernT", "mongoac_write_concern_t"),
     ] {
         config
@@ -62,6 +73,15 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
 
     config.sys_includes = match name {
         "bson" => includes!["mongoac/export.h", "stdint.h"],
+        "aggregate_options" => includes![
+            "mongoac/export.h",
+            "mongoac/error.h",
+            "mongoac/read_concern.h",
+            "mongoac/write_concern.h",
+            "mongoac/bson.h",
+            "stdbool.h",
+            "stdint.h",
+        ],
         "sanity_check" => includes!["mongoac/export.h", "stdint.h"],
         "client" => includes![
             "mongoac/export.h",
@@ -99,6 +119,14 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
             "mongoac/insert_one_options.h",
             "mongoac/insert_many_options.h",
             "mongoac/find_options.h",
+            "mongoac/find_one_options.h",
+            "mongoac/delete_options.h",
+            "mongoac/replace_options.h",
+            "mongoac/update_options.h",
+            "mongoac/count_options.h",
+            "mongoac/estimated_document_count_options.h",
+            "mongoac/distinct_options.h",
+            "mongoac/aggregate_options.h",
             "mongoac/collection_options.h",
             "mongoac/bson.h",
             "stdbool.h",
@@ -151,6 +179,47 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
             "mongoac/server_selector.h",
         ],
         "drop_collection_options" => includes!["mongoac/export.h", "mongoac/write_concern.h"],
+        "delete_options" => includes![
+            "mongoac/export.h",
+            "mongoac/error.h",
+            "mongoac/write_concern.h",
+            "mongoac/bson.h",
+        ],
+        "replace_options" => includes![
+            "mongoac/export.h",
+            "mongoac/error.h",
+            "mongoac/write_concern.h",
+            "mongoac/bson.h",
+            "stdbool.h",
+        ],
+        "update_options" => includes![
+            "mongoac/export.h",
+            "mongoac/error.h",
+            "mongoac/write_concern.h",
+            "mongoac/bson.h",
+            "stdbool.h",
+        ],
+        "count_options" => includes![
+            "mongoac/export.h",
+            "mongoac/error.h",
+            "mongoac/read_concern.h",
+            "mongoac/bson.h",
+            "stdint.h",
+        ],
+        "estimated_document_count_options" => includes![
+            "mongoac/export.h",
+            "mongoac/error.h",
+            "mongoac/read_concern.h",
+            "mongoac/bson.h",
+            "stdint.h",
+        ],
+        "distinct_options" => includes![
+            "mongoac/export.h",
+            "mongoac/error.h",
+            "mongoac/read_concern.h",
+            "mongoac/bson.h",
+            "stdint.h",
+        ],
         "drop_database_options" => includes!["mongoac/export.h", "mongoac/write_concern.h"],
         "error" => includes![
             "mongoac/export.h",
@@ -159,6 +228,7 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
             "stdint.h"
         ],
         "find_options" => includes!["mongoac/export.h", "mongoac/error.h", "mongoac/bson.h"],
+        "find_one_options" => includes!["mongoac/export.h", "mongoac/error.h", "mongoac/bson.h"],
         "future" => includes![
             "mongoac/export.h",
             "mongoac/error.h",

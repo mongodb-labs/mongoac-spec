@@ -662,19 +662,16 @@ Read concern and write concern are represented by `mongoac_read_concern_t` and `
 <a id="crud-operations"></a>
 #### CRUD Operations
 
-> [!NOTE]
-> Partially implemented in the current proof-of-concept. `find`, `insert_one`, and `insert_many` are exposed in both sync and async forms (including session parameters). `aggregate`, `delete`, `replace`, `update`, `count`, `distinct`, and `estimated_document_count` are not yet exposed.
-
 CRUD operations follow the general async pattern with these conventions:
 
-- **Session parameter:** Nullable `mongoac_client_session_t *session` (second param; `NULL` = implicit). See [Sessions](#sessions).
-- **Sequence parameters:** `insert_many` accepts a C array of `mongoac_bson_view_t` with explicit count; `aggregate` will follow the same pattern.
-- **Result BSON encoding:** `camelCase` field names per CRUD spec (e.g. `insertedId` for `insert_one`, `insertedIds` for `insert_many`).
-- **Cursor:** Single `mongoac_cursor_t` type for `find`, `aggregate`, `run_cursor_command`, wrapping `Cursor<T>` or `SessionCursor<T>`. Session embedded; iteration functions have no session parameter. The cursor implementation returns a non-owning `mongoac_bson_view_t` by value via `mongoac_cursor_current()`, borrowing the cursor's current document buffer (valid until the next call or destruction).
-- **Cursor iteration:** Sync `mongoac_cursor_next()` (blocks) advances the cursor; `mongoac_cursor_current()` returns a non-owning `mongoac_bson_view_t` by value borrowing the current document. Async variants `mongoac_cursor_next_async()` and `mongoac_cursor_current_async()` return futures. A future `cursor_next_with_timeout()` may be added for tailable cursors.
+- **Session parameter:** Nullable `mongoac_client_session_t *session` (second param; `NULL` = implicit), except `estimated_document_count`. See [Sessions](#sessions).
+- **Sequence parameters:** `insert_many` and `aggregate` accept a C array of `mongoac_bson_view_t` with explicit count.
+- **Result encoding:** Write operations return `mongoac_bson_t` result documents with `camelCase` fields per CRUD spec. `find_one` returns an optional document (empty `mongoac_bson_t` when no match). `count_documents` and `estimated_document_count` return `uint64_t` directly — no BSON wrapping. `distinct` returns a result document with a BSON array field.
+- **Cursor:** Single `mongoac_cursor_t` type for `find`, `aggregate`, `run_cursor_command`, wrapping `Cursor<T>` or `SessionCursor<T>`. Session embedded; iteration functions have no session parameter. The cursor returns a non-owning `mongoac_bson_view_t` by value via `mongoac_cursor_current()`, borrowing the current document buffer (valid until the next call or destruction).
+- **Cursor iteration:** Sync `mongoac_cursor_next()` (blocks) advances; `mongoac_cursor_current()` returns the current view. Async variants return futures. A future `cursor_next_with_timeout()` may be added for tailable cursors.
 - **Cursor lifecycle:** `mongoac_cursor_destroy()` triggers `killCursors` via `AsyncDropToken`; call `make_progress()` to flush pending killCursors.
-- **Sync find:** `mongoac_collection_find()` returns a cursor directly via `runtime.block_on()`.
 - **Per-getMore options:** `batchSize` and `maxTimeMS` fixed at cursor creation.
+- **Estimated document count:** Uses collection metadata (legacy `count` command); no session parameter; options are `mongoac_estimated_document_count_options_t`.
 - **Deferred (Database-level):** `aggregate` on `Database` and client-level `bulkWrite` (MongoDB 8.0+). `run_command` and `run_cursor_command` will be provided as database-level operations (see [Run Command](#run-command-database-level)).
 
 > [!TIP]
@@ -695,7 +692,7 @@ The cursor is backed by the Rust driver's `Cursor<T>` (implicit session) or `Ses
 > [!NOTE]
 > Not yet implemented in the current proof-of-concept. Collation is not wired into any exposed CRUD or index operation.
 
-Collation will be passed as a BSON sub-document within options structs (e.g. `mongoac_find_options_t`). The BSON document follows the Rust `Collation` struct fields (`locale` required, plus optional `strength`, `caseLevel`, `caseFirst`, `numericOrdering`, `alternate`, `maxVariable`, `normalization`, `backwards`). Collation will be supported on all CRUD operations except `estimated_document_count`, `insert_one`, and `insert_many`. mongoac will not check `maxWireVersion < 5` for collation; the Rust driver handles server incompatibility.
+Collation will be exposed as a dedicated `mongoac_collation_t` handle with typed setters for each field (`locale` required, plus optional `strength`, `caseLevel`, `caseFirst`, `numericOrdering`, `alternate`, `maxVariable`, `normalization`, `backwards`). Enum-typed fields use `#define`-based C enum constants. The handle is passed to options structs (e.g. `mongoac_find_options_t`, `mongoac_create_collection_options_t`) via `set_collation`. Collation will be supported on all CRUD operations except `estimated_document_count`, `insert_one`, and `insert_many`. mongoac will not check `maxWireVersion < 5` for collation; the Rust driver handles server incompatibility.
 
 > [!TIP]
 > - [Why no maxWireVersion check?](#why-no-maxwireversion-check)
@@ -705,7 +702,7 @@ Collation will be passed as a BSON sub-document within options structs (e.g. `mo
 
 Mongoac provides create and drop operations for collection lifecycle management.
 
-- **`create_collection`** — database-level, accepts `mongoac_create_collection_options_t` (capped, validator, `viewOn`/`pipeline` for views, collation, timeseries, clusteredIndex, `encryptedFields`, and other `CreateCollectionOptions` fields).
+- **`create_collection`** — database-level, accepts `mongoac_create_collection_options_t` (capped, validator, `viewOn`/`pipeline` for views, collation via `mongoac_collation_t`, timeseries via `mongoac_timeseries_options_t`, clusteredIndex via `mongoac_clustered_index_t`, `encryptedFields`, and other `CreateCollectionOptions` fields).
 - **`drop_collection`** — collection-level, accepts `mongoac_drop_collection_options_t` (write concern).
 - **`drop_database`** — database-level, drops the entire database.
 
@@ -715,7 +712,7 @@ Mongoac provides create and drop operations for collection lifecycle management.
 #### Sessions
 
 > [!NOTE]
-> Partially implemented in the current proof-of-concept. Only `mongoac_client_start_session()`, `mongoac_client_start_session_async()`, and `mongoac_client_session_destroy()` are exposed. Sessions can be passed to `list_databases`, `list_database_names`, `list_collections`, `list_collection_names`, `find`, `insert_one`, `insert_many`, and the collection/database create/drop operations, but transaction accessors and causal-consistency accessors are not yet implemented.
+> Partially implemented in the current proof-of-concept. Only `mongoac_client_start_session()`, `mongoac_client_start_session_async()`, and `mongoac_client_session_destroy()` are exposed. Transaction accessors and causal-consistency accessors are not yet implemented.
 
 Session support follows the [Driver Sessions specification](https://github.com/mongodb/specifications/blob/master/source/sessions/driver-sessions.md). The Rust driver manages server session lifetime internally; the FFI layer exposes explicit session handles for C callers.
 
@@ -959,7 +956,7 @@ A dedicated pointer locks the ABI from day one: callers pass `NULL` until sessio
 <a id="why-bson-string-cursortype"></a>
 #### Why BSON string for CursorType?
 
-`FindOptions` currently uses a transitional `set_from_bson()` that deserializes a BSON document into the Rust struct via serde, which handles the string-to-enum mapping for `CursorType`. An integer enum would require a parallel C `#define` set and manual conversion code that duplicates serde's work. Once full typed setters are added to `mongoac_find_options_t`, `CursorType` will be exposed as a `#define` enum with a typed setter.
+`FindOptions` currently uses a transitional `new_from_bson()` that deserializes a BSON document into the Rust struct via serde, which handles the string-to-enum mapping for `CursorType`. An integer enum would require a parallel C `#define` set and manual conversion code that duplicates serde's work. Once full typed setters are added to `mongoac_find_options_t`, `CursorType` will be exposed as a `#define` enum with a typed setter.
 
 <a id="why-server-selection-callback"></a>
 #### Why use a callback for custom server selection

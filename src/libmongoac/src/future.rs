@@ -52,6 +52,14 @@ pub extern "C" fn mongoac_future_get_int32(future: *const FutureT, error: *mut E
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn mongoac_future_get_uint64(future: *const FutureT, error: *mut ErrorT) -> u64 {
+    let error = safe_optional_error_as_mut!(error);
+    let future = safe_as_ref_with_error!(future, error);
+
+    *safe_error!(future.get_uint64(), error)
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn mongoac_future_get_optional_bson(
     future: *const FutureT,
     error: *mut ErrorT,
@@ -81,6 +89,7 @@ pub enum FutureValue {
     ClientSession(FutureValueType<ClientSessionT>),
     Cursor(FutureValueType<CursorT>),
     Int32(FutureValueType<i32>),
+    UInt64(FutureValueType<u64>),
     OptionalBson(FutureValueType<Option<RawDocumentBuf>>),
     Void(FutureValueType<()>),
 }
@@ -93,6 +102,7 @@ macro_rules! future_value_op {
             FutureValue::ClientSession($v) => $e,
             FutureValue::Cursor($v) => $e,
             FutureValue::Int32($v) => $e,
+            FutureValue::UInt64($v) => $e,
             FutureValue::OptionalBson($v) => $e,
             FutureValue::Void($v) => $e,
         }
@@ -147,6 +157,10 @@ impl FutureT {
 
     pub fn get_int32(&self) -> Result<&i32, ErrorT> {
         future_value_result!(self, Int32, "int32")
+    }
+
+    pub fn get_uint64(&self) -> Result<&u64, ErrorT> {
+        future_value_result!(self, UInt64, "uint64")
     }
 
     pub fn get_optional_bson(&self) -> Result<&Option<RawDocumentBuf>, ErrorT> {

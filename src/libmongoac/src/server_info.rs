@@ -195,7 +195,7 @@ impl From<ServerType> for ServerTypeT {
             ServerType::RsOther => Self::RsOther,
             ServerType::RsGhost => Self::RsGhost,
             ServerType::LoadBalancer => Self::LoadBalancer,
-            ServerType::Unknown | _ => Self::Unknown, // #[non_exhaustive]
+            _ => Self::Unknown, // #[non_exhaustive]
         }
     }
 }
