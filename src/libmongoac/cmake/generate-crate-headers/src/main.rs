@@ -54,7 +54,10 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
         ("ReadPreferenceT", "mongoac_read_preference_t"),
         ("ReplaceOptionsT", "mongoac_replace_options_t"),
         ("RunCommandOptionsT", "mongoac_run_command_options_t"),
-        ("RunCursorCommandOptionsT", "mongoac_run_cursor_command_options_t"),
+        (
+            "RunCursorCommandOptionsT",
+            "mongoac_run_cursor_command_options_t",
+        ),
         ("RuntimeT", "mongoac_runtime_t"),
         ("ServerApiT", "mongoac_server_api_t"),
         ("ServerInfoT", "mongoac_server_info_t"),

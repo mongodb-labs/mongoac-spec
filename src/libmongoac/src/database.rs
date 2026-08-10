@@ -231,7 +231,11 @@ pub extern "C" fn mongoac_database_run_command(
     let options = safe_optional_as_ref!(options);
 
     safe_error!(
-        database.run_command(session, safe_error!((&command).try_into(), error), options.map(Into::into)),
+        database.run_command(
+            session,
+            safe_error!((&command).try_into(), error),
+            options.map(Into::into)
+        ),
         error
     )
     .into()
@@ -273,7 +277,11 @@ pub extern "C" fn mongoac_database_run_cursor_command(
     let options = safe_optional_as_ref!(options);
 
     Box::into_raw(Box::new(safe_error!(
-        database.run_cursor_command(session, safe_error!((&command).try_into(), error), options.map(Into::into)),
+        database.run_cursor_command(
+            session,
+            safe_error!((&command).try_into(), error),
+            options.map(Into::into)
+        ),
         error
     )))
 }
