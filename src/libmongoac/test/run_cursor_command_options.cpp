@@ -6,7 +6,6 @@
 #include <mongoac/cursor_type.h>
 #include <mongoac/error.h>
 #include <mongoac/read_preference.h>
-#include <mongoac/server_selector.h>
 #include <test_util/bson.hh>
 #include <test_util/error.hh>
 #include <test_util/owning_ptr.hh>

@@ -21,7 +21,6 @@
 
 #include <array>
 #include <cstdint>
-#include <optional>
 
 using mongoac::test_util::bson_array_contains_string;
 using mongoac::test_util::bson_from_json;
