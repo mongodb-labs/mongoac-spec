@@ -631,10 +631,6 @@ The option setters (`max_staleness`, `tag_set`, `hedge`) reject `Primary` mode w
 
 Retryable reads and writes are enabled by default and controlled by URI options `retryReads` and `retryWrites`, or equivalently by `mongoac_client_options_set_retry_reads` / `mongoac_client_options_set_retry_writes`. The Rust driver automatically retries eligible operations once. No per-operation retry flags are exposed.
 
-##### Connection Resilience (Step-Down)
-
-The Rust driver preserves connections across replica set step-downs on wire version 8+. This requires no C API.
-
 #### Enumerate Databases
 
 Two client-level async operations, distinguished by result format:
