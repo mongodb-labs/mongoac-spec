@@ -536,7 +536,8 @@ This not only permit lossless (never truncated) error messages, but also the fre
   `mongoac_error_t` API without being held back by ABI compatibility (e.g. exposing additional API to query error
   labels, write concern errors, etc.).
 
-Modelling C++'s `<system_error>` and the error conditions from mongocxx, the `mongoac` (1) error category currently only defines four error codes: `Ok` (0), `InvalidArgument` (1), `RuntimeError` (2), and `Timeout` (3).
+Modelling C++'s `<system_error>` and the error conditions from mongocxx, the `mongoac` (1) error category currently only
+  defines four error codes: `Ok` (0), `InvalidArgument` (1), `RuntimeError` (2), and `Timeout` (3).
 This design specification currently proposes the following error categories:
 
 - `None` (0): the default-initialized `mongoac_error_t`.
@@ -544,6 +545,9 @@ This design specification currently proposes the following error categories:
 - `Server` (2): the MongoDB server (e.g. `Command` and `Write` errors).
 - `Rust` (3): the `mongodb` crate (e.g. client-side invalid arguments or runtime errors).
 - `Bson` (4): the `mongodb::bson` crate (e.g. BSON document validation errors).
+
+Both error categories and error codes also define a special `Unknown` variant to distinguish unknown or unexpected
+  values from the `Ok` state.
 
 > [!TIP]
 > - [Why #define macros?](#why-define-macros)
