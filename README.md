@@ -577,8 +577,8 @@ mongoac_client_options_destroy(opts);
 
 The `mongoac_client_options_t` object is expected to be the primary means by which mongoac-specific configuration
   options are specified, such as parameters to configure the Tokio runtime (e.g. `event_interval`).
-Currently, the only mongoac-specific options are boolean toggles to enable event monitoring for commands, SDAM, and
-  CMAP.
+Currently, the only mongoac-specific options are [boolean toggles](#event-api) to enable event monitoring for commands,
+  SDAM, and CMAP.
 
 > [!TIP]
 > - [Feature-gated fields](#deferred-client-options-fields)
@@ -600,27 +600,34 @@ When the user sets `driver_info` for `mongoac_client_options_t`, the metadata is
   order to avoid overwriting mongoac's own client metadata.
 Users may also append metadata post-construction using `mongoac_client_append_metadata()` instead.
 
-<!-- Audit Progress -->
+<a id="event-api"></a>
 
 #### Event API
 
-Events use an **index-based** API rather than C callbacks: each implemented category has `count`, `get`, and `clear` functions polling a client-owned `VecDeque` buffer. The `get` functions return an owning `mongoac_bson_t`. Ring buffer storage avoids the O(N) `memmove` that `Vec` would require, but `clear(N)` is still O(N) due to per-element drop.
+The Rust Driver API supports tracking events by registering a callback function for commands, CMAP, and SDAM.
+To [avoid using callback functions](#rejected-callbacks) in the FFI, an index-based buffer API is used instead.
+When the boolean toggle is enabled in `mongoac_client_options_t` (defaults to `false`), `mongoac_client_t` registers an
+  internal callback function for the appropriate event category during construction.
+The internal callback function directly moves the given event object into the event queue of the associated client
+  object.
+These event objects are then accessed by the user using `count()`, `get(n)`, and `clear(n)`.
 
-One event category is currently implemented — **command** events. Capture toggles for **CMAP** (connection pool) and **SDAM** (server discovery and monitoring) are present on `mongoac_client_options_t` but reserved for future use (see [client options](#client-options)). All capture toggles default to `false` and must be explicitly enabled before client construction.
+The event queues are implement as `VecDeque`: a "double-ended queue implemented with a growable ring buffer".
+The `count()` and `get(n)` operations are O(1) operations, whereas `clear(n)` is O(n).
+Due to being a ring buffer, the O(n) clear does not require any internal reallocations of existing objects.
 
 > [!NOTE]
-> The PoC implements only command event capture for reference. The CMAP/SDAM capture toggles on `mongoac_client_options_t` are accepted but are **not yet wired to event handlers** in the current implementation.
+> Contrary to Drivers Specification, four SDAM event types (opening/closed) omit `topologyId` during deserialization
+>   due to `#[serde(skip)]`.
+> Two events (`ServerDescriptionChanged`, `TopologyDescriptionChanged`) include it. The three heartbeat events (`ServerHeartbeatStarted`, `ServerHeartbeatSucceeded`, `ServerHeartbeatFailed`) have no `topologyId` field at all.
 
-Events are the Rust driver's serde-serialized event types, returned as BSON documents without transformation. The Rust driver uses `#[serde(untagged)]` on its `CommandEvent` and `SdamEvent` enums — serialized BSON documents contain no type-discriminant field. C callers distinguish event types by inspecting the presence of BSON document fields that are unique to each variant (e.g., `command` for `CommandStartedEvent` vs. `durationMS` for `CommandSucceededEvent` vs. `failure` for `CommandFailedEvent`).
-
-**Known spec-level divergence:** Four SDAM event types (opening/closed) omit `topologyId` from their serialized BSON due to `#[serde(skip)]` on the Rust driver structs. Two events (`ServerDescriptionChanged`, `TopologyDescriptionChanged`) include it. The three heartbeat events (`ServerHeartbeatStarted`, `ServerHeartbeatSucceeded`, `ServerHeartbeatFailed`) have no `topologyId` field at all.
+> [!NOTE]
+> Only command event monitoring is currently implemented by the current mongoac implementation.
 
 > [!TIP]
-> - [Why index-based events?](#why-index-based-events)
-> - [Why ring buffer storage?](#why-ring-buffer-storage)
-> - [Why is event capture opt-in?](#why-capture-all-events-by-default)
-> - [Why pass through Rust driver event shapes?](#why-pass-through-event-shapes)
-> - [Why not callback-based APIs?](#rejected-callbacks)
+> - [Should the FFI define typed event structs?](#event-typed-structs)
+
+<!-- Audit Progress -->
 
 #### Server Discovery, Selection & Operations
 
@@ -997,35 +1004,6 @@ However, this callback function is somewhat unique compared to other potential c
 Therefore, an exemption to the [no callback-based API](#rejected-callbacks) principle is justifiable.
 
 ### Supported Features
-
-<a id="why-index-based-events"></a>
-#### Event API
-
-##### Why index-based events?
-
-Index-based access keeps the FFI boundary one-directional: C pulls BSON documents from Rust-owned buffers at safe points of its own choosing, so no C code runs during `make_progress()`. The `current_thread` runtime means command, CMAP, and SDAM events all fire on the driving thread (not from hidden worker threads), but they fire spontaneously during `make_progress()` — whenever monitoring or connection-pool activity progresses, potentially while the caller is awaiting an unrelated operation. The spontaneity is strongest for SDAM (topology and heartbeat changes fire during background monitoring) and CMAP pool-lifecycle events; command events and CMAP checkout/checkin are more request-scoped. A single pull model is adopted uniformly across all three categories so the caller consumes every event at safe points rather than handling some at spontaneous moments deep inside the runtime's task queue, and to avoid splitting the event API into two delivery idioms. The BSON documents are produced by serde-serializing the Rust driver events directly, avoiding custom wrapper types and keeping the FFI implementation minimal.
-
-> [!TIP]
-> - [Why not callback-based events?](#rejected-callbacks)
-> - [Event buffer limits](#event-buffer-limits)
-
-<a id="why-ring-buffer-storage"></a>
-##### Why ring buffer storage?
-
-`VecDeque` advances the head pointer on `drain(..N)` rather than `Vec`'s O(N) `memmove`, avoiding the cost of shifting remaining elements. However, per-element drop is still O(N). Push, index lookup, and length queries remain O(1).
-
-> [!TIP]
-> - [Event buffer limits](#event-buffer-limits)
-
-<a id="why-capture-all-events-by-default"></a>
-##### Why is event capture opt-in rather than default?
-
-Event capture imposes serialization and memory overhead on every operation. Making it opt-in avoids paying this cost for callers that do not consume events.
-
-<a id="why-pass-through-event-shapes"></a>
-##### Why pass through Rust driver event shapes?
-
-Consistent with the [partially-transparent error-handling approach](#error-handling-transparency): the FFI layer validates pointer safety and encoding, but defers semantic choices (including event serialization format) to the Rust driver. Normalizing event shapes to spec-expected conventions would require duplicating or transforming Rust driver internals, adding complexity and risk of divergence from the upstream crate. Known spec-level divergences (e.g., `topologyId` serde skip, untagged serialization, duration subdocuments, string `failure`, `connectionId` and `databaseName` shapes) are accepted as-is and documented in the investigation reports.
 
 #### Server Discovery, Selection & Operations
 
@@ -1481,14 +1459,35 @@ Current approach: **BSON array via `mongoac_bson_t`** — the existing `Bson` va
 ### Supported Features
 
 <a id="event-buffer-limits"></a>
+
 #### Event API
 
 ##### Should event buffers have a size limit?
 
-Command, SDAM, and CMAP events will be stored in unbounded per-client buffers. Long-lived clients or heavy monitoring workloads could consume unbounded memory if the caller does not clear events promptly.
-
-- **Unbounded buffers:** simple, no event loss, no configuration API. Con: unbounded memory growth if the caller forgets to clear.
-- **Bounded buffers with tail eviction:** caps memory by dropping oldest events. Con: silently loses events; the limit is an arbitrary tuning parameter.
-- **Bounded buffers with caller notification:** returns an error when full. Con: requires backpressure or an error signal that complicates the API.
+`VecDeque` is a a growable ring buffer.
+If the user enables event monitoring, but does not periodically `clear(n)` the buffer frequently enough relative to the
+  rate of incoming events, the memory utilization may grow unbounded.
+`mongoac_client_options_t` could be given one or more configuration options to control whether these internal event
+  buffers have a maximum (possibly preallocated) allocation size, as well as the policy to use when the queue is full
+  (e.g. overwriting oldest events vs. refusing new events and/or whether to return an error).
 
 Current approach: **unbounded buffers** — events are stored until the caller clears them. This decision is deferrable: adding a size limit later does not change the C function signatures or ABI; it only changes runtime behavior.
+
+<a id="event-typed-structs"></a>
+
+##### Should the FFI define typed event structs?
+
+There are a large number of event types, each with its own set of fields requiring accessors:
+
+- Command: 3 structs, 18 fields total.
+- CmapEvent: 11 structs, 27 fields total.
+- SdamEvent: 9 structs, 29 fields total.
+
+For simplicity, the current mongoac implementation proposes returning all events as BSON documents.
+However, this imposes the unconditional performance cost of serde serialization.
+Furthermore, users are forced to query for the presence/absence of specific fields to derive the original event type.
+
+If typed event structs are defined by the FFI, the index-based event API will need to support accessors similar to that
+  of `mongoac_future_t`, where one must query the event type and invoke the correct getter.
+The index-based API would then return the non-owning, read-only per-event-category structs (`mongoac_command_event_t`, `mongoac_cmap_event_t`, and `mongoac_sdam_event_t`) each with its own type-getters (e.g.
+  `mongoac_command_event_get_command_started()`, etc.).
