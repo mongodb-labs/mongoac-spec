@@ -617,11 +617,6 @@ The `count()` and `get(n)` operations are O(1) operations, whereas `clear(n)` is
 Due to being a ring buffer, the O(n) clear does not require any internal reallocations of existing objects.
 
 > [!NOTE]
-> Contrary to Drivers Specification, four SDAM event types (opening/closed) omit `topologyId` during deserialization
->   due to `#[serde(skip)]`.
-> Two events (`ServerDescriptionChanged`, `TopologyDescriptionChanged`) include it. The three heartbeat events (`ServerHeartbeatStarted`, `ServerHeartbeatSucceeded`, `ServerHeartbeatFailed`) have no `topologyId` field at all.
-
-> [!NOTE]
 > Only command event monitoring is currently implemented by the current mongoac implementation.
 
 > [!TIP]
