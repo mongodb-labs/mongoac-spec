@@ -504,19 +504,51 @@ Furthermore, all `block_on*()` and `make_progress*()` functions support a `*_wit
 > - [Why runtime make_progress?](#why-runtime-make-progress)
 > - [Why defer cancellation?](#why-defer-cancellation)
 
-<!-- Audit Progress -->
-
 #### Error Model
 
-Errors are reported through an opaque `mongoac_error_t` out-parameter with category, code, and message fields. Four categories are defined: `MONGOAC_ERROR_CATEGORY_NONE` (no error), `MONGOAC_ERROR_CATEGORY_MONGOAC` (mongoac-internal errors), `MONGOAC_ERROR_CATEGORY_BSON` (BSON deserialization errors), and `MONGOAC_ERROR_CATEGORY_RUST` (Rust driver errors, including server errors). Four synthetic codes cover common mongoac failures: unknown category, invalid argument, runtime error, and timeout. Server and Rust driver error codes pass through as raw integers. Lifecycle is `mongoac_error_new()`/`mongoac_error_destroy()`; accessors return safe defaults on `NULL` input.
+Errors are reported using an optional `mongoac_error_t` out-parameter.
+It is always the last parameter in the list of parameters: `mongoac_example(..., error)`.
+On error, the return value of an error-aware FFI function is generally set to default value of the return type.
+To avoid reserving special values or forcing incompatibility with underlying Rust Driver API types (in particular for
+  integral types) or force the use of out-parameters in order to indicate result vs. error via `bool` return values,
+  the return value is generally *not* used to indicate whether an error has occurred.
+Instead, users must check for a non-zero error code after the error-aware operation:
 
-**Return value convention:** Every function that accepts an `error` out-parameter returns its result value directly (not via an out-parameter). The return value doubles as a suitable default on error (0, `NULL`, etc.). The canonical way to test success vs. failure is `mongoac_error_code(error) == MONGOAC_ERROR_CODE_OK` — the `bool` return type is not used for this purpose.
+```c
+mongoac_error_t* const error = mongoac_error_new();
+
+// We do NOT reserve any special values (e.g. `0`, `-1`, `INT_MIN`, etc.) to indicate an error.
+int const result = mongoac_example(example, error);
+
+// Methods to abstract this common pattern is left to the user.
+if (mongoac_error_code(error) == MONGOAC_ERROR_CODE_OK) {
+  use(result);
+} else {
+  // Handle error.
+}
+
+mongoac_error_destroy(error);
+```
+
+Unlike the current C Driver's `bson_error_t`-based error model, which uses a fixed-width inline buffer to store error
+  messages, `mongoac_error_t` permits arbitrary error message lengths by returning an owning `mongoac_string_t`.
+This not only permit lossless (never truncated) error messages, but also the freedom to extend the capabilities of the
+  `mongoac_error_t` API without being held back by ABI compatibility (e.g. exposing additional API to query error
+  labels, write concern errors, etc.).
+
+Modelling C++'s `<system_error>` and the error conditions from mongocxx, the `mongoac` (1) error category currently only defines four error codes: `Ok` (0), `InvalidArgument` (1), `RuntimeError` (2), and `Timeout` (3).
+This design specification currently proposes the following error categories:
+
+- `None` (0): the default-initialized `mongoac_error_t`.
+- `MongoAC` (1): the mongoac library.
+- `Server` (2): the MongoDB server (e.g. `Command` and `Write` errors).
+- `Rust` (3): the `mongodb` crate (e.g. client-side invalid arguments or runtime errors).
+- `Bson` (4): the `mongodb::bson` crate (e.g. BSON document validation errors).
 
 > [!TIP]
-> - [Why opaque errors?](#why-opaque-error-handle)
-> - [Why raw integer codes?](#why-raw-error-codes)
 > - [Why #define macros?](#why-define-macros)
-> - [Why return-value-with-error convention?](#why-return-value-with-error)
+
+<!-- Audit Progress -->
 
 ### Supported Features
 
@@ -736,7 +768,7 @@ Each transaction operation (`start_transaction`, `commit_transaction`, `abort_tr
 
 `TransactionOptions` is represented by `mongoac_transaction_options_t` (`timeoutMS` is [deferred](#deferred-transaction-timeoutms)). `NULL` for options uses session-level defaults set via `default_transaction_options` at session creation; per-call options override those defaults — the Rust driver handles the inheritance chain.
 
-Transaction state machine validation (`None → Starting → InProgress → Committed → Aborted`) will be delegated to the Rust driver, which detects invalid transitions synchronously and propagates them through the error out-parameter. Error labels (`"TransientTransactionError"`, `"UnknownTransactionCommitResult"`) are accessible via `mongoac_error_has_label()`, which delegates directly to the Rust driver's `contains_label()` on the preserved original error.
+Transaction state machine validation (`None → Starting → InProgress → Committed → Aborted`) will be delegated to the Rust driver, which detects invalid transitions synchronously and propagates them through the error out-parameter. Error labels (`"TransientTransactionError"`, `"UnknownTransactionCommitResult"`) are accessible via `mongoac_error_contains_label()`, which delegates directly to the Rust driver's `contains_label()` on the preserved original error.
 
 The Rust driver's `and_run()` retry-loop convenience will not be exposed; C callers will implement their own retry logic around the explicit API. If a session is destroyed while a transaction is `InProgress`, the Rust driver's `Drop` impl fires a fire-and-forget async abort task — callers that need a clean abort should call `abort_transaction` explicitly before `destroy()`.
 
@@ -883,34 +915,37 @@ For consistency, options fields (e.g. `ReadConcern`, `ServerApi`, etc.) are also
 Only options fields which are fundamentally BSON documents (e.g. `filter`, `comment`, etc.) use `mongoac_bson_view_t`
   in their corresponding accessor API.
 
-<a id="why-opaque-error-handle"></a>
-#### Why opaque errors?
-
-Opaque handles provide ABI stability (internal layout can change without breaking callers) and avoid truncation — unlike mongoc's 504-byte inline `bson_error_t`, a heap-allocated `String` returned as an owning `mongoac_string_t` supports arbitrary-length messages.
-
-> [!TIP]
-> - [Why not Box<dyn Error>?](#rejected-box-dyn-error)
-
-<a id="why-raw-error-codes"></a>
-#### Why raw integer codes for server/driver errors?
-
-Server and Rust driver codes are external values not owned by mongoac. Only a small, stable taxonomy of synthetic mongoac errors (invalid argument, NULL pointer, etc.) justifies named constants.
-
 <a id="why-define-macros"></a>
 #### Why #define macros instead of C enums?
 
-`#define` gives explicit `int32_t` width (C99 enum underlying types are compiler-chosen) and additive constant safety (does not change type size). The named values are backed by a Rust `#[repr(i32)]` enum with explicit discriminants, so duplicate values are caught at compile time before the C header is generated. cbindgen also emits simpler, more portable headers with `#define`.
+C23 introduced support for declaring enumerations with a fixed underlying type.
+Prior to C23, enumerations have an _unspecified_ underlying type whose permitted range of representable values is
+  determined by the declared values of its enumerators.
+This lack of guarantee concerning the size (or even signedness) of the underlying type makes using enumerations in a
+  pre-C23 FFI challenging to support reliably over time.
+Furthermore, cbindgen emits complicated standard-specific polyfill declarations in order to support this new feature in
+  C23 while being compatible with pre-C23 standards.
 
-> [!TIP]
-> - [Why not C enums?](#rejected-c-enums)
+Rather than dealing with these idiosyncracies, mongoac proposes using a simple combination of `#define` constant macros
+  and typedefs for the expected enumerator type:
 
-<a id="why-return-value-with-error"></a>
-#### Why return-value-with-error convention?
+```c
+// `pub type example_t = i32;`
+typedef int32_t example_enum_t;
 
-Returning the result value directly avoids forcing callers to declare extra variables. The `error` out-parameter carries structured diagnostics that a `bool` return cannot. The return value doubles as a safe default on error (0, `NULL`), so accessing it unconditionally is safe — the caller checks the error code only to distinguish a real result from a sentinel.
+// `pub const EXAMPLE_ENUM_VALUE: example_enum_t = 123;
+#define EXAMPLE_ENUM_VALUE 123
 
-> [!TIP]
-> - [Error-handling transparency trade-off](#error-handling-transparency)
+// fn example(example_enum_t v);
+void example(example_enum_t v);
+```
+
+This ensures explicit and deterministic ABI-stable function declarations that are both backward-compatible with the C99
+  standard and forward-compatible with the C23 standard.
+The mongoac implementation also defines internal `enum ExampleEnum { ... }` enumerators whose variants are defined by
+  the `pub const` declarations.
+This ensures enumerator-like properties are satisfied (e.g. that all variants have a unique value) and allows internal
+  mongoac code to be written against type-safe `enum` rather than plain constants.
 
 <a id="why-runtime-make-progress"></a>
 #### Why runtime make_progress?
@@ -1115,11 +1150,6 @@ The Rust driver validates all state transitions synchronously (before any async 
 
 The Rust driver's inheritance chain (session-level defaults overridden by per-call values) is handled entirely on the Rust side — no C-side storage of default options is needed. Supporting both mechanisms gives C callers full flexibility while keeping the FFI boundary stateless.
 
-<a id="why-error-t-enum"></a>
-##### Why refactor `ErrorT` to an enum storing original errors?
-
-The previous flat struct discarded error labels, wire version, server response, and source chain. An enum where each variant stores the original error (`Rust(mongodb::error::Error)`, `Bson(bson::error::Error)`, etc.) preserves all metadata naturally and delegates `mongoac_error_has_label()` directly to the Rust driver's `contains_label()` without a separate label-tracking collection.
-
 ## Rejected Ideas
 
 > [!IMPORTANT]
@@ -1174,11 +1204,6 @@ Rejected: `#[repr(C)]` structs with public fields break ABI on every layout chan
 #### Box<dyn std::error::Error> opaque handle
 
 Rejected: trait objects discard category/code metadata. C callers need integer codes to classify errors, not just Display strings.
-
-<a id="rejected-c-enums"></a>
-#### C enumerations for category/code
-
-Rejected: C99 allows the compiler to choose any compatible integer type for enum underlying types. Even a `Sentinel = INT32_MAX` enumerator only influences the heuristic; it is not mandated. Pre-C23 compilers also erase enum types to `typedef int32_t`.
 
 <a id="rejected-manual-match"></a>
 #### Manual match impl blocks for enum conversions
@@ -1485,34 +1510,6 @@ Should mongoac use its own `VERSION_CURRENT` or share the root `VERSION_CURRENT`
 Current approach: **independent** — mongoac maintains its own `src/libmongoac/VERSION_CURRENT` (`0.1.0-dev`), separate from the root `VERSION_CURRENT` (`2.3.1`). Switching to unified later is a packaging change, not an ABI break, but it is disruptive for release tooling and downstream consumers expecting a separate version line.
 
 ### Rust FFI Design
-
-<a id="error-code-strategy"></a>
-#### Error code strategy: stable constants vs. raw pass-through
-
-Should server and Rust driver error codes be exposed as named `#define` constants or as raw integer pass-through values?
-
-- **Stable constants for all codes:** every error code (including server and Rust driver) is mapped to a named `#define`. This enables `#ifdef` feature-gating and gives C callers a stable vocabulary for classification. However, mapping an open-ended set of server codes requires a version-locked table that is costly to maintain.
-- **Raw pass-through for external codes:** server and Rust driver codes are passed through as raw integers; only mongoac-internal codes (invalid argument, NULL pointer, etc.) use named constants. This avoids premature commitment while the taxonomy evolves, and named mongoac constants can still be added later without breaking ABI. However, C callers lose the ability to classify server errors with `#ifdef` or symbolic names.
-
-Current approach: **raw pass-through** — only mongoac-internal category constants and synthetic codes use named `#define` constants; server and Rust driver codes pass through as raw integers. This choice is deferrable: stable constants can be added later without breaking ABI.
-
-<a id="error-code-extraction"></a>
-##### Error code extraction from `mongodb::error::Error`
-
-`ErrorT::code()` maps an internal `mongodb::error::ErrorKind` to an `ErrorCodeT` integer. Only four `ErrorKind` variants carry server error codes: `Command`, `Write`, `InsertMany`, and `BulkWrite`. Codes across all four draw from the same server error-code namespace and are not disambiguated by the integer value alone (e.g., code `91` can appear in both `CommandError.code` and `WriteConcernError.code`). All other variants return `ErrorCodeT::Unknown(i32::MIN)`, indicating the error exists but no numeric code is available.
-
-For multi-error variants (`InsertMany`, `BulkWrite`), write concern errors are preferred over individual write errors when both are present. This priority is deferrable: changing it does not break the C API or ABI.
-
-<a id="error-handling-transparency"></a>
-#### Error-handling transparency
-
-Should the FFI layer defer all error semantics to the Rust API, or implement spec-compliant validation on top of it? `mongoac_client_append_metadata()` is a representative example: the Driver Handshake spec requires `name` to be present, forbids `|` in driver-info strings, and limits the metadata document to 512 bytes, but the underlying Rust `Client::append_metadata()` does not enforce these constraints.
-
-- **Fully-transparent:** perform only FFI conversions and rely on the Rust API for all validation. This minimizes FFI code and avoids divergence from Rust behavior. However, invalid UTF-8 is silently replaced with `U+FFFD` by `CStr::to_string_lossy()`, corrupting caller data, and C callers may see server-side errors or non-compliant handshake metadata that mongoac could have caught earlier.
-- **Partially-transparent:** validate immediate FFI safety (non-null required pointers) and encoding preconditions (valid UTF-8), but defer semantic/spec-level validation to the Rust API. This catches common C caller mistakes at the boundary while avoiding duplication of Rust driver logic. However, spec violations such as `|` in metadata or oversized documents pass through silently.
-- **Opaque (spec-compliant FFI layer):** implement the full specification on the Rust side regardless of whether the Rust API enforces it. This gives C callers consistent, spec-compliant behavior independent of Rust driver version. However, it duplicates validation logic, requires ongoing maintenance to track spec changes, and risks divergence if the Rust driver later enforces different rules.
-
-Current approach: **partially-transparent** — the FFI layer validates pointer safety and UTF-8 encoding, rejecting invalid UTF-8 with `MONGOAC_ERROR_CODE_INVALID_ARGUMENT`. Spec-level constraints (e.g., `|` in metadata, 512-byte limit) are delegated to the Rust API. This decision is deferrable: moving more or less validation to the boundary is a behavior change that does not break C API or ABI, though it may change which errors callers observe.
 
 #### Async Operations
 

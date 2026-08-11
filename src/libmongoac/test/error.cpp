@@ -30,11 +30,11 @@ TEST_CASE("destroy", "[mongoac][error]")
    }
 }
 
-TEST_CASE("has_label", "[mongoac][error]")
+TEST_CASE("contains_label", "[mongoac][error]")
 {
    SECTION("null error")
    {
-      CHECK_FALSE(mongoac_error_has_label(nullptr, "TransientTransactionError"));
+      CHECK_FALSE(mongoac_error_contains_label(nullptr, "TransientTransactionError"));
    }
 
    SECTION("valid")
@@ -44,13 +44,13 @@ TEST_CASE("has_label", "[mongoac][error]")
 
       SECTION("null label")
       {
-         CHECK_FALSE(mongoac_error_has_label(error, nullptr));
+         CHECK_FALSE(mongoac_error_contains_label(error, nullptr));
       }
 
       SECTION("missing labels")
       {
-         CHECK_FALSE(mongoac_error_has_label(error, "TransientTransactionError"));
-         CHECK_FALSE(mongoac_error_has_label(error, "UnknownTransactionCommitResult"));
+         CHECK_FALSE(mongoac_error_contains_label(error, "TransientTransactionError"));
+         CHECK_FALSE(mongoac_error_contains_label(error, "UnknownTransactionCommitResult"));
       }
 
       mongoac_error_destroy(error);

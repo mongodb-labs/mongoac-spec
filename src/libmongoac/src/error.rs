@@ -1,32 +1,37 @@
 use crate::private::macros::*;
 use crate::string::StringT;
+
+use mongodb::error::{ErrorKind, WriteFailure};
 use strum::EnumMessage;
 
 #[allow(non_camel_case_types)]
 pub type mongoac_error_category_t = i32;
 pub const MONGOAC_ERROR_CATEGORY_NONE: mongoac_error_category_t = 0;
 pub const MONGOAC_ERROR_CATEGORY_MONGOAC: mongoac_error_category_t = 1;
-pub const MONGOAC_ERROR_CATEGORY_BSON: mongoac_error_category_t = 2;
+pub const MONGOAC_ERROR_CATEGORY_SERVER: mongoac_error_category_t = 2;
 pub const MONGOAC_ERROR_CATEGORY_RUST: mongoac_error_category_t = 3;
+pub const MONGOAC_ERROR_CATEGORY_BSON: mongoac_error_category_t = 4;
+pub const MONGOAC_ERROR_CATEGORY_UNKNOWN: mongoac_error_category_t = i32::MIN;
 
 #[allow(non_camel_case_types)]
 pub type mongoac_error_code_t = i32;
 pub const MONGOAC_ERROR_CODE_OK: mongoac_error_code_t = 0;
-pub const MONGOAC_ERROR_CODE_UNKNOWN_CATEGORY: mongoac_error_code_t = 1;
-pub const MONGOAC_ERROR_CODE_INVALID_ARGUMENT: mongoac_error_code_t = 2;
-pub const MONGOAC_ERROR_CODE_RUNTIME_ERROR: mongoac_error_code_t = 3;
-pub const MONGOAC_ERROR_CODE_TIMEOUT: mongoac_error_code_t = 4;
+pub const MONGOAC_ERROR_CODE_INVALID_ARGUMENT: mongoac_error_code_t = 1;
+pub const MONGOAC_ERROR_CODE_RUNTIME_ERROR: mongoac_error_code_t = 2;
+pub const MONGOAC_ERROR_CODE_TIMEOUT: mongoac_error_code_t = 3;
+pub const MONGOAC_ERROR_CODE_UNKNOWN: mongoac_error_code_t = i32::MIN;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, num_enum::FromPrimitive, num_enum::IntoPrimitive)]
 #[repr(i32)]
 pub enum ErrorCategoryT {
     None = MONGOAC_ERROR_CATEGORY_NONE,
     MongoAC = MONGOAC_ERROR_CATEGORY_MONGOAC,
-    Bson = MONGOAC_ERROR_CATEGORY_BSON,
+    Server = MONGOAC_ERROR_CATEGORY_SERVER,
     Rust = MONGOAC_ERROR_CATEGORY_RUST,
+    Bson = MONGOAC_ERROR_CATEGORY_BSON,
 
     #[num_enum(catch_all)]
-    Unknown(i32),
+    Unknown(i32) = i32::MIN,
 }
 
 #[derive(
@@ -84,18 +89,11 @@ pub extern "C" fn mongoac_error_message(error: *const ErrorT) -> StringT {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn mongoac_error_has_label(
+pub extern "C" fn mongoac_error_contains_label(
     error: *const ErrorT,
     label: *const std::ffi::c_char,
 ) -> bool {
-    safe_as_ref!(error).has_label(safe_cstr_from_ptr!(label))
-}
-
-impl ErrorCodeT {
-    #[must_use]
-    pub fn message(self) -> &'static str {
-        self.get_message().unwrap_or("unknown mongoac error")
-    }
+    safe_as_ref!(error).contains_label(safe_cstr_from_ptr!(label))
 }
 
 #[derive(Clone, Debug, Default)]
@@ -106,8 +104,9 @@ pub enum ErrorT {
         code: ErrorCodeT,
         message: Option<String>,
     },
-    Bson(mongodb::bson::error::Error),
+    Server(mongodb::error::Error),
     Rust(mongodb::error::Error),
+    Bson(mongodb::bson::error::Error),
 }
 
 impl ErrorT {
@@ -132,8 +131,9 @@ impl ErrorT {
         match self {
             Self::None => ErrorCategoryT::None,
             Self::MongoAC { .. } => ErrorCategoryT::MongoAC,
-            Self::Bson(..) => ErrorCategoryT::Bson,
-            Self::Rust(..) => ErrorCategoryT::Rust,
+            Self::Server(_) => ErrorCategoryT::Server,
+            Self::Rust(_) => ErrorCategoryT::Rust,
+            Self::Bson(_) => ErrorCategoryT::Bson,
         }
     }
 
@@ -141,13 +141,23 @@ impl ErrorT {
     pub fn code(&self) -> ErrorCodeT {
         match self {
             Self::None => ErrorCodeT::Ok,
-            // mongodb::bson::error::Error does not use integral error codes.
-            Self::Bson(..) => ErrorCodeT::Unknown(i32::MIN),
+
+            // mongoac defines its own integral error codes.
             Self::MongoAC { code, .. } => *code,
-            Self::Rust(err) => match err.kind.as_ref() {
-                mongodb::error::ErrorKind::Command(cmd) => ErrorCodeT::from(cmd.code),
-                _ => ErrorCodeT::Unknown(i32::MIN),
+
+            // Only support variants which provide a single unambiguous `err.code`.
+            Self::Server(err) => match err.kind.as_ref() {
+                ErrorKind::Command(err) => ErrorCodeT::from(err.code),
+                ErrorKind::Write(err) => match err {
+                    WriteFailure::WriteError(we) => ErrorCodeT::from(we.code),
+                    WriteFailure::WriteConcernError(wce) => ErrorCodeT::from(wce.code),
+                    _ => ErrorCodeT::Unknown(MONGOAC_ERROR_CODE_UNKNOWN), // #[non_exhaustive]
+                },
+                _ => ErrorCodeT::Unknown(MONGOAC_ERROR_CODE_UNKNOWN), // #[non_exhaustive]
             },
+
+            Self::Rust(_) => ErrorCodeT::Unknown(MONGOAC_ERROR_CODE_UNKNOWN),
+            Self::Bson(_) => ErrorCodeT::Unknown(MONGOAC_ERROR_CODE_UNKNOWN),
         }
     }
 
@@ -155,18 +165,29 @@ impl ErrorT {
     pub fn message(&self) -> Option<String> {
         match self {
             Self::None => None,
-            Self::MongoAC { message, .. } => message.clone(),
+
+            Self::MongoAC { code, message, .. } => {
+                // All variants must have `#[strum(message = "...")]`.
+                let prefix = code.get_message().unwrap_or_default();
+
+                Some(match message {
+                    Some(msg) => format!("{}: {}", prefix, msg),
+                    None => prefix.to_string(),
+                })
+            }
+
+            Self::Server(err) | Self::Rust(err) => Some(err.to_string()),
             Self::Bson(err) => Some(err.to_string()),
-            Self::Rust(err) => Some(err.to_string()),
         }
     }
 
     #[must_use]
-    pub fn has_label(&self, label: &str) -> bool {
-        match self {
-            Self::Rust(err) => err.contains_label(label),
-            _ => false,
+    pub fn contains_label(&self, label: &str) -> bool {
+        if let Self::Server(err) | Self::Rust(err) = self {
+            return err.contains_label(label);
         }
+
+        false
     }
 }
 
@@ -179,7 +200,10 @@ impl From<mongodb::bson::error::Error> for ErrorT {
 
 impl From<mongodb::error::Error> for ErrorT {
     fn from(err: mongodb::error::Error) -> Self {
-        Self::Rust(err)
+        match err.kind.as_ref() {
+            ErrorKind::Command(_) | ErrorKind::Write(_) => Self::Server(err),
+            _ => Self::Rust(err),
+        }
     }
 }
 
