@@ -258,24 +258,25 @@ impl ClientT {
             .map(|o| o.inner.driver_info.clone())
             .unwrap_or_default();
 
-        let client = runtime.block_on({
+        let client = {
             let command_event_handler = command_events.as_ref().map(Arc::clone);
             let mut options: ClientOptions = options.map(Into::into).unwrap_or_default();
 
-            async move {
-                // Append mongoac's metadata before user-provided metadata.
-                options.driver_info = Some(build_driver_info());
+            // Append mongoac's metadata before user-provided metadata.
+            options.driver_info = Some(build_driver_info());
 
-                if let Some(handler) = command_event_handler {
-                    options.command_event_handler =
-                        Some(EventHandler::callback(move |ev: CommandEvent| {
-                            handler.lock().push_back(ev);
-                        }));
-                }
-
-                Client::with_options(options)
+            if let Some(handler) = command_event_handler {
+                options.command_event_handler =
+                    Some(EventHandler::callback(move |ev: CommandEvent| {
+                        handler.lock().push_back(ev);
+                    }));
             }
-        })?;
+
+            // Required to associate background tasks spawned by `Client::with_options()` with this runtime.
+            let _guard = runtime.get_runtime().enter();
+
+            Client::with_options(options)?
+        };
 
         // Append user-provided metadata after mongoac's metadata.
         if let Some(driver_info) = user_driver_info {
