@@ -506,17 +506,6 @@ Furthermore, all `block_on*()` and `make_progress*()` functions support a `*_wit
 
 <!-- Audit Progress -->
 
-#### Client Options
-
-Client options are represented by `mongoac_client_options_t`.
-
-Client options are used with `mongoac_client_new_with_options()`, which takes no connection string — all settings are configured via the typed setters on the options struct. `mongoac_client_new()` instead parses a connection string directly and does not accept options. The two construction paths are distinct; there is no URI-into-options parsing step that would let typed setters overlay URI-parsed values.
-
-The mongoac library adds boolean fields to toggle event monitoring fields for commands, SDAM, and CMAP.
-
-> [!TIP]
-> - [Feature-gated fields not exposed](#deferred-client-options-fields)
-
 #### Error Model
 
 Errors are reported through an opaque `mongoac_error_t` out-parameter with category, code, and message fields. Four categories are defined: `MONGOAC_ERROR_CATEGORY_NONE` (no error), `MONGOAC_ERROR_CATEGORY_MONGOAC` (mongoac-internal errors), `MONGOAC_ERROR_CATEGORY_BSON` (BSON deserialization errors), and `MONGOAC_ERROR_CATEGORY_RUST` (Rust driver errors, including server errors). Four synthetic codes cover common mongoac failures: unknown category, invalid argument, runtime error, and timeout. Server and Rust driver error codes pass through as raw integers. Lifecycle is `mongoac_error_new()`/`mongoac_error_destroy()`; accessors return safe defaults on `NULL` input.
@@ -552,6 +541,17 @@ URI options are parsed by `ClientOptions::parse()` in `mongoac_client_new()`. Al
 
 > [!TIP]
 > - [Why no URI option getters?](#why-no-uri-getters)
+
+#### Client Options
+
+Client options are represented by `mongoac_client_options_t`.
+
+Client options are used with `mongoac_client_new_with_options()`, which takes no connection string — all settings are configured via the typed setters on the options struct. `mongoac_client_new()` instead parses a connection string directly and does not accept options. The two construction paths are distinct; there is no URI-into-options parsing step that would let typed setters overlay URI-parsed values.
+
+The mongoac library adds boolean fields to toggle event monitoring fields for commands, SDAM, and CMAP.
+
+> [!TIP]
+> - [Feature-gated fields not exposed](#deferred-client-options-fields)
 
 #### Client Metadata
 
