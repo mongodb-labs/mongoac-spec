@@ -552,67 +552,55 @@ Both error categories and error codes also define a special `Unknown` variant to
 > [!TIP]
 > - [Why #define macros?](#why-define-macros)
 
-<!-- Audit Progress -->
-
 ### Supported Features
-
-> [!NOTE]
-> This section documents both features that are **implemented** in the current proof-of-concept and features that are **planned** for later phases. Subsections explicitly state their current status where applicable.
-
-#### Connection Strings (URI)
-
-Mongoac accepts connection strings directly in `mongoac_client_new()`. There is no separate URI type.
-
-##### Construction
-
-`mongoac_client_new(uri_string, error)` accepts a null-terminated UTF-8 connection string and an optional error out-parameter. `mongoac_client_new_with_options(options, error)` accepts a `mongoac_client_options_t*` (pass `NULL` for defaults) and an optional error out-parameter; hosts and all other settings are configured via the [typed setters](#client-options) on the options struct rather than a connection string. Both return an opaque handle on success, `NULL` on failure. `mongoac_client_new` **blocks** the caller for URI parsing (including DNS SRV/TXT for `mongodb+srv://`) but does not connect to the server; `mongoac_client_new_with_options` performs no URI or DNS parsing.
-
-> [!TIP]
-> - [Why no separate URI type?](#why-no-uri-type)
-> - [Why block for DNS?](#why-client-new-blocks)
-
-##### URI Options
-
-URI options are parsed by `ClientOptions::parse()` in `mongoac_client_new()`. All supported options configure the Rust driver's internal behavior. Supported categories include DNS seedlist, SRV polling, SDAM, server selection, read preference, read concern, compression, load balancers, retryable reads/writes, backpressure, connection pool sizing, auth (SCRAM, X509, GSSAPI, PLAIN, AWS, OIDC), and write concern. Unsupported options (`waitQueueTimeoutMS`, `serverSelectionTryOnce`) are silently ignored. `socketTimeoutMS` is rejected by the Rust driver. Most URI-expressible fields can also be set programmatically via the [typed setters](#client-options) on `mongoac_client_options_t` for use with `mongoac_client_new_with_options()`; the two construction paths are independent (there is no shared URI-into-options parse step).
-
-> [!TIP]
-> - [Why no URI option getters?](#why-no-uri-getters)
 
 #### Client Options
 
-Client options are represented by `mongoac_client_options_t`.
+The Rust Driver API supports two ways to construct a client object: a connection string (URI) and an options struct.
+The mongoac API mirrors this structure in its API:
 
-Client options are used with `mongoac_client_new_with_options()`, which takes no connection string — all settings are configured via the typed setters on the options struct. `mongoac_client_new()` instead parses a connection string directly and does not accept options. The two construction paths are distinct; there is no URI-into-options parsing step that would let typed setters overlay URI-parsed values.
+```c
+// `mongodb::client::Client::with_uri_str()`
+mongoac_client_t* client = mongoac_client_new("mongodb://localhost:27017?appName=example");
 
-The mongoac library adds boolean fields to toggle event monitoring fields for commands, SDAM, and CMAP.
+// `mongodb::client::Client::with_options()`
+mongoac_client_options_t* opts = mongoac_client_options_new();
+mongoac_client_options_set_app_name(opts, "example", NULL);
+mongoac_client_t* client = mongoac_client_new_with_options(opts, NULL);
+mongoac_client_options_destroy(opts);
+```
+
+> [!NOTE]
+> `ClientOptions::parse()` is an async function due to performing
+>   [DNS lookups](https://docs.rs/mongodb/latest/mongodb/action/struct.ParseConnectionString.html#method.resolver_config)
+>   given `mongodb+srv://`, but mongoac does not expose a corresponding async API due to dubious value.
+
+The `mongoac_client_options_t` object is expected to be the primary means by which mongoac-specific configuration
+  options are specified, such as parameters to configure the Tokio runtime (e.g. `event_interval`).
+Currently, the only mongoac-specific options are boolean toggles to enable event monitoring for commands, SDAM, and
+  CMAP.
 
 > [!TIP]
-> - [Feature-gated fields not exposed](#deferred-client-options-fields)
+> - [Feature-gated fields](#deferred-client-options-fields)
 
 #### Client Metadata
 
-The initial connection handshake is performed automatically by the Rust driver. mongoac does not expose `hello` or legacy `isMaster` commands to C callers.
+The mongoac library always appends the following client metadata on construction:
 
-The handshake metadata sent to the server contains:
+- `client.driver.name`: "mongoac"
+- `client.driver.version`: "0.1.0" (from `VERSION_CURRENT`)
+- `client.platform`: "`<build-type><link-type>`"
 
-| Field | Source | Notes |
-|---|---|---|
-| `client.application.name` | URI `appName` option or `mongoac_client_options_set_app_name` | Maps to Rust `ClientOptions::app_name` |
-| `client.driver.name` | Rust driver + mongoac (+ optional user) | `mongo-rust-driver` \| `mongoac` \| `<user>` |
-| `client.driver.version` | Rust driver + mongoac (+ optional user) | Rust base version + mongoac version (+ user version) |
-| `client.os.*` | Rust driver | Detected from `std::env::consts` |
-| `client.platform` | Rust driver + mongoac | Rust platform string + `\|`-delimited C build metadata (`<build><link>`) |
-| `client.env.*` | Rust driver | Detected from environment variables |
+where `<build-type>` is either Debug ("d") or Release ("r") and `<link-type>` is either shared ("h") or static ("t"),
+  deliberately mirroring the
+  [library filename ABI tag pattern](https://github.com/mongodb/mongo-cxx-driver/blob/70935c76a1153d564c622968899085991042e249/cmake/BsoncxxUtil.cmake#L40-L60)
+  used by the C++ Driver.
 
-mongoac injects its identity into the handshake by setting `ClientOptions::driver_info` during client construction. User-provided `driver_info` (set via `mongoac_client_options_set_driver_info`) is appended *after* mongoac's via `Client::append_metadata`, yielding the order `mongo-rust-driver | mongoac | <user>`. The metadata uses the `|` delimiter required by the [Driver Handshake spec](https://github.com/mongodb/specifications/blob/master/source/mongodb-handshake/handshake.md). A two-character suffix is appended to the Rust `platform` string encoding build type (`d`/`r`/`u`) and linkage (`h`/`t`).
+When the user sets `driver_info` for `mongoac_client_options_t`, the metadata is appended _after_ client construction in
+  order to avoid overwriting mongoac's own client metadata.
+Users may also append metadata post-construction using `mongoac_client_append_metadata()` instead.
 
-C callers may also append wrapping-library metadata at runtime via `mongoac_client_append_metadata(client, name, version, platform, error)`.
-
-> [!NOTE]
-> `mongoac_client_append_metadata()` validates immediate FFI safety (non-null client) and UTF-8 encoding for each non-`NULL` string argument. The [Driver Handshake spec](https://github.com/mongodb/specifications/blob/master/source/mongodb-handshake/handshake.md) requires `name` to be present, rejects `|` in driver-info strings, and limits the metadata document to 512 bytes; these spec-level checks are **delegated to the Rust driver**, not the FFI layer.
-
-> [!TIP]
-> - [Why append C build metadata to the platform field?](#why-build-platform-metadata)
+<!-- Audit Progress -->
 
 #### Event API
 
@@ -1010,32 +998,6 @@ Therefore, an exemption to the [no callback-based API](#rejected-callbacks) prin
 
 ### Supported Features
 
-#### Connection Strings (URI)
-
-<a id="why-no-uri-type"></a>
-##### Why no separate URI type?
-
-The `mongodb` crate's `ClientOptions::parse()` is the authoritative parser. Calling it directly from the FFI layer avoids duplicating parse logic and eliminates a C-only two-phase construction model. URI inspection can be added later without breaking existing API.
-
-> [!TIP]
-> - [Why not a full URI type?](#deferred-full-uri-type)
-> - [Why not a read-only URI type?](#deferred-read-only-uri-type)
-
-<a id="why-client-new-blocks"></a>
-##### Why block for DNS?
-
-`ClientOptions::parse()` is async because `mongodb+srv://` requires DNS lookups. Blocking the caller with `runtime.block_on()` avoids exposing an async parse to C. URI parsing is one-time and typically completes in milliseconds. Using the client's own runtime avoids creating a temporary one.
-
-<a id="why-no-uri-getters"></a>
-##### Why no URI option getters?
-
-`ClientOptions` fields are consumed during `Client::with_options()`. Exposing them back would require storing a copy inside `mongoac_client_t` for rarely-accessed data. The common workflow (connect, operate, disconnect) does not need post-construction URI inspection.
-
-<a id="why-build-platform-metadata"></a>
-#### Client Metadata
-
-mongoac appends the C build configuration to the handshake `client.platform` field so support and diagnostics can distinguish Debug vs. Release and shared vs. static builds. The compact two-letter suffix keeps the existing `platform` field readable and the handshake document within the 512-byte limit. Additional single-character fields may be added in the future to capture other build or distribution attributes.
-
 <a id="why-index-based-events"></a>
 #### Event API
 
@@ -1273,8 +1235,6 @@ Therefore, callback-based APIs are avoided library-wide whenever possible.
 
 ### Supported Features
 
-#### Connection Strings (URI)
-
 #### Server Discovery, Selection & Operations
 
 <a id="rejected-snapshot-select"></a>
@@ -1401,23 +1361,11 @@ Deferred to a later phase. The existing CMake + `uv` + Cargo workflow is suffici
 
 ### Supported Features
 
-#### Connection Strings (URI)
-
-<a id="deferred-full-uri-type"></a>
-##### Full mongoac_uri_t with typed getters and setters
-
-A full URI type would require a parallel option store because `ClientOptions` is read-only after construction. This creates maintenance coupling with the `mongodb` crate's `#[non_exhaustive]` fields.
-
-<a id="deferred-read-only-uri-type"></a>
-##### Read-only mongoac_uri_t with getters only
-
-A read-only wrapper adds little value over a future `mongoac_client_get_uri_string()`. The same diagnostics/logging use case is served without introducing opaque-handle lifecycle.
-
 #### Client Options
 
 <a id="deferred-client-options-fields"></a>
 
-##### Feature-gated fields not exposed
+##### Feature-gated fields
 
 The following `ClientOptions` / `TlsOptions` / `Credential` fields are not exposed because mongoac does not enable the corresponding Rust driver feature flags, or because the field type is not FFI-expressible:
 
