@@ -713,7 +713,7 @@ CRUD operations follow the general async pattern with these conventions:
 
 `run_command` and `run_cursor_command` are database-level operations on `mongoac_database_t`, following the same async and options patterns as collection-level CRUD.
 
-Contracts: non-retryable; no `readConcern`/`writeConcern`; read preference follows `SelectionCriteria`; `$db` and Stable API fields set automatically; session is a dedicated pointer parameter (not a BSON field); `run_cursor_command` reuses `mongoac_cursor_t`.
+Contracts: non-retryable; no `readConcern`/`writeConcern`; read preference follows `SelectionCriteria`; `$db` and Stable API fields set automatically; `run_cursor_command` reuses `mongoac_cursor_t`.
 
 ##### Cursor Advance Execution Model
 
