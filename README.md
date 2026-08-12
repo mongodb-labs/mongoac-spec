@@ -502,7 +502,7 @@ Furthermore, all `block_on*()` and `make_progress*()` functions support a `*_wit
 
 > [!TIP]
 > - [Why runtime make_progress?](#why-runtime-make-progress)
-> - [Why defer cancellation?](#why-defer-cancellation)
+> - [Cancellation is deferred](#defer-cancellation)
 
 #### Error Model
 
@@ -624,7 +624,7 @@ Due to being a ring buffer, the O(n) clear does not require any internal realloc
 > [!TIP]
 > - [Should the FFI define typed event structs?](#event-typed-structs)
 
-#### Server Discovery And Monitoring
+#### Server Discovery and Monitoring
 
 The following Drivers specification features are implemented by the Rust Driver and require no additional work by the
   mongoac library:
@@ -690,12 +690,15 @@ Two database-level operations are exposed, following the same result-type split 
 
 Options are represented by `mongoac_list_collections_options_t`; `NULL` = defaults. `nameOnly` is not a valid option (same rationale as enumerate databases). `authorizedCollections` only affects `list_collection_names`.
 
-#### Read Concern & Write Concern
+#### Read and Write Concerns
 
 Read concern and write concern are represented by `mongoac_read_concern_t` and `mongoac_write_concern_t`. `NULL` (or not calling the setter) inherits from the parent level.
 
-> [!WARNING]
-> **Empty ReadConcern for server-default reset** is not currently expressible — see [Rejected Ideas](#rejected-empty-read-concern-hack).
+> [!NOTE]
+> The CRUD spec permits sending `readConcern: {}` to override a parent-level read concern and instead use the server's
+>   default read concern.
+> However, the Rust Driver API (thus mongoac) currently cannot support this due to `ReadConcern.level` being a
+>   non-optional field.
 
 > [!TIP]
 > - [Why typed options structs?](#why-typed-options)
@@ -771,7 +774,7 @@ Transaction support will follow the [Driver Transactions specification](https://
 
 Each transaction operation (`start_transaction`, `commit_transaction`, `abort_transaction`) will be provided in two forms: async (`*_async()`) returning a `mongoac_future_t*`, and sync (no suffix) blocking via `runtime.block_on()`. The sync variants must not be called from within a `make_progress()` context, matching the sync session accessor convention.
 
-`TransactionOptions` is represented by `mongoac_transaction_options_t` (`timeoutMS` is [deferred](#deferred-transaction-timeoutms)). `NULL` for options uses session-level defaults set via `default_transaction_options` at session creation; per-call options override those defaults — the Rust driver handles the inheritance chain.
+`TransactionOptions` is represented by `mongoac_transaction_options_t` (`timeoutMS` is [deferred](#deferred-timeoutms)). `NULL` for options uses session-level defaults set via `default_transaction_options` at session creation; per-call options override those defaults — the Rust driver handles the inheritance chain.
 
 Transaction state machine validation (`None → Starting → InProgress → Committed → Aborted`) will be delegated to the Rust driver, which detects invalid transitions synchronously and propagates them through the error out-parameter. Error labels (`"TransientTransactionError"`, `"UnknownTransactionCommitResult"`) are accessible via `mongoac_error_contains_label()`, which delegates directly to the Rust driver's `contains_label()` on the preserved original error.
 
@@ -859,7 +862,7 @@ Furthermore, the mongoac implementaiton would be complicated by the (re)declarat
 Catch2 provides CMake integration via `catch_discover_tests`, standard `TEST_CASE` macros, and native CTest parallelization. It is the natural choice for a modern C++ test suite.
 
 > [!TIP]
-> - [Why not mongoc's TestSuite?](#rejected-mongoc-testsuite)
+> - [Why not reuse the mongoc test suite?](#rejected-mongoc-testsuite)
 
 <a id="why-custom-test-discovery"></a>
 #### Why custom discovery?
@@ -967,22 +970,6 @@ These background tasks include CMAP workers, SDAM monitors, and cleanup routines
 To ensure these background tasks are able to run to completion, `mongoac_client_shutdown*()` may be used to block on
   these background tasks.
 
-<a id="why-defer-cancellation"></a>
-#### Why defer cancellation?
-
-Cancellation is deferred because opaque handles allow it to be added later as an ABI-compatible extension.
-
-> [!TIP]
-> - [Why not add cancellation now?](#rejected-cooperative-cancellation)
-
-<a id="why-arc-runtime"></a>
-#### Why Arc<Runtime> instead of borrowed references?
-
-`RuntimeT` encapsulates an `Arc<RuntimeState>`, so handles reference-count the same underlying allocations. C callers do not understand Rust borrow semantics. A `RuntimeT` must remain valid even if the originating `ClientT` is destroyed, so `Arc<RuntimeState>` is required.
-
-> [!TIP]
-> - [Why not borrowed references?](#rejected-borrowed-references)
-
 <a id="why-single-cursor-type"></a>
 #### Why a single `mongoac_cursor_t` type?
 
@@ -1028,8 +1015,6 @@ These behaviors are managed entirely inside the Rust driver, which exposes no pu
 > [!TIP]
 > - The server selection predicate is a callback exception — see [Why callbacks are avoided](#rejected-callbacks).
 > - [Why not snapshot-and-select for custom server selection?](#rejected-snapshot-select)
-> - [Why not a BSON declarative server filter?](#rejected-bson-server-filter)
-> - [Why not a precedence-list for custom server selection?](#rejected-precedence-list)
 
 #### Collation
 
@@ -1045,9 +1030,6 @@ The Rust driver uses `OP_MSG` exclusively — the opcode-based restriction is in
 ##### Why `tokio::sync::Mutex` instead of `parking_lot::Mutex` for session state?
 
 `parking_lot::MutexGuard` and `std::sync::MutexGuard` are `!Send` — they cannot be held across `.await` points inside a spawned task. `tokio::sync::MutexGuard` is `Send` and designed for this pattern.
-
-> [!TIP]
-> - [Why not parking_lot or std::sync::Mutex for session state?](#rejected-tokio-mutex-blocking-lock)
 
 <a id="why-session-mutex-held-across-await"></a>
 ##### Why hold the session mutex across the entire operation `.await`?
@@ -1101,105 +1083,60 @@ The Rust driver's inheritance chain (session-level defaults overridden by per-ca
 > [!IMPORTANT]
 > Ideas considered but not pursued during foundation design.
 
-### Build System
-
-<a id="rejected-manual-c-verification"></a>
-#### Dedicated C-only header verification targets
-
-Manual `OBJECT` targets were investigated to verify generated headers as C. Rejected because `FILE_SET HEADERS` on `INTERFACE` targets already integrates with CMake's `CMAKE_VERIFY_INTERFACE_HEADER_SETS` option. Manual `OBJECT` targets would duplicate this functionality and require fragile `add_dependencies` logic for generated headers.
-
-<a id="rejected-downstream-bson-link"></a>
-#### Static embedding of bson2 into the cdylib
-
-Rejected: statically embedding bson2 into the shared library would create duplicate symbol instances in processes that also load libmongoc, violating the one-definition rule for `bson_t` internals.
-
-> [!NOTE]
-> This rejection is now moot: mongoac no longer links bson2 at all. The entry is retained for historical context.
-
-
 ### Test Infrastructure
 
 <a id="rejected-mongoc-testsuite"></a>
-#### Reusing mongoc's TestSuite
+#### Why not reuse the mongoc test suite?
 
-Rejected: `TestSuite` is C-only and sync-centric, with `fork()`-based isolation and compile-time test registration. It has no awareness of C++ lifetimes or async polling. Adapting it for C++ and async futures exceeds the value of reuse.
+Rejected: the custom C test framework used by `test-libmongoc` is heavily dependent on the mongoc library.
+Given mongoac is deliberately designed to be completely independent from the mongoc library, architecturally isolating
+  `test-libmongoac`'s Catch2-based C++ test framework from that of `test-libmongoc` enforces this independence.
 
 ### Rust FFI Design
 
-#### bson2
+#### Defining a featureful `mongoac_bson_t` API
 
-<a id="rejected-new-bson-type"></a>
-##### New Rust BSON type for FFI
+Rejected: mongoac is a new MongoDB Driver exposing an async C API, not a new BSON representation library.
+The `mongoac_bson(_view)_t` structs are declared only to support type safety and ownership semantics.
 
-Rejected: mongoac is a MongoDB Driver, not a new BSON representation library.
+##### Reusing the bson2 API
 
-<a id="rejected-reuse-bson-t"></a>
-##### Reuse libbson `bson_t` in the public API
+Rejected: the mongoac library does not require or use any bson2-specific features.
+The "mongodb" crate dependency already includes a dependency on the "bson" crate which provides a rich API for
+  handling BSON documents; this "bson" crate is fully bundled into the mongoac library without imposing any link-time
+  dependencies.
+Including bson2 headers in mongoac headers and internally using bson2 symbols (i.e. `bson_destroy()`) forces mongoac
+  users to unnecessarily inherit a library dependency both during build-time and link-time.
+Furthermore, redeclaration of bson2 symbols for use by mongoac risks ODR violations, link compatibility issues, `unsafe`
+  blocks to convert BSON bytes to/from foreign pointers, and unnecessary deep-copies of BSON bytes to respect library
+  allocator consistency.
 
-Rejected: forces bson2 link dependency and `<bson/bson.h>` header inclusion, risks `bson_t` ODR violations, requires
-  `unsafe` blocks to support `bson_*()` API calls, requires `unsafe` blocks to convert foreign pointers to BSON bytes
-  into a slice, force unnecessary deep-copies for bson2 allocator consistency, and exclude direct-compatibility with
-  other BSON representation libraries (i.e. bsoncxx).
+#### Concrete (Non-Opaque) Structs
 
-<a id="rejected-flat-structs"></a>
-#### Flat value-type structs
+Rejected: the mongoac library prioritizes compatibility with the underlying Rust Driver API.
+Declaring structs as concrete types in public headers would impose FFI-specific ABI compatibility requirements.
+This includes the use of inline buffers for raw bytes (e.g. `bson_t`) and strings (e.g. `bson_error_t`).
 
-Rejected: `#[repr(C)]` structs with public fields break ABI on every layout change. Inline `char message[512]` arrays force truncation and waste stack space.
+#### Future Struct per Result Type
 
-<a id="rejected-box-dyn-error"></a>
-#### Box<dyn std::error::Error> opaque handle
+Rejected: `mongoac_runtime_block_on*()` needs a consistent type for future handles on which to block-on.
+Declaring a unique struct per future result type would greatly complicate both the public `RuntimeT` API as well as the
+  mongoac implementation for little-to-no additional type safety.
+Clearly documenting the expected return type for a given future and ensuring well-defined runtime errors for incorrect
+  result value access is sufficient.
 
-Rejected: trait objects discard category/code metadata. C callers need integer codes to classify errors, not just Display strings.
+#### Cursor Struct per Cursor Type
 
-<a id="rejected-manual-match"></a>
-#### Manual match impl blocks for enum conversions
-
-Rejected: violates single responsibility. Adding one error code would require editing 4–5 locations. At scale, manual match blocks risk drift and have no compile-time verification.
-
-<a id="rejected-pure-macros"></a>
-#### macro_rules! for conversions and messages
-
-Rejected: cbindgen does not expand general `macro_rules!` macros, so `pub const` items and enum variants would still need separate hand-written lists. At scale, macro tables become unwieldy and produce poor diagnostics.
-
-<a id="rejected-build-time-codegen"></a>
-#### Build-time code generation from a master .def file
-
-Rejected: a code generator adds build infrastructure overhead disproportionate for a proof-of-concept. Generated files create pre-commit friction. Deferrable: derive macros (`num_enum` + `strum`) suffice.
-
-<a id="rejected-inline-char"></a>
-#### Inline char arrays for strings
-
-Rejected: fixed-size arrays truncate long messages and rigidify ABI. Changing array size breaks binary compatibility.
-
-<a id="rejected-waker-integration"></a>
-#### Waker-based event-loop integration
-
-A waker callback inverts control: Rust decides when to notify the caller rather than the caller polling. This imposes a mandatory thread-safe synchronization contract on all consumers, including those without an event loop, and waker vtables are complex to implement correctly across language boundaries.
-
-<a id="rejected-separate-futures"></a>
-#### Separate future types per result category
-
-Separate future types per result category would require a distinct Rust struct, module, and generated header for each category, duplicating `poll`, `destroy`, and any extension functions. C provides no strong type checking for opaque pointers, so the compile-time safety benefit is limited.
-
-<a id="rejected-cooperative-cancellation"></a>
-#### Cooperative cancellation for Phase 0
-
-Cooperative cancellation requires wiring an `AbortHandle` or oneshot channel into every operation and testing race conditions during normal resolution and client shutdown. The bookkeeping and test coverage required are significant for an initial API.
-
-<a id="rejected-borrowed-references"></a>
-#### Borrowed `&'r Runtime` references in RuntimeT
-
-Borrowed references are sufficient when Rust controls lifetimes and callers are single-threaded. C callers do not understand borrow semantics, and a `RuntimeT` may outlive its originating `ClientT`, so `Arc<RuntimeState>` inside `RuntimeT` is the only safe choice. `RuntimeT` is `Clone`-derived so callers can cheaply share handles.
-
-<a id="rejected-temporary-runtime"></a>
-##### Temporary runtime for URI parse
-
-Rejected: the per-client runtime already exists at parse time. Using it eliminates overhead and preserves DNS cache between parse and connection.
-
-<a id="rejected-separate-cursor-types"></a>
-#### Exposing separate C cursor types for implicit and explicit sessions
-
-The Rust driver's dual-cursor type is a borrow-checker artifact. C lacks Rust's lifetime system, so the distinction cannot be enforced at compile time. A single cursor type with an embedded session provides the same capabilities with a simpler API and fewer opportunities for caller error.
+Rejected: the Rust Driver provides both a `Cursor<T>` and `SessionCursor<T>`, both of which are parameterized on the
+  result type `T` (mongoac only uses `RawDocumentBuf`, but it may also be a `Document`, `CollectionSpecification`,
+  `IndexModel`, etc.).
+This distinction is motivated by the mutability of the `ClientSession` object that must be borrowed by
+  `SessionCursor<T>` for session consistency (`Cursor<T>` has its own implicit session object).
+This Rust type safety requirement is not inherited by the FFI: `mongoac_cursor_t` may instead own a handle to the
+  associated `ClientSessionT` object and ensure it is borrowed during `SessionCursor<T>` operations without requiring
+  explicit user syntax.
+The `ClientSessionT` only needs to be provided at the beginning of the operation which creates the cursor being iterated
+  via the `session` parameter.
 
 <a id="rejected-callbacks"></a>
 #### Callback-based APIs
@@ -1215,121 +1152,41 @@ Therefore, callback-based APIs are avoided library-wide whenever possible.
 
 ### Supported Features
 
-#### Server Discovery, Selection & Operations
+#### Server Discovery and Monitoring
 
 <a id="rejected-snapshot-select"></a>
-##### Snapshot-and-select for custom server selection
+##### Snapshot-based Custom Server Selection
 
-Exposing a read-only topology snapshot (list of servers with metadata) and letting the C caller pick a server would require duplicating the driver's server selection logic on the C side. A point-in-time snapshot pins the selection to stale topology state and does not auto-adapt when topology changes (server goes down, new primary elected, RTT shifts). The snapshot would need its own lifetime management and invalidation strategy, adding complexity without solving the adaptation problem.
-
-<a id="rejected-bson-server-filter"></a>
-##### BSON declarative server filter
-
-A BSON document expressing filter criteria (e.g., `{"server_type": "Mongos", "tags.region": "us-east"}`) would avoid callbacks but reinvents a query language for server metadata. The filter semantics would need to match the Rust driver's `ServerInfo` field types, support nested tag lookups, and handle missing fields — all without the driver's existing query infrastructure. Extending the filter to cover new use cases would grow the schema incrementally, never reaching the full expressiveness of a predicate.
-
-<a id="rejected-precedence-list"></a>
-##### Precedence-list for custom server selection
-
-A sorted list of preferred server addresses or tags would let the caller express preference order without a callback. However, this bakes in a fallback policy (what happens when no preferred server is available) that the driver already handles via suitability rules and latency windows. The list would need to interact with read preference, tags, and max staleness — duplicating or conflicting with existing selection criteria. The predicate callback lets the caller express any preference logic, including fallback, without mongoac prescribing the policy.
-
-#### Read Concern, Write Concern & Read Preference
-
-<a id="rejected-empty-read-concern-hack"></a>
-
-##### Raw BSON readConcern: {} at the FFI boundary
-
-The CRUD spec permits sending `readConcern: {}` to reset a parent-level concern to server default. The Rust driver's public API cannot produce this — `ReadConcern.level` is not `Option<ReadConcernLevel>`, conflating "not set" with "explicit server default". A raw-BSON workaround would need to replicate the driver's serde and wire-protocol serialization, creating a fragile internal divergence.
-
-#### Event API
-
-<a id="rejected-event-shape-normalization"></a>
-
-##### Event shape normalization
-
-Post-processing serialized BSON events to match spec-expected conventions (renaming fields to camelCase, converting durations to flat integers, lowercasing reason strings, injecting `databaseName`) would require duplicating or transforming Rust driver internals — whether through a custom serde wrapper, BSON post-processing, or an event-bridge layer. All three approaches create maintenance burden and risk of divergence from the upstream crate that mongoac does not control.
-
-<a id="rejected-list-database-names-string-getter"></a>
-
-##### Dedicated string array getter for listDatabaseNames
-
-An earlier design called for a `mongoac_future_get_strings(future, &data, &len, &error)` getter returning `const char**` and `size_t`, with a companion `mongoac_future_free_strings()` function. While more ergonomic for C callers (no BSON parsing to extract strings), this was rejected in favor of returning a BSON array via the existing `mongoac_future_get_bson()` getter. The BSON array pattern keeps the API consistent between `listDatabases` and `listDatabaseNames` and avoids adding a new result-extraction function for a single operation.
-
-<a id="rejected-list-databases-dedicated-result"></a>
-
-##### Dedicated mongoac_list_databases_result_t type
-
-Creating a dedicated `mongoac_list_databases_result_t` opaque handle with count, index-access, and destroy methods was considered. This would provide a cleaner iteration API for C callers but was rejected in favor of reusing the existing BSON array pattern. Adding a dedicated type later is an additive change that does not break ABI.
-
-#### Enumerate Collections
-
-<a id="rejected-collection-type-enum"></a>
-
-##### Dedicated C enum for CollectionType
-
-A dedicated `mongoac_collection_type_t` enum with constants for each variant (`COLLECTION`, `VIEW`, `TIMESERIES`, `BUCKET`) was considered for type safety and discoverability. Rejected in favor of a string field in the BSON document — the user confirmed that C callers parsing the `type` field as a string is sufficient, and a parallel enum would add maintenance overhead without clear benefit.
-
-<a id="rejected-cursor-types-per-result"></a>
-
-##### Separate cursor types for CollectionSpecification vs Document
-
-Distinct cursor types for `listCollections` results (`Cursor<CollectionSpecification>`) and `find` results (`Cursor<Document>`) were considered. Rejected in favor of a single `mongoac_cursor_t` that exposes raw BSON bytes per entry regardless of the underlying Rust type — the user confirmed this approach. The C caller sees a non-owning `mongoac_bson_view_t` view in both cases.
-
-#### Collection Management
-
-<a id="rejected-rename-collection"></a>
-
-##### Exposing rename_collection
-
-Exposing `rename_collection` as either a client-level or database-level function was considered. The user rejected exposure entirely: if the Rust driver does not natively support it (no dedicated `rename_collection` API — must use `admin.run_command()` with a manual command document), the Rust FFI should not expose it either.
-
-<a id="rejected-separate-create-view"></a>
-
-##### Separate create_view function
-
-A dedicated `mongoac_database_create_view_async` function for discoverability was considered. Rejected in favor of expressing view creation through `create_collection` with `viewOn` and `pipeline` fields in the BSON options — consistent with the Rust driver and the existing BSON-options pattern.
-
-#### Sessions
-
-<a id="rejected-sync-only-sessions"></a>
-
-##### Sync-only session API (no async session operations)
-
-Restricting session parameters to synchronous API functions only was considered to avoid the thread-safety complexity of `Arc<Mutex<>>`. Rejected — the approach is viable, and sync-only sessions would force callers to choose between explicit sessions and non-blocking I/O.
-
-<a id="rejected-per-op-mutex"></a>
-
-##### Per-operation Mutex lock-then-drop pattern (don't hold across `.await`)
-
-Locking the session mutex only to configure the action builder before `.await` was considered. Rejected: the Rust driver's `.session()` method does not return a separately configured builder — the `&mut` reference is consumed by `.await` and held internally for the operation's full duration. There is no point to release the lock early.
-
-<a id="rejected-tokio-mutex-blocking-lock"></a>
-
-##### Using `std::sync::Mutex` or `parking_lot::Mutex` for session state
-
-Both produce `!Send` guards, which cannot be held across `.await` in a spawned task (`tokio::spawn` requires `Send`). `tokio::sync::Mutex` is the only standard choice producing a `Send` guard.
-
-<a id="rejected-async-only-transaction"></a>
-
-##### Async-only transaction API
-
-Requiring every `start`/`commit`/`abort` to go through the future poll loop was considered, but transaction operations are typically called in a tight sequence by a single thread with no concurrent work — the poll loop adds boilerplate and yield overhead without concurrency benefit.
-
-<a id="rejected-c-side-state-machine"></a>
-
-##### Duplicating the transaction state machine on the C side
-
-Tracking `TransactionState` on the C side was considered, but the Rust driver already validates all state transitions synchronously (before any async I/O) behind the `Arc<Mutex<ClientSession>>` guard. A parallel C-side state machine creates drift risk whenever the Rust driver's state machine evolves, with no measurable performance benefit — the Rust validation path is lock-call-return with no async hop.
-
-<a id="rejected-vec-cstring-error-labels"></a>
-
-##### Storing error labels as `Vec<CString>` in `ErrorT`
-
-A separate `Vec<CString>` of error labels was considered, but it creates a duplicate-tracking problem every time an error crosses the FFI boundary — the label collection drifts from the underlying `mongodb::error::Error` whenever one is reconstructed or which lacks the original's `contains_label()` method.
+Rejected: returning a "snapshot" of the current topology in a manner similar to the Event API is infeasible due to the
+  timing of the invocation of the server selection predicate within the SDAM implementation.
+The user would then need to pass custom selection criteria in the form of a BSON document to be matched against server
+  info fields (e.g. `{"server_type": "Mongos"}`).
+The mongoac library would effectively need to implement its own non-trivial custom callback handling in order to
+  save topology state (for the user to query) and update its server selection state machine (as directed by the user).
+This would also introduce problems with "stale" topology states, including questions concerning the timing of topology
+  updates (to expose to the user) and how to handle user requests based on outdated topology information.
 
 ## Deferred Features
 
 > [!IMPORTANT]
 > Features intentionally excluded from the current scope. Each item can be added later without breaking the existing API or ABI unless noted otherwise.
+
+### Rust FFI Design
+
+<a id="defer-cancellation"></a>
+
+#### Cancellation
+
+Users may request the ability to gracefully _cancel_ an in-progress operation whose result is no longer necessary.
+The current implementation allows a `mongoac_future_t` to be destroyed early before its result is ready.
+However, destroying a future does not remove the associated task(s) from the runtime's task scheduler: the task(s) are
+  still (redundantly) executed to completion by other calls to the runtime progress function.
+Aside from dropping the entire runtime, the Tokio library does not natively support a cooperative cancellation
+  mechanism, which forces the mongoac library to implement its own cancellation features on top of the Tokio library
+  (e.g. via [`CancellationToken`](https://docs.rs/tokio-util/latest/tokio_util/sync/struct.CancellationToken.html)),
+  which would introduce significant implementation complexity.
+Users who need cancellation-like behavior may be able use per-operation client objects as a workaround, where destroying
+  the client object drops the associated runtime, thereby "cancelling" all of its associated tasks.
 
 ### Supported Features
 
@@ -1340,8 +1197,7 @@ A separate `Vec<CString>` of error labels was considered, but it creates a dupli
 For the initial implementation, several "mongodb" crate features are _not_ enabled due to scope, which impacts the set
   of supported client option fields:
 
-- `credential.mechanism` with `GSSAPI`: requires `gssapi-auth` (deferred due to scope)
-- `tls_options.
+- `credential.mechanism` with `GSSAPI`: requires `gssapi-auth` (deferred due to scope).
 - `socks5_proxy`: requires `socks5-proxy` (deferred due to scope).
 - `tracing`: requires `opentelemetry` (out-of-scope + dubious value).
 - `tracing_max_document_length_bytes`: requires `tracing-unstable` (deferred until stable).
@@ -1353,58 +1209,35 @@ This may be added later if there is sufficient user demand in a manner similar t
 
 #### Logging
 
-Logging is deferred. No log callback, level constants, or default logger are exposed in this phase.
+The current specification and implementation provides no mechanism to control or track log messages emitted by the Rust
+  Driver.
 
-#### Collation
+#### Option Field Types
 
-<a id="deferred-typed-options-subfields"></a>
+The current implementation uses a convenient `new_from_bson()` for `Find*Options` and `CreateCollectionOptions` due to
+  the large number of accessors required.
 
-##### Dedicated typed handles for non-trivial subfields
+The following (deferred) option field types are needed to properly support accessors for these option structs:
 
-`FindOptions` and `CreateCollectionOptions` currently use a transitional `new_from_bson()` via serde. Migrating to per-field typed setters requires dedicated handle structs for non-trivial subfields, following the `mongoac_read_concern_t` / `mongoac_write_concern_t` pattern:
+- `mongoac_collation_t` (for `Collation`)
+- `mongoac_clustered_index_t` (for `ClusteredIndex`)
+- `mongoac_timeseries_options_t` (for `TimeseriesOptions`)
 
-| Handle | Wraps | Used by |
-|---|---|---|
-| `mongoac_collation_t` | `Collation` | `FindOptions`, `CreateCollectionOptions` |
-| `mongoac_clustered_index_t` | `ClusteredIndex` | `CreateCollectionOptions` |
-| `mongoac_timeseries_options_t` | `TimeseriesOptions` | `CreateCollectionOptions` |
+All other fields may be represented as scalar types, strings, or BSON documents.
 
-Fundamentally-BSON fields (`sort`, `projection`, `filter`, `validator`, `pipeline`) stay as `mongoac_bson_view_t`; scalars get direct typed setters; enum-typed fields use `#define` C constants. Each handle is an additive change.
+#### Bulk Write API
 
-##### Bulk write collation helper
+Deferred due to scope.
 
-Deferred to the bulk write feature design.
+#### Index Management
 
-##### Change stream collation documentation
+Deferred due to scope (+ Rust Driver API does not support Index Views).
 
-The Rust driver's `ChangeStreamOptions.collation` is `#[serde(skip_serializing)]`. This constraint should be documented when change streams are designed.
+<a id="deferred-timeoutms"></a>
 
-##### Index collation and dropIndex
+#### `timeoutMS`
 
-Verification of `DropIndexOptions` collation support is deferred to the index management feature design.
-
-#### Enumerate Collections
-
-<a id="deferred-list-collection-names-streaming"></a>
-
-##### Streaming variant for listCollectionNames
-
-The current `list_collection_names` implementation eagerly collects all results into a `Vec<String>` before returning. A streaming variant returning a cursor of name strings would reduce memory overhead for databases with very large numbers of collections. Deferred — the `list_collections` cursor path already provides a streaming alternative, and adding a streaming names variant later is an additive change.
-
-#### Async Operations
-
-<a id="deferred-transaction-retry-callback"></a>
-
-##### Callback-based transaction retry callback (`and_run`)
-
-See [Rejected: Callback-based API](#rejected-callbacks).
-Users may implement their own retry behavior using explicit `start`/`commit`/`abort`.
-
-<a id="deferred-transaction-timeoutms"></a>
-
-##### `timeoutMS` support in the transaction API
-
-The Driver Transactions specification deprecates `maxCommitTimeMS` in favor of `timeoutMS`, but mongoac has not yet introduced `timeoutMS` for any operation. Deferred until `timeoutMS` is added to the broader mongoac API — `maxCommitTimeMS` via `TransactionOptions` BSON is sufficient for initial support, and adding `timeoutMS` later is a non-breaking additive change.
+Deferred: Rust Driver API currently does not support CSOT (see: [RUST-582](https://jira.mongodb.org/browse/RUST-582)).
 
 ## Open Issues
 
