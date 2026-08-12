@@ -318,7 +318,7 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
             "stdint.h",
         ],
         "string" => includes!["mongoac/export.h", "stdint.h"],
-        "tls" => includes!["mongoac/export.h", "mongoac/error.h", "stdbool.h"],
+        "tls_options" => includes!["mongoac/export.h", "mongoac/error.h", "stdbool.h"],
         "transaction_options" => includes![
             "mongoac/export.h",
             "mongoac/read_concern.h",

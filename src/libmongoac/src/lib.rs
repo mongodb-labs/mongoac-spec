@@ -39,7 +39,7 @@ pub mod server_info;
 pub mod server_selector;
 pub mod session_options;
 pub mod string;
-pub mod tls;
+pub mod tls_options;
 pub mod transaction_options;
 pub mod update_options;
 pub mod version;
