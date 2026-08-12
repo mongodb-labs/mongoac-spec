@@ -1231,7 +1231,7 @@ Deferred due to scope.
 
 #### Index Management
 
-Deferred due to scope (+ Rust Driver API does not support Index Views).
+Deferred due to scope.
 
 <a id="deferred-timeoutms"></a>
 
