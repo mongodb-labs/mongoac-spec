@@ -49,7 +49,7 @@ The following executables are **new** required external dependencies or **strict
   requirements:
 
 - `cmake`: 3.25 or newer.
-- `cargo`: 1.85 or newer (2024 Edition)
+- `cargo`: 1.88 or newer (2024 Edition)
 - `patchelf`: Linux only.
 - C Compiler (header validation only): C99 or newer, see `CMakeLists.txt`.
 - C++ Compiler (tests only): C++17 or newer, see `CMakeLists.txt`.
@@ -57,9 +57,9 @@ The following executables are **new** required external dependencies or **strict
 All Rust crate dependencies are automatically obtained by `cargo`.
 This is similar to how CMake obtains Catch2 and `uv` obtains Python packages.
 
-The C compiler is required for `CMAKE_VERIFY_INTERFACE_HEADERS`, but is not strictly required to build the mongoac
-  library (handled entirely by Cargo).
-The C++ compiler is only required to build the Catch2 test suite (with C++17).
+No C or C++ compiler is required to build mongoac libraries themselves (handled entirely by Cargo).
+A C compiler is only required when `CMAKE_VERIFY_INTERFACE_HEADER_SETS` is set to `ON`.
+A C++ compiler is only required to build the Catch2 test suite (with C++17).
 The stricter C/C++ toolchain and CMake version requirements are expected to be acceptable for users given the
   comparatively more-demanding Rust toolchain requirements.
 
@@ -106,8 +106,8 @@ CMake must also use `patchelf` when available (on Linux environments only, per C
   set the SONAME in the shared library file.
 When `patchelf` is not found, CMake emits a warning, but does not error.
 
-The `OUT_DIR` env var specified by CMake ensures Cargo uses a directory consistent with the current CMake build
-  configuration and regardless of the CMake generator being used (via CMake generator expressions).
+The `--target-dir` flag specified by CMake ensures Cargo's generated `config.rs` is consistent with the current CMake
+  build configuration regardless of the CMake generator being used.
 Configuration options are forwarded to `build.rs` using environment variables (e.g. `MONGOAC_CMAKE_BUILD_TYPE` and
   `MONGOAC_LIBRARY_TYPE`).
 
@@ -183,8 +183,8 @@ The Rust FFI uses a two-layer architectural design:
   This layer is tested by Catch2 tests.
 - **Layer 2 (Internal Rust):** safe Rust implementations of corresponding public API symbols.
   Functions are defined as methods of the corresponding `struct` being operated on.
-  No `unsafe` blocks are present in Layer 2: all unsafe input validation and C representation conversions are handled by
-    Layer 1.
+  No `unsafe` blocks are present in Layer 2 (with the exception of unenforcable library-wide preconditions on ptr+len
+    pairs): all other unsafe input validation and C representation conversions are handled by Layer 1.
   This layer is tested by Catch2 tests (via Layer 1) and via `cargo test`.
 
 This results in the following general pattern for a given `example.rs` crate:
@@ -336,8 +336,8 @@ Structs such as `mongoac_cursor_t` will need to clearly document which operation
 <a id="string-structs"></a>
 #### Strings
 
-Strings returned by the FFI (e.g. `mongoac_future_get_string()`) are represented by simple `(ptr, len)` structs.
-Alongside the [string structs](#string-structs), these are the only non-opaque structs declared in the public API.
+Strings returned by the FFI (e.g. `mongoac_error_message()`) are represented by simple `(ptr, len)` structs.
+Alongside the [BSON structs](#bson-structs), these are the only non-opaque structs declared in the public API.
 Their behavior mirrors that of the BSON document structs, including the **library-wide invariant** that the ptr+len pair
   satisfies the same validity and accessibility requirements as the BSON structs.
 Strings as input parameters remain simple null-terminated byte strings.
@@ -352,8 +352,8 @@ Safety macros enforce not-null requirements as graceful errors returned via `mon
 Owning pointers to mongoac structs are returned using `Box::into_raw()` and destroyed by `drop(Box::from_raw(ptr))`
   within a dedicated `mongoac_*_destroy()` function using `safe_drop!(ptr)`.
 
-All public structs are defined as `pub struct ExampleT`, which are renamed to `mongoac_example_t` by cbindgen via
-  `generate-crate-headers`.
+All public structs are defined as `pub struct ExampleT` or `pub enum ExampleT` (both `struct` in the FFI), which are
+  renamed to `mongoac_example_t` by cbindgen via `generate-crate-headers`.
 The `T` suffix in Rust mirrors the `_t` suffix in C and prevents ambiguity with existing Rust structs and traits (e.g.
   `ErrorT` vs. `std::error::Error`, `ClientT` vs. `mongodb::Client`, etc.).
 Private structs (under `src/libmongoac/private/`) do not need to follow this naming convention.
@@ -377,8 +377,8 @@ This is conceptually analogous to `std::shared_ptr<std::pair<std::mutex, T>>` in
 The `private/safety.rs` crate provides macros which encapsulate unsafe C-to-Rust input validation.
 All safety macros are defined to avoid runtime panics, both during validation (error handling) and after validation
   (in safe Layer 2 internal Rust code).
-The `*_with_error` variants ensure the optional `mongoac_error_t *error` parameter is always cleared (when not null) and
-  set when an input validation error occurs.
+The `safe_optional_error_as_mut` macro (whose result is then passed to subsequent `*_with_error` macros) clears the
+  optional `mongoac_error_t *error` parameter (when not null) so that success paths always return `Ok`.
 The macros which handle string-like arguments additionally validate the string is UTF-8 for Rust API compatibility:
   this is also [a language-wide invariant](https://doc.rust-lang.org/book/ch08-02-strings.html).
 These macros are expected to be used exclusively in Layer 1 (Public API) function definitions.
@@ -461,8 +461,8 @@ These have no C++26 Execution equivalents; instead, they are comparable to `io_c
   `uv_run(loop, UV_RUN_NOWAIT)` from libuv, or `loop._run_once()` from Python's `asyncio`.
 
 The `make_progress_for*()` variant makes progress for at least a given duration without spin-looping.
-Furthermore, all `block_on*()` and `make_progress*()` functions support a `*_with_timeout()` variant to avoid
-  indefinitely blocking the current thread.
+All other `block_on*()` and `make_progress*()` functions support a `*_with_timeout()` variant to avoid indefinitely
+  blocking the current thread.
 
 > [!NOTE]
 > In terms of C++26 Execution, `block_on*()`, `block_on_any*()`, and `block_on_all*()` are similar to consuming senders
@@ -590,7 +590,7 @@ Currently, the only mongoac-specific options are [boolean toggles](#event-api) t
 The mongoac library always appends the following client metadata on construction:
 
 - `client.driver.name`: "mongoac"
-- `client.driver.version`: "0.1.0" (from `VERSION_CURRENT`)
+- `client.driver.version`: "0.1.0-dev" (from `VERSION_CURRENT`)
 - `client.platform`: "`<build-type><link-type>`"
 
 where `<build-type>` is either Debug ("d") or Release ("r") and `<link-type>` is either shared ("h") or static ("t"),
@@ -612,9 +612,9 @@ When the boolean toggle is enabled in `mongoac_client_options_t` (defaults to `f
   internal callback function for the appropriate event category during construction.
 The internal callback function directly moves the given event object into the event queue of the associated client
   object.
-These event objects are then accessed by the user using `count()`, `get(n)`, and `clear(n)`.
+These event objects are then accessed by the user using `*_count()`, `*_get(n)`, and `*_clear(n)`.
 
-The event queues are implement as `VecDeque`: a "double-ended queue implemented with a growable ring buffer".
+The event queues are implemented as `VecDeque`: a "double-ended queue implemented with a growable ring buffer".
 The `count()` and `get(n)` operations are O(1) operations, whereas `clear(n)` is O(n).
 Due to being a ring buffer, the O(n) clear does not require any internal reallocations of existing objects.
 
@@ -742,7 +742,7 @@ The cursor is backed by the Rust driver's `Cursor<T>` (implicit session) or `Ses
 
 Mongoac provides create and drop operations for collection lifecycle management.
 
-- **`create_collection`** — database-level, accepts `mongoac_create_collection_options_t` (capped, validator, `viewOn`/`pipeline` for views, collation via `mongoac_collation_t`, timeseries via `mongoac_timeseries_options_t`, clusteredIndex via `mongoac_clustered_index_t`, `encryptedFields`, and other `CreateCollectionOptions` fields).
+- **`create_collection`** — database-level, will accept `mongoac_create_collection_options_t`. Corresponding typed sub-types are [deferred](#option-field-types); the current implementation uses BSON deserialization to minimize the scope of the reference implementation.
 - **`drop_collection`** — collection-level, accepts `mongoac_drop_collection_options_t` (write concern).
 - **`drop_database`** — database-level, drops the entire database.
 
@@ -766,9 +766,6 @@ Every CRUD operation accepting an explicit session will take a nullable `mongoac
 
 <a id="transactions"></a>
 ##### Transactions
-
-> [!NOTE]
-> Not yet implemented in the current proof-of-concept. No transaction functions are exposed.
 
 Transaction support will follow the [Driver Transactions specification](https://github.com/mongodb/specifications/blob/master/source/transactions/transactions.md). Transactions build on Driver Sessions (minimum server 4.0 for replica sets, 4.2 for sharded clusters).
 
@@ -849,7 +846,7 @@ Using `bson_t` in the FFI would force users to use the bson2 API even when they 
   library (e.g. `bsoncxx::document::value` from the C++ Driver).
 All major BSON representation libraries are trivially capable of expressing a BSON document as a sequence of raw bytes;
   forcing conversions to/from `bson_t` is completely unnecessary.
-Furthermore, the mongoac implementaiton would be complicated by the (re)declaration of `bson_t` as an opaque struct (to
+Furthermore, the mongoac implementation would be complicated by the (re)declaration of `bson_t` as an opaque struct (to
   avoid ODR violations), the need to allocate owning BSON bytes returned by the FFI using `bson_new_*()` (which forces
   unnecessary deep-copies), and the use of `unsafe` blocks in contexts that cannot be handled simply by safety macros
   (e.g. arrays of BSON documents) to convert the foreign pointer to BSON bytes into a slice that is usable in Rust code.
@@ -960,7 +957,7 @@ This ensures enumerator-like properties are satisfied (e.g. that all variants ha
 
 A dedicated worker thread must repeatedly call `make_progress*()` or `block_on*()` to make progress on scheduled tasks.
 The `make_progress_for*()` variants allow the worker thread or event loop to efficiently make progress for *at least* a
-  given duration without spin-looping, and all `block_on*()` and `make_progress*()` functions support a
+  given duration without spin-looping, and all other `block_on*()` and `make_progress*()` functions support a
   `*_with_timeout()` variant to avoid indefinitely blocking the current thread.
 
 The Rust Driver may internally spawn background tasks which have no visible mechanism to query their in-progress state.
@@ -1212,6 +1209,8 @@ This may be added later if there is sufficient user demand in a manner similar t
 The current specification and implementation provides no mechanism to control or track log messages emitted by the Rust
   Driver.
 
+<a id="option-field-types"></a>
+
 #### Option Field Types
 
 The current implementation uses a convenient `new_from_bson()` for `Find*Options` and `CreateCollectionOptions` due to
@@ -1281,7 +1280,7 @@ Current approach: **BSON array via `mongoac_bson_t`** — the existing `Bson` va
 
 ##### Should event buffers have a size limit?
 
-`VecDeque` is a a growable ring buffer.
+`VecDeque` is a growable ring buffer.
 If the user enables event monitoring, but does not periodically `clear(n)` the buffer frequently enough relative to the
   rate of incoming events, the memory utilization may grow unbounded.
 `mongoac_client_options_t` could be given one or more configuration options to control whether these internal event
