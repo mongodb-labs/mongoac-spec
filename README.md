@@ -622,25 +622,36 @@ Due to being a ring buffer, the O(n) clear does not require any internal realloc
 > [!TIP]
 > - [Should the FFI define typed event structs?](#event-typed-structs)
 
-<!-- Audit Progress -->
+#### Server Discovery And Monitoring
 
-#### Server Discovery, Selection & Operations
+The following Drivers specification features are implemented by the Rust Driver and require no additional work by the
+  mongoac library:
 
-Server discovery, selection, retry, client backpressure, and connection resilience are handled internally by the Rust driver. C callers configure them through URI options and observe only operation-level outcomes.
+- Client Backpressure
+- Retryable Reads
+- Retryable Writes
+- Server Discovery
+- [Server Monitoring](#event-api)
+- Server Selection
 
-##### Server Discovery and Monitoring
-
-SDAM runs inside the Rust driver.
+Their behavior is configurable via the connection string or options struct used to construct a client object.
 
 Wire protocol compatibility is determined by the Rust driver. See [compatibility](https://www.mongodb.com/docs/drivers/compatibility/?driver-language=rust).
 
 ##### Server Selection
 
-The Rust driver selects a server automatically for every operation. Client-specific options (`serverSelectionTimeoutMS`, `localThresholdMS`) are available both through the URI and as `mongoac_client_options_t` fields. Non-client-specific options (`readPreference`, `maxStalenessSeconds`, `readPreferenceTags`) map to `SelectionCriteria` and are expressed via `mongoac_read_preference_t` with setters for mode, max staleness (seconds), tag sets, and hedge. Read preference is supported for `mongoac_client_options_t`, `mongoac_database_options_t`, and `mongoac_collection_options_t`; per-operation (e.g. `FindOptions`) support is planned.
+Read preference may be specified by setting the appropriate option field for the client, database, collection, or
+  individual operation.
 
-For custom server selection logic that cannot be expressed by read preference, mongoac exposes `SelectionCriteria::Predicate` via a synchronous C callback. A `mongoac_server_selector_t` handle wraps a C function pointer (`mongoac_server_predicate_t`) and an opaque `user_data` pointer. The callback receives a borrowed opaque `mongoac_server_info_t` pointer and inspects server metadata via getter functions (`mongoac_server_info_get_type`, `mongoac_server_info_get_host`, `mongoac_server_info_get_port`, `mongoac_server_info_get_average_round_trip_time_secs`, `mongoac_server_info_get_average_round_trip_time_nanos`, `mongoac_server_info_get_last_update_time`, `mongoac_server_info_get_max_wire_version`, `mongoac_server_info_get_min_wire_version`, `mongoac_server_info_get_replica_set_name`, `mongoac_server_info_get_replica_set_version`, `mongoac_server_info_get_tags`, `mongoac_server_info_has_error`). Optional scalar fields return `Default::default()` (zero) when unset; each has a companion `*_has_value()` predicate to avoid introducing `OptionalT` structs. Tags are returned as an owning `mongoac_bson_t` document (freed by the caller). All borrowed values are valid only for the duration of the callback. Setters are provided on `mongoac_client_options_t`, `mongoac_database_options_t`, and `mongoac_collection_options_t` via `set_server_selector`. The server selector and `set_read_preference` both set the same underlying `selection_criteria` field and are mutually exclusive (last-write-wins). The callback must be non-blocking, non-reentrant (must not call any mongoac API), and must not retain borrowed pointers after return.
+Custom server selection is supported via a synchronous callback function `mongoac_server_predicate_t`, assigned to an
+  options struct via `mongoac_server_selector_t` (function pointer + user data).
+The function MUST NOT invoke a progress function on the associated runtime (no re-entrancy) and MUST NOT fail in any
+  manner (panic, deadlock, etc.).
+The function SHOULD NOT perform any potentially blocking operations, otherwise the entire runtime progress will be
+  blocked by the callback function.
 
-`RuntimeT` ensures the predicate is only potentially-invoked during `make_progress*()` or `block_on*()`. The callback must be non-blocking, non-reentrant, and retain no pointers to values passed to the callback beyond the scope of the invocation. Any panic, deadlock, or failure-mode that may occur within the callback is undefined behavior.
+The callback's only parameter is a non-owning, read-only `mongoac_server_info_t` object whose lifetime is valid only for
+  the duration of the callback function invocation.
 
 > [!NOTE]
 > If the FFI is ever used by a runtime-based language (e.g. Python, Java, JavaScript, etc.), the caller must ensure that
@@ -649,11 +660,11 @@ For custom server selection logic that cannot be expressed by read preference, m
 > If the values accessed by the callback function are on the same thread as the one making progress, synchronization
 >   should not be necessary.
 
-The option setters (`max_staleness`, `tag_set`, `hedge`) reject `Primary` mode with `MONGOAC_ERROR_CODE_INVALID_ARGUMENT`. A non-`Primary` mode must be set before configuring options.
-
 > [!TIP]
 > - [Why use a callback for custom server selection?](#why-server-selection-callback)
 > - [Why typed read preference?](#why-typed-read-preference)
+
+<!-- Audit Progress -->
 
 ##### Retryable Reads & Writes
 
@@ -991,9 +1002,9 @@ A dedicated pointer locks the ABI from day one: callers pass `NULL` until sessio
 `SelectionCriteria::Predicate` is the only method by which the Rust Driver supports custom server selection.
 There is no meaningful non-callback-based alternative approach to be considered in this circumstance (i.e. index-based
   Event API).
-However, this callback function is somewhat unique compared to other potential callback-based APIs: no substantial
-  "work" is expected to occur in this callback function (only accepts or rejects the given server candidate), and the
-  `bool` result is for use by Rust Driver internals, not by the user (the user is the one providing the result).
+However, this callback function is unique compared to other potential callback-based APIs: no substantial "work" is
+  expected to occur in this callback function (only accepts or rejects the given server candidate), and the `bool`
+  result is returned to Rust Driver internals, not to the user (the user is the one providing the result).
 Therefore, an exemption to the [no callback-based API](#rejected-callbacks) principle is justifiable.
 
 ### Supported Features
