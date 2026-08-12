@@ -573,7 +573,9 @@ mongoac_client_options_destroy(opts);
 > [!NOTE]
 > `ClientOptions::parse()` is an async function due to performing
 >   [DNS lookups](https://docs.rs/mongodb/latest/mongodb/action/struct.ParseConnectionString.html#method.resolver_config)
->   given `mongodb+srv://`, but mongoac does not expose a corresponding async API due to dubious value.
+>   given `mongodb+srv://`.
+> The current mongoac implementation does not declare a corresponding `mongoac_client_options_parse_async()` due to
+>   dubious value; instead, the potential DNS lookups are treated as part of `mongoac_client_new()` construction.
 
 The `mongoac_client_options_t` object is expected to be the primary means by which mongoac-specific configuration
   options are specified, such as parameters to configure the Tokio runtime (e.g. `event_interval`).
