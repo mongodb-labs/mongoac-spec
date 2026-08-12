@@ -1331,14 +1331,6 @@ A separate `Vec<CString>` of error labels was considered, but it creates a dupli
 > [!IMPORTANT]
 > Features intentionally excluded from the current scope. Each item can be added later without breaking the existing API or ABI unless noted otherwise.
 
-### Test Infrastructure
-
-<a id="deferred-dagger-integration"></a>
-
-#### Dagger integration for local CI testing
-
-Deferred to a later phase. The existing CMake + `uv` + Cargo workflow is sufficient for the proof-of-concept.
-
 ### Supported Features
 
 #### Client Options
