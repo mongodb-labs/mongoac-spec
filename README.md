@@ -632,6 +632,8 @@ Server discovery, selection, retry, client backpressure, and connection resilien
 
 SDAM runs inside the Rust driver.
 
+Wire protocol compatibility is determined by the Rust driver. See [compatibility](https://www.mongodb.com/docs/drivers/compatibility/?driver-language=rust).
+
 ##### Server Selection
 
 The Rust driver selects a server automatically for every operation. Client-specific options (`serverSelectionTimeoutMS`, `localThresholdMS`) are available both through the URI and as `mongoac_client_options_t` fields. Non-client-specific options (`readPreference`, `maxStalenessSeconds`, `readPreferenceTags`) map to `SelectionCriteria` and are expressed via `mongoac_read_preference_t` with setters for mode, max staleness (seconds), tag sets, and hedge. Read preference is supported for `mongoac_client_options_t`, `mongoac_database_options_t`, and `mongoac_collection_options_t`; per-operation (e.g. `FindOptions`) support is planned.
@@ -717,11 +719,7 @@ The cursor is backed by the Rust driver's `Cursor<T>` (implicit session) or `Ses
 
 > [!NOTE]
 > Not yet implemented in the current proof-of-concept. Collation is not wired into any exposed CRUD or index operation.
-
-Collation will be exposed as a dedicated `mongoac_collation_t` handle with typed setters for each field (`locale` required, plus optional `strength`, `caseLevel`, `caseFirst`, `numericOrdering`, `alternate`, `maxVariable`, `normalization`, `backwards`). Enum-typed fields use `#define`-based C enum constants. The handle is passed to options structs (e.g. `mongoac_find_options_t`, `mongoac_create_collection_options_t`) via `set_collation`. Collation will be supported on all CRUD operations except `estimated_document_count`, `insert_one`, and `insert_many`. mongoac will not check `maxWireVersion < 5` for collation; the Rust driver handles server incompatibility.
-
 > [!TIP]
-> - [Why no maxWireVersion check?](#why-no-maxwireversion-check)
 > - [Why are opcode-based writes not a concern?](#why-opcode-non-issue)
 
 #### Collection Management
@@ -1022,10 +1020,6 @@ These behaviors are managed entirely inside the Rust driver, which exposes no pu
 
 #### Collation
 
-<a id="why-no-maxwireversion-check"></a>
-##### Why no maxWireVersion check?
-
-The Rust driver sends collation unconditionally. mongoac defers spec-level validation to the Rust API per the ["partially-transparent" error-handling approach](#error-handling-transparency). This is a known spec divergence.
 
 <a id="why-opcode-non-issue"></a>
 ##### Why are opcode-based writes not a concern?
