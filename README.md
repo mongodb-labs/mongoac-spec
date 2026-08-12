@@ -1333,37 +1333,27 @@ A separate `Vec<CString>` of error labels was considered, but it creates a dupli
 
 ### Supported Features
 
-#### Client Options
-
 <a id="deferred-client-options-fields"></a>
 
-##### Feature-gated fields
+#### Client Options
 
-The following `ClientOptions` / `TlsOptions` / `Credential` fields are not exposed because mongoac does not enable the corresponding Rust driver feature flags, or because the field type is not FFI-expressible:
+For the initial implementation, several "mongodb" crate features are _not_ enabled due to scope, which impacts the set
+  of supported client option fields:
 
-| Field | Why deferred |
-|---|---|
-| `tracing_max_document_length_bytes` | Feature-gated (`tracing-unstable`) in the Rust driver. Deferred until the tracing feature is stable. |
-| `tracing` (opentelemetry) | Feature-gated (`opentelemetry`) in the Rust driver. Requires establishing a tracing strategy for mongoac first. |
-| `socks5_proxy` | Feature-gated (`socks5-proxy`) in the Rust driver. Deferred until SOCKS5 proxy support is needed. |
-| `credential.oidc_callback` | Rust callback type (`oidc::Callback`) that cannot cross the FFI boundary. Not FFI-expressible; OIDC via the connection string remains the supported path. |
-| `credential.mechanism = GSSAPI` | Requires `gssapi-auth` feature, not enabled by mongoac. |
-| `TlsOptions.allow_invalid_hostnames` | Feature-gated (`openssl-tls`), not available under mongoac's `rustls-tls` feature. |
-| `TlsOptions.tls_certificate_key_file_password` | Feature-gated (`cert-key-password`), not enabled by mongoac. |
+- `credential.mechanism` with `GSSAPI`: requires `gssapi-auth` (deferred due to scope)
+- `tls_options.
+- `socks5_proxy`: requires `socks5-proxy` (deferred due to scope).
+- `tracing`: requires `opentelemetry` (out-of-scope + dubious value).
+- `tracing_max_document_length_bytes`: requires `tracing-unstable` (deferred until stable).
+- `tls_options.allow_invalid_hostnames`: requires `openssl-tls` (mongoac uses `rustls-tls` instead).
+- `tls_options.tls_certificate_key_file_password`: requires `cert-key-password` (deferred due to scope).
 
-Adding these fields later is an additive change: new setter functions on
-`mongoac_client_options_t` that do not break existing C API or ABI.
+Additionally, `credential.oidc_callback` is excluded due to requiring a callback-based API.
+This may be added later if there is sufficient user demand in a manner similar to `mongoac_server_selector_t`.
 
 #### Logging
 
 Logging is deferred. No log callback, level constants, or default logger are exposed in this phase.
-
-#### Client Metadata
-
-<a id="post-construction-app-name"></a>
-##### Post-construction application name setter
-
-The handshake spec permits setting the application name on the `MongoClient` before any connection is established. The Rust driver only accepts `app_name` through `ClientOptions` at construction time; there is no `Client::set_app_name` API. A post-construction setter in mongoac would require rebuilding the underlying `Client` (and its runtime) or upstream Rust driver support. Deferred until the Rust driver exposes this capability or the use case justifies the complexity.
 
 #### Collation
 
