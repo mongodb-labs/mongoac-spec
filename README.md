@@ -666,11 +666,13 @@ The callback's only parameter is a non-owning, read-only `mongoac_server_info_t`
 > - [Why use a callback for custom server selection?](#why-server-selection-callback)
 > - [Why typed read preference?](#why-typed-read-preference)
 
+##### Retryable Reads and Writes
+
+Handled by the Rust Driver (enabled by default).
+May be explicitly (un)set by the user using URI options or `mongoac_client_options_set_retry_*()`.
+The Rust Driver API does not support configuring these options at any level other than the `Client` object.
+
 <!-- Audit Progress -->
-
-##### Retryable Reads & Writes
-
-Retryable reads and writes are enabled by default and controlled by URI options `retryReads` and `retryWrites`, or equivalently by `mongoac_client_options_set_retry_reads` / `mongoac_client_options_set_retry_writes`. The Rust driver automatically retries eligible operations once. No per-operation retry flags are exposed.
 
 #### Enumerate Databases
 
