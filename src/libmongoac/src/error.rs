@@ -156,8 +156,7 @@ impl ErrorT {
                 _ => ErrorCodeT::Unknown(MONGOAC_ERROR_CODE_UNKNOWN), // #[non_exhaustive]
             },
 
-            Self::Rust(_) => ErrorCodeT::Unknown(MONGOAC_ERROR_CODE_UNKNOWN),
-            Self::Bson(_) => ErrorCodeT::Unknown(MONGOAC_ERROR_CODE_UNKNOWN),
+            Self::Rust(_) | Self::Bson(_) => ErrorCodeT::Unknown(MONGOAC_ERROR_CODE_UNKNOWN),
         }
     }
 
@@ -171,7 +170,7 @@ impl ErrorT {
                 let prefix = code.get_message().unwrap_or_default();
 
                 Some(match message {
-                    Some(msg) => format!("{}: {}", prefix, msg),
+                    Some(msg) => format!("{prefix}: {msg}"),
                     None => prefix.to_string(),
                 })
             }
