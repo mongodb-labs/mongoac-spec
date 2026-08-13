@@ -640,7 +640,7 @@ Their behavior is configurable via the connection string or options struct used 
 
 Wire protocol compatibility is determined by the Rust driver. See [compatibility](https://www.mongodb.com/docs/drivers/compatibility/?driver-language=rust).
 
-##### Server Selection
+#### Server Selection
 
 Read preference may be specified by setting the appropriate option field for the client, database, collection, or
   individual operation.
@@ -666,7 +666,7 @@ The callback's only parameter is a non-owning, read-only `mongoac_server_info_t`
 > - [Why use a callback for custom server selection?](#why-server-selection-callback)
 > - [Why typed read preference?](#why-typed-read-preference)
 
-##### Retryable Reads and Writes
+#### Retryable Reads and Writes
 
 Handled by the Rust Driver (enabled by default).
 May be explicitly (un)set by the user using URI options or `mongoac_client_options_set_retry_*()`.
