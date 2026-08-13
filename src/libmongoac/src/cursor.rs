@@ -8,11 +8,11 @@ use crate::spawn;
 
 use mongodb::bson::{RawDocument, RawDocumentBuf};
 use std::sync::Arc;
-use tokio::sync::Mutex as AsyncMutex;
+use tokio::sync::Mutex;
 
 #[derive(Clone)]
 pub struct CursorT {
-    state: Arc<AsyncMutex<CursorState>>,
+    state: Arc<Mutex<CursorState>>,
     runtime: RuntimeT,
 }
 
@@ -38,20 +38,20 @@ pub extern "C" fn mongoac_cursor_clone(cursor: *const CursorT) -> *mut CursorT {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn mongoac_cursor_next(cursor: *const CursorT, error: *mut ErrorT) -> bool {
+pub extern "C" fn mongoac_cursor_next(cursor: *mut CursorT, error: *mut ErrorT) -> bool {
     let error = safe_optional_error_as_mut!(error);
-    let cursor = safe_as_ref_with_error!(cursor, error);
+    let cursor = safe_as_mut_with_error!(cursor, error);
 
     safe_error!(cursor.next(), error)
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_cursor_next_async(
-    cursor: *const CursorT,
+    cursor: *mut CursorT,
     error: *mut ErrorT,
 ) -> *mut FutureT {
     let error = safe_optional_error_as_mut!(error);
-    let cursor = safe_as_ref_with_error!(cursor, error);
+    let cursor = safe_as_mut_with_error!(cursor, error);
 
     Box::into_raw(Box::new(cursor.next_async()))
 }
@@ -78,7 +78,7 @@ pub extern "C" fn mongoac_cursor_current(cursor: *const CursorT, error: *mut Err
 impl CursorT {
     pub(crate) fn new(cursor: mongodb::Cursor<RawDocumentBuf>, runtime: RuntimeT) -> Self {
         Self {
-            state: Arc::new(AsyncMutex::new(CursorState::Plain(cursor))),
+            state: Arc::new(Mutex::new(CursorState::Plain(cursor))),
             runtime,
         }
     }
@@ -89,12 +89,12 @@ impl CursorT {
         runtime: RuntimeT,
     ) -> Self {
         Self {
-            state: Arc::new(AsyncMutex::new(CursorState::Session { cursor, session })),
+            state: Arc::new(Mutex::new(CursorState::Session { cursor, session })),
             runtime,
         }
     }
 
-    fn next_async(&self) -> FutureT {
+    fn next_async(&mut self) -> FutureT {
         let state = self.state.clone();
 
         spawn!(self, Bool, async move {
@@ -102,7 +102,7 @@ impl CursorT {
         })
     }
 
-    fn next(&self) -> Result<bool, mongodb::error::Error> {
+    fn next(&mut self) -> Result<bool, mongodb::error::Error> {
         self.runtime
             .block_on(async { self.state.lock().await.advance().await })
     }

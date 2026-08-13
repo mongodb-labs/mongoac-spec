@@ -258,7 +258,7 @@ TEST_CASE("find", "[mongoac][collection]")
       auto const options = REQUIRE_MAKE_OWNING_PTR(mongoac_find_options_new_from_bson(make_bson_view(sort_bson), error),
                                                    &mongoac_find_options_destroy);
 
-      auto const check_two_results = [&](mongoac_cursor_t const *cursor) {
+      auto const check_two_results = [&](mongoac_cursor_t *cursor) {
          bson_iter_t iter = {};
 
          REQUIRE(mongoac_cursor_next(cursor, error));

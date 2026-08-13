@@ -68,7 +68,7 @@ pub extern "C" fn mongoac_client_append_metadata(
     error: *mut ErrorT,
 ) {
     let error = safe_optional_error_as_mut!(error);
-    let client = safe_as_ref_with_error!(client, error);
+    let client = safe_as_mut_with_error!(client, error);
 
     let name = safe_optional_cstr_from_ptr_with_error!(name, error).unwrap_or_default();
     let version = safe_optional_cstr_from_ptr_with_error!(version, error);
@@ -291,7 +291,7 @@ impl ClientT {
     }
 
     fn append_metadata(
-        &self,
+        &mut self,
         name: &str,
         version: Option<&str>,
         platform: Option<&str>,
