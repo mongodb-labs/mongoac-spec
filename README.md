@@ -735,6 +735,7 @@ The cursor is backed by the Rust driver's `Cursor<T>` (implicit session) or `Ses
 
 > [!NOTE]
 > Not yet implemented in the current proof-of-concept. Collation is not wired into any exposed CRUD or index operation.
+
 > [!TIP]
 > - [Why are opcode-based writes not a concern?](#why-opcode-non-issue)
 
