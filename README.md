@@ -672,25 +672,68 @@ Handled by the Rust Driver (enabled by default).
 May be explicitly (un)set by the user using URI options or `mongoac_client_options_set_retry_*()`.
 The Rust Driver API does not support configuring these options at any level other than the `Client` object.
 
-<!-- Audit Progress -->
-
 #### Enumerate Databases
 
-Two client-level async operations, distinguished by result format:
+There are two client-level operations to enumerate databases:
 
-- **`list_databases`** returns a BSON array of `DatabaseSpecification` documents (`{ name, sizeOnDisk, empty, shards? }`).
-- **`list_database_names`** returns a BSON array of name strings — both via `mongoac_future_get_bson()`.
+- `list_databases()`: returns an array of `DatabaseSpecification`.
+- `list_database_names`: returns an array of strings (database names).
 
-Options are represented as `mongoac_list_databases_options_t`; `NULL` = defaults. `nameOnly` is not a valid option — the Rust driver determines it internally per entry point, so two separate C functions avoid ambiguity. Targets `admin`; runs on primary. `totalSize` is not exposed.
+The current implementation returns both values as a BSON array:
+
+```
+// list_databases():
+[
+  {"name": "db",      "size_on_disk": 123, ...},
+  {"name": "example", "size_on_disk": 456, ...},
+  ...
+]
+
+// list_database_names():
+["db", "example", ...]
+```
+
+In order to return the array of values as `mongoac_database_specification_t` or `mongoac_string_t`, an approach to
+  support [typed arrays in the FFI](#array-result-representation) will be necessary.
+
+Drivers Specification states:
+
+- "Drivers SHOULD specify the `nameOnly` option when executing the `listDatabases` command..."
+- "Drivers SHOULD report the `filter`, `authorizedDatabases`, and `comment` options when implementing this method."
+- "Drivers MAY" report `totalSize` ... but this is not necessary."
+
+The Rust Driver API implicitly sets `nameOnly` for `listDatabases`, but does not provide an explicit option for the
+  user to enable in `ListDatabaseOptions`.
+All three options (`filter`, `authorizedDatabases`, and `comment`) are supported; `totalSize` is not reported.
 
 #### Enumerate Collections
 
-Two database-level operations are exposed, following the same result-type split as enumerate databases:
+There are two database-level operations to enumerate collections:
 
-- **`list_collections`** returns a cursor (`mongoac_cursor_t`) with `mongoac_bson_view_t` views of `CollectionSpecification` documents. The `type` field is a string (no dedicated C enum).
-- **`list_collection_names`** returns a BSON array of name strings via `mongoac_database_list_collection_names()`.
+- `list_collections`: returns a cursor over `CollectionSpecification` documents.
+- `list_collection_names`: returns an array of strings (collection names).
 
-Options are represented by `mongoac_list_collections_options_t`; `NULL` = defaults. `nameOnly` is not a valid option (same rationale as enumerate databases). `authorizedCollections` only affects `list_collection_names`.
+Each `CollectionSpecification` is returned from the cursor as a serialized BSON document:
+
+```
+{
+  "name": "coll",
+  "type": "collection",
+  ...
+}
+```
+
+Drivers Specification states:
+
+- "Drivers MAY allow the `nameOnly` and `authorizedCollections` options to be passed when executing the
+    `listCollections` command..."
+
+As with the database enumeration API, `nameOnly` is not an explicit option despite being used internally by the
+  `listCollections` command.
+Although `authorizedCollections` may be set explicitly, it is only used by `list_collection_names`; the Rust Driver
+  ignores this option for `list_collections`.
+
+<!-- Audit Progress -->
 
 #### Read and Write Concerns
 
