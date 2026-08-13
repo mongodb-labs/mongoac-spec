@@ -733,11 +733,10 @@ As with the database enumeration API, `nameOnly` is not an explicit option despi
 Although `authorizedCollections` may be set explicitly, it is only used by `list_collection_names`; the Rust Driver
   ignores this option for `list_collections`.
 
-<!-- Audit Progress -->
-
 #### Read and Write Concerns
 
-Read concern and write concern are represented by `mongoac_read_concern_t` and `mongoac_write_concern_t`. `NULL` (or not calling the setter) inherits from the parent level.
+`mongoac_read_concern_t` and `mongoac_write_concern_t` may be used to set option fields for all option structs which
+  support them.
 
 > [!NOTE]
 > The CRUD spec permits sending `readConcern: {}` to override a parent-level read concern and instead use the server's
@@ -748,7 +747,10 @@ Read concern and write concern are represented by `mongoac_read_concern_t` and `
 > [!TIP]
 > - [Why typed options structs?](#why-typed-options)
 
+<!-- Audit Progress -->
+
 <a id="crud-operations"></a>
+
 #### CRUD Operations
 
 CRUD operations follow the general async pattern with these conventions:
