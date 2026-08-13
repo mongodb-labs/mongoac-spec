@@ -796,6 +796,35 @@ Mongoac provides create and drop operations for collection lifecycle management.
 
 `rename_collection` is not exposed — the Rust driver has no dedicated API. View creation uses `create_collection` with `viewOn`+`pipeline`; no separate create-view function.
 
+<a id="index-management"></a>
+#### Index Management
+
+The Rust Driver API implements the "Standard API" for index management.
+Accordingly, mongoac will support index management with the following set of `mongoac_collection_t` functions:
+
+- `create_index()`: accepts a single `mongoac_index_model_t` and returns a `mongoac_string_t` (index name).
+- `create_indexes()`: accepts an array (ptr+len) of `mongoac_index_model_t` and returns a `mongoac_bson_t` (BSON array
+    of index names).
+- `list_indexes()`: returns a `mongoac_cursor_t` over `IndexModel` objects.
+- `list_index_names()`: returns an array of strings (index names).
+- `drop_index()`: accepts an index name (as a string).
+- `drop_indexes()`: no parameters or return value.
+
+For simplicity and consistency with the currently proposed cursor API, the cursor returned by `list_indexes()` will
+  likely return its value as a serialized BSON document (`mongoac_bson_view_t`) rather than as a `mongoac_index_model_t`
+  struct.
+If returned as a struct, this would require adding getters to `mongoac_index_model_t` (which are currently absent in all
+  other option structs due to scope).
+
+Relevant options structs (`CreateIndexOptionsT`, `ListIndexesOptionsT`, and `DropIndexOptionsT`) will expose all fields
+  that are supported by their underlying Rust Driver representation.
+A `mongoac_commit_quorum_t` typed field will be necessary to support its range of possible variants (e.g. `Nodes(u32)`, `Custom(String)`, etc.).
+
+> [!TIP]
+> - [Array-like result representation](#array-result-representation)
+> - [Why a single `mongoac_cursor_t` type?](#why-single-cursor-type)
+> - [Why typed options structs?](#why-typed-options)
+
 <a id="sessions"></a>
 #### Sessions
 
@@ -1276,10 +1305,6 @@ All other fields may be represented as scalar types, strings, or BSON documents.
 
 Deferred due to scope.
 
-#### Index Management
-
-Deferred due to scope.
-
 <a id="deferred-timeoutms"></a>
 
 #### `timeoutMS`
@@ -1310,7 +1335,7 @@ Current approach: **independent** — mongoac maintains its own `src/libmongoac/
 <a id="array-result-representation"></a>
 ##### Array-like result representation: `mongoac_bson_t` vs ptr+len vs dedicated array type
 
-Operations that return lists of values (e.g., `listDatabases`, `listDatabaseNames`, `listCollectionNames`, `listIndexes`) need a way to return array-like results across the FFI boundary. (Note: `listCollections` uses a cursor for its result, not a list result — see the CRUD Operations section for cursor conventions.) Three representations are under consideration:
+Operations that return lists of values (e.g., `listDatabases`, `listDatabaseNames`, `listCollectionNames`, `listIndexNames`) need a way to return array-like results across the FFI boundary. Three representations are under consideration:
 
 - **BSON array via `mongoac_bson_t` (current approach):** The result is encoded as a BSON array stored in the `mongoac_bson_t` returned by `mongoac_future_get_bson()`. The caller iterates elements using their BSON library's iteration API (e.g., libbson `bson_iter_init_find` + `bson_iter_recurse`, or bsoncxx array view). Pros: reuses existing types and getter, no new API surface, consistent with BSON interchange format. Cons: C callers must know a BSON iteration API; elements of homogeneous type (e.g., all strings) incur BSON encoding overhead for a single concrete type; BSON arrays are stored as `{"0": ..., "1": ...}` internally, which may be surprising for callers expecting a flat C array.
 
