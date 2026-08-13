@@ -27,10 +27,6 @@ This project is the initial design specification for the new MongoDB Async C Dri
 
 This section describes how the initial set of features for the mongoac library are expected to be implemented.
 
-> [!IMPORTANT]
-> Ambiguities, inconsistencies, and conflicts with this initial design specification are expected during real-world
->   implementation.
-
 ### Build System
 
 The mongoac library is defined as a new CMake subproject under `src/libmongoac` alongside `src/libbson` and
@@ -879,10 +875,6 @@ Explicit sessions are required for causal consistency — operations without a s
 
 ## Rationale
 
-> [!IMPORTANT]
-> This section documents **why** specific design decisions were made.
-
-
 ### Build System
 
 <a id="why-cmake-325"></a>
@@ -1188,9 +1180,6 @@ The Rust driver's inheritance chain (session-level defaults overridden by per-ca
 
 ## Rejected Ideas
 
-> [!IMPORTANT]
-> Ideas considered but not pursued during foundation design.
-
 ### Test Infrastructure
 
 <a id="rejected-mongoc-testsuite"></a>
@@ -1279,9 +1268,6 @@ This would also introduce problems with "stale" topology states, including quest
 
 ## Deferred Features
 
-> [!IMPORTANT]
-> Features intentionally excluded from the current scope. Each item can be added later without breaking the existing API or ABI unless noted otherwise.
-
 ### Rust FFI Design
 
 <a id="defer-cancellation"></a>
@@ -1349,9 +1335,6 @@ Deferred due to scope.
 Deferred: Rust Driver API currently does not support CSOT (see: [RUST-582](https://jira.mongodb.org/browse/RUST-582)).
 
 ## Open Issues
-
-> [!IMPORTANT]
-> Items that warrant discussion but do not yet have a concrete resolution.
 
 ### Build System
 
