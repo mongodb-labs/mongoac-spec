@@ -300,6 +300,7 @@ impl ExampleT {
 ```
 
 <a id="bson-structs"></a>
+
 #### BSON Documents
 
 BSON documents are passed through the FFI as raw bytes represented by simple `(ptr, len)` structs.
@@ -334,6 +335,7 @@ Structs such as `mongoac_cursor_t` will need to clearly document which operation
 > - [Why raw bytes to represent BSON documents?](#why-bson-raw-bytes)
 
 <a id="string-structs"></a>
+
 #### Strings
 
 Strings returned by the FFI (e.g. `mongoac_error_message()`) are represented by simple `(ptr, len)` structs.
@@ -797,6 +799,7 @@ Mongoac provides create and drop operations for collection lifecycle management.
 `rename_collection` is not exposed — the Rust driver has no dedicated API. View creation uses `create_collection` with `viewOn`+`pipeline`; no separate create-view function.
 
 <a id="index-management"></a>
+
 #### Index Management
 
 The Rust Driver API implements the "Standard API" for index management.
@@ -826,6 +829,7 @@ A `mongoac_commit_quorum_t` typed field will be necessary to support its range o
 > - [Why typed options structs?](#why-typed-options)
 
 <a id="sessions"></a>
+
 #### Sessions
 
 > [!NOTE]
@@ -842,6 +846,7 @@ Planned synchronous accessors (`get_id`, `get_cluster_time`, `get_snapshot_time`
 Every CRUD operation accepting an explicit session will take a nullable `mongoac_client_session_t*` as its second parameter. `NULL` selects an implicit session. Cursor-creating operations will clone the `Arc` into the cursor so the session outlives the user's handle.
 
 <a id="transactions"></a>
+
 ##### Transactions
 
 Transaction support will follow the [Driver Transactions specification](https://github.com/mongodb/specifications/blob/master/source/transactions/transactions.md). Transactions build on Driver Sessions (minimum server 4.0 for replica sets, 4.2 for sharded clusters).
@@ -855,6 +860,7 @@ Transaction state machine validation (`None → Starting → InProgress → Comm
 The Rust driver's `and_run()` retry-loop convenience will not be exposed; C callers will implement their own retry logic around the explicit API. If a session is destroyed while a transaction is `InProgress`, the Rust driver's `Drop` impl fires a fire-and-forget async abort task — callers that need a clean abort should call `abort_transaction` explicitly before `destroy()`.
 
 <a id="causal-consistency"></a>
+
 ##### Causal Consistency
 
 > [!NOTE]
@@ -880,6 +886,7 @@ Explicit sessions are required for causal consistency — operations without a s
 ### Build System
 
 <a id="why-cmake-325"></a>
+
 #### Why CMake 3.25?
 
 The following CMake features are newer than the current 3.15+ requirement:
@@ -891,6 +898,7 @@ The following CMake features are newer than the current 3.15+ requirement:
 - `FetchContent_Declare(... SYSTEM)` (3.25)
 
 <a id="why-cmake-version-header"></a>
+
 #### Why CMake for version.h?
 
 Version macros (`MONGOAC_VERSION_MAJOR`, etc.) cannot be defined from Rust.
@@ -899,6 +907,7 @@ Using `configure_file()` follows the same pattern used by mongo-c-driver and ens
   without overcomplicating `build.rs`.
 
 <a id="why-patchelf-soname"></a>
+
 #### Why `patchelf`?
 
 Cargo currently does not support setting custom SONAME for cdylib: see [rust-lang/cargo#5045](https://github.com/rust-lang/cargo/issues/5045).
@@ -910,6 +919,7 @@ Attempting to handle this within the `build.rs` script would require detecting p
   the linker.
 
 <a id="why-bson-raw-bytes"></a>
+
 #### Why raw bytes to represent BSON documents?
 
 Despite sharing a repository with the bson2 library, the mongoac library does not need any bson2-specific features.
@@ -931,6 +941,7 @@ Furthermore, the mongoac implementation would be complicated by the (re)declarat
 ### Test Infrastructure
 
 <a id="why-catch2"></a>
+
 #### Why Catch2?
 
 Catch2 provides CMake integration via `catch_discover_tests`, standard `TEST_CASE` macros, and native CTest parallelization. It is the natural choice for a modern C++ test suite.
@@ -939,6 +950,7 @@ Catch2 provides CMake integration via `catch_discover_tests`, standard `TEST_CAS
 > - [Why not reuse the mongoc test suite?](#rejected-mongoc-testsuite)
 
 <a id="why-custom-test-discovery"></a>
+
 #### Why custom discovery?
 
 Catch2's `catch_discover_tests()` permits duplicate `TEST_CASE` names with different tags, but does not register these
@@ -950,6 +962,7 @@ Rather than forcing unique `TEST_CASE` names (conflicting with native Catch2 des
   complexity.
 
 <a id="why-dual-testing-layers"></a>
+
 #### Why dual testing layers?
 
 Rust tests exercise internal logic without cbindgen/C compilation overhead. C++ tests validate the public ABI: header syntax, opaque-pointer contracts, linking, and behavior visible to C callers.
@@ -957,6 +970,7 @@ Rust tests exercise internal logic without cbindgen/C compilation overhead. C++ 
 ### Rust FFI Design
 
 <a id="why-ptr-len-strings"></a>
+
 #### Why ptr+len for strings?
 
 It is not possible to represent internal `str` or `String` without unnecessarily incurring deep-copies just to guarantee
@@ -983,6 +997,7 @@ mongoac_client_t const* client = mongoac_client_new((mongoac_string_view_t){"mon
 ```
 
 <a id="why-typed-options"></a>
+
 #### Why typed options structs?
 
 The Rust Driver discourages depending on `Deserialize` for options classes.
@@ -998,6 +1013,7 @@ Only options fields which are fundamentally BSON documents (e.g. `filter`, `comm
   in their corresponding accessor API.
 
 <a id="why-define-macros"></a>
+
 #### Why #define macros instead of C enums?
 
 C23 introduced support for declaring enumerations with a fixed underlying type.
@@ -1030,6 +1046,7 @@ This ensures enumerator-like properties are satisfied (e.g. that all variants ha
   mongoac code to be written against type-safe `enum` rather than plain constants.
 
 <a id="why-runtime-make-progress"></a>
+
 #### Why runtime make_progress?
 
 A dedicated worker thread must repeatedly call `make_progress*()` or `block_on*()` to make progress on scheduled tasks.
@@ -1045,21 +1062,25 @@ To ensure these background tasks are able to run to completion, `mongoac_client_
   these background tasks.
 
 <a id="why-single-cursor-type"></a>
+
 #### Why a single `mongoac_cursor_t` type?
 
 The Rust driver's dual-type design is a borrow-checker artifact that cannot be enforced at compile time across the C FFI boundary. A single mongoac type embeds the session via `Arc<tokio::sync::Mutex<ClientSession>>` (not `parking_lot::Mutex` — `tokio::sync::MutexGuard` is `Send` and safe to hold across `.await` points), provides non-owning document access via a by-value `mongoac_bson_view_t` returned from `mongoac_cursor_current()`, and simplifies the API with uniform destroy and iteration patterns.
 
 <a id="why-dedicated-session-parameter"></a>
+
 #### Why a dedicated `mongoac_session_t *session` parameter instead of a BSON field?
 
 A dedicated pointer locks the ABI from day one: callers pass `NULL` until sessions arrive (see the [Sessions](#sessions) specification), without requiring an options-BSON migration. Embedding session as a free-form BSON key would be less discoverable for callers and harder to deprecate later. The dedicated pointer also matches the Rust driver's explicit-session API, where `&mut ClientSession` is passed as a separate argument to operation builders.
 
 <a id="why-bson-string-cursortype"></a>
+
 #### Why BSON string for CursorType?
 
 `FindOptions` currently uses a transitional `new_from_bson()` that deserializes a BSON document into the Rust struct via serde, which handles the string-to-enum mapping for `CursorType`. An integer enum would require a parallel C `#define` set and manual conversion code that duplicates serde's work. Once full typed setters are added to `mongoac_find_options_t`, `CursorType` will be exposed as a `#define` enum with a typed setter.
 
 <a id="why-server-selection-callback"></a>
+
 #### Why use a callback for custom server selection
 
 `SelectionCriteria::Predicate` is the only method by which the Rust Driver supports custom server selection.
@@ -1075,6 +1096,7 @@ Therefore, an exemption to the [no callback-based API](#rejected-callbacks) prin
 #### Server Discovery, Selection & Operations
 
 <a id="why-typed-read-preference"></a>
+
 ##### Why typed read preference?
 
 `readPreference`, `maxStalenessSeconds`, and `readPreferenceTags` are meaningful at the database, collection, and operation levels in the Rust driver. The `mongodb` crate exposes `SelectionCriteria` on `DatabaseOptions`, `CollectionOptions`, and per-operation option structs such as `FindOptions`. A typed `mongoac_read_preference_t` handle with per-variant setters for mode, max staleness (seconds), tag sets, and hedge provides stronger type checking than a BSON document and reaches `#[serde(skip)]` fields such as `selection_criteria` (unreachable via BSON deserialization). The handle is currently reused for the `selection_criteria` field on `mongoac_client_options_t`, `mongoac_database_options_t`, and `mongoac_collection_options_t`; per-operation option structs such as `FindOptions` will use it once their typed setters are added. `SelectionCriteria::Predicate` (custom closure) is exposed via a separate `mongoac_server_selector_t` handle — see [Why callbacks are avoided](#rejected-callbacks).
@@ -1082,6 +1104,7 @@ Therefore, an exemption to the [no callback-based API](#rejected-callbacks) prin
 `mongoac_read_preference_t` directly wraps `ReadPreference` (`ReadPreferenceT(ReadPreference)`), matching the struct shape of `mongoac_read_concern_t` and `mongoac_write_concern_t`. Because `ReadPreference::Primary` has no `options` slot, the option setters (`max_staleness`, `tag_sets`, `hedge`) reject `Primary` with `MONGOAC_ERROR_CODE_INVALID_ARGUMENT` — mirroring the Rust driver's `ReadPreference::with_tags` / `with_max_staleness`, which return `Err(InvalidArgument)` for `Primary`. Mode setters carry `ReadPreferenceOptions` forward when switching between non-`Primary` modes; switching to `Primary` discards them (inherent to the enum).
 
 <a id="why-internal-no-api"></a>
+
 ##### Why do SDAM, retry, and step-down resilience require no C API?
 
 These behaviors are managed entirely inside the Rust driver, which exposes no public API to read topology state, toggle per-operation retry, or manually clear connection pools. Because the C caller cannot influence them through any Rust API, there is no C API surface to expose.
@@ -1094,6 +1117,7 @@ These behaviors are managed entirely inside the Rust driver, which exposes no pu
 
 
 <a id="why-opcode-non-issue"></a>
+
 ##### Why are opcode-based writes not a concern?
 
 The Rust driver uses `OP_MSG` exclusively — the opcode-based restriction is inapplicable.
@@ -1101,36 +1125,43 @@ The Rust driver uses `OP_MSG` exclusively — the opcode-based restriction is in
 #### Sessions
 
 <a id="why-tokio-sync-mutex"></a>
+
 ##### Why `tokio::sync::Mutex` instead of `parking_lot::Mutex` for session state?
 
 `parking_lot::MutexGuard` and `std::sync::MutexGuard` are `!Send` — they cannot be held across `.await` points inside a spawned task. `tokio::sync::MutexGuard` is `Send` and designed for this pattern.
 
 <a id="why-session-mutex-held-across-await"></a>
+
 ##### Why hold the session mutex across the entire operation `.await`?
 
 The Rust driver's action builders consume `&mut ClientSession` for the operation's full duration. There is no intermediate point to release the lock before `.await` completes.
 
 <a id="why-session-accessors-block-on-mutex"></a>
+
 ##### Why do synchronous session accessors block on the mutex instead of using `try_lock()`?
 
 `try_lock()` would return `WouldBlock` on contention, forcing callers to retry — an unfamiliar pattern for synchronous accessors and inconsistent with the rest of mongoac.
 
 <a id="why-fire-and-forget-abort"></a>
+
 ##### Why fire-and-forget async abort on session destroy?
 
 This is inherent to the Rust driver's `ClientSession::Drop`. Diverging would require a synchronous abort path absent from the upstream driver.
 
 <a id="why-session-drop-sends-endsessions"></a>
+
 ##### Why is no explicit `endSessions` C API needed?
 
 The Rust driver's `Client::Drop` impl handles this automatically — sending pooled session IDs (in chunks of 10,000) during client destruction.
 
 <a id="why-causal-consistency-automatic"></a>
+
 ##### Why is causal consistency mostly automatic (no explicit C API)?
 
 The Rust driver's executor handles `operationTime` capture and `afterClusterTime` injection automatically — the C caller only needs to create a session with `causalConsistency: true`. Manual accessors are only needed for cross-session token propagation (`advance_operation_time`, `advance_cluster_time`), a rare use case.
 
 <a id="why-causal-consistency-writes-known-limitation"></a>
+
 ##### Why is the `afterClusterTime`-on-writes limitation documented as a known limitation rather than worked around?
 
 The upstream Rust driver's executor gates `afterClusterTime` injection on `op.read_concern().supported()`, and write operations return `Feature::NotSupported`. The FFI layer cannot override this — the Rust executor controls the wire protocol. Documenting the limitation is the only viable option. Filing an upstream issue is recommended.
@@ -1138,16 +1169,19 @@ The upstream Rust driver's executor gates `afterClusterTime` injection on `op.re
 #### Transactions
 
 <a id="why-both-async-sync-transaction"></a>
+
 ##### Why both async and sync transaction variants?
 
 Transaction operations are typically called in sequence by a single thread with no concurrent work to drive — forcing every call through the future poll loop adds boilerplate without concurrency benefit. The sync variant uses `runtime.block_on()`, matching the existing pattern of `mongoac_client_start_session()` and synchronous cursor iteration. Callers who need non-blocking I/O use the `*_async()` variants.
 
 <a id="why-rust-transaction-state"></a>
+
 ##### Why rely on Rust for transaction state validation?
 
 The Rust driver validates all state transitions synchronously (before any async I/O) behind the `Arc<Mutex<ClientSession>>` guard — there is no async hop for pure state errors. Duplicating the state machine on the C side would add drift risk as the Rust driver's state machine evolves, with no measurable performance benefit.
 
 <a id="why-both-default-txn-options"></a>
+
 ##### Why support both session-level and per-call default transaction options?
 
 The Rust driver's inheritance chain (session-level defaults overridden by per-call values) is handled entirely on the Rust side — no C-side storage of default options is needed. Supporting both mechanisms gives C callers full flexibility while keeping the FFI boundary stateless.
@@ -1160,6 +1194,7 @@ The Rust driver's inheritance chain (session-level defaults overridden by per-ca
 ### Test Infrastructure
 
 <a id="rejected-mongoc-testsuite"></a>
+
 #### Why not reuse the mongoc test suite?
 
 Rejected: the custom C test framework used by `test-libmongoc` is heavily dependent on the mongoc library.
@@ -1213,6 +1248,7 @@ The `ClientSessionT` only needs to be provided at the beginning of the operation
   via the `session` parameter.
 
 <a id="rejected-callbacks"></a>
+
 #### Callback-based APIs
 
 The Rust Driver expects callback functions to be asynchronous.
@@ -1229,6 +1265,7 @@ Therefore, callback-based APIs are avoided library-wide whenever possible.
 #### Server Discovery and Monitoring
 
 <a id="rejected-snapshot-select"></a>
+
 ##### Snapshot-based Custom Server Selection
 
 Rejected: returning a "snapshot" of the current topology in a manner similar to the Event API is infeasible due to the
@@ -1319,6 +1356,7 @@ Deferred: Rust Driver API currently does not support CSOT (see: [RUST-582](https
 ### Build System
 
 <a id="version-current-strategy"></a>
+
 #### Version strategy: independent vs. root VERSION_CURRENT
 
 Should mongoac use its own `VERSION_CURRENT` or share the root `VERSION_CURRENT` from the `mongo-c-driver` repository?
@@ -1333,6 +1371,7 @@ Current approach: **independent** — mongoac maintains its own `src/libmongoac/
 #### Async Operations
 
 <a id="array-result-representation"></a>
+
 ##### Array-like result representation: `mongoac_bson_t` vs ptr+len vs dedicated array type
 
 Operations that return lists of values (e.g., `listDatabases`, `listDatabaseNames`, `listCollectionNames`, `listIndexNames`) need a way to return array-like results across the FFI boundary. Three representations are under consideration:
