@@ -4,14 +4,6 @@
 
 This project is the initial design specification for the new MongoDB Async C Driver.
 
-> [!CAUTION]
-> This specification is still in a drafting state!
-> As a Proof of Concept, this project uses heavy LLM-assistance.
-> Details in this README.md are still being reviewed and the reference implementation under `src/libmongoac` is still
->   being audited.
-> Contents above the `<!-- Audit Progress -->` marker comment in this file have been manually reviewed, audited, and
->   edited for accuracy and intent.
-
 ## Terminology
 
 | Term | Shortname | Description |
@@ -749,8 +741,6 @@ Although `authorizedCollections` may be set explicitly, it is only used by `list
 
 > [!TIP]
 > - [Why typed options structs?](#why-typed-options)
-
-<!-- Audit Progress -->
 
 <a id="crud-operations"></a>
 
