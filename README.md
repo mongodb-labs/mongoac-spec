@@ -921,6 +921,8 @@ The `mongoac_client_session_t` API may expose supported accessors such as `get_o
 
 ## Rationale
 
+This section explains the reasons behind certain design decisions made in the proposed specification.
+
 ### Build System
 
 <a id="why-cmake-325"></a>
@@ -1110,6 +1112,8 @@ Therefore, an exemption to the [no callback-based API](#rejected-callbacks) prin
 
 ## Rejected Ideas
 
+This section enumerates some alternative designs that were considered but rejected.
+
 ### Test Infrastructure
 
 <a id="rejected-mongoc-testsuite"></a>
@@ -1198,6 +1202,9 @@ This would also introduce problems with "stale" topology states, including quest
 
 ## Deferred Features
 
+This section lists features which may be considered for eventual implementation, but is not included in the scope of the
+  initial design specification.
+
 ### Rust FFI Design
 
 <a id="defer-cancellation"></a>
@@ -1265,6 +1272,8 @@ Deferred due to scope.
 Deferred: Rust Driver API currently does not support CSOT (see: [RUST-582](https://jira.mongodb.org/browse/RUST-582)).
 
 ## Open Issues
+
+This section lists open design decisions which need to be addressed by the real-world implementation.
 
 ### Build System
 
