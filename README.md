@@ -1278,16 +1278,12 @@ Deferred: Rust Driver API currently does not support CSOT (see: [RUST-582](https
 
 ### Build System
 
-<a id="version-current-strategy"></a>
-
-#### Version strategy: independent vs. root VERSION_CURRENT
+#### Versioning: Independent or Coupled?
 
 Should mongoac use its own `VERSION_CURRENT` or share the root `VERSION_CURRENT` from the `mongo-c-driver` repository?
 
-- **Independent:** allows separate release cadence; mongoac is experimental (v0.x) while mongoc is stable (v2.x).
-- **Unified:** simplifies packaging and release notes; all three libraries ship together.
-
-Current approach: **independent** — mongoac maintains its own `src/libmongoac/VERSION_CURRENT` (`0.1.0-dev`), separate from the root `VERSION_CURRENT` (`2.3.1`). Switching to unified later is a packaging change, not an ABI break, but it is disruptive for release tooling and downstream consumers expecting a separate version line.
+The current implementation proposes using an independent `VERSION_CURRENT` to avoid coupling the versioning of logically
+  independent libraries.
 
 ### Rust FFI Design
 
@@ -1295,17 +1291,22 @@ Current approach: **independent** — mongoac maintains its own `src/libmongoac/
 
 <a id="array-result-representation"></a>
 
-##### Array-like result representation: `mongoac_bson_t` vs ptr+len vs dedicated array type
+##### Array Representation
 
-Operations that return lists of values (e.g., `listDatabases`, `listDatabaseNames`, `listCollectionNames`, `listIndexNames`) need a way to return array-like results across the FFI boundary. Three representations are under consideration:
+Some operations (e.g. `listDatabases`, `listDatabaseNames`, `listCollectionNames`, `listIndexNames`) return an array
+  of values, each with different element types.
+There are several approaches to representing these array-like return values:
 
-- **BSON array via `mongoac_bson_t` (current approach):** The result is encoded as a BSON array stored in the `mongoac_bson_t` returned by `mongoac_future_get_bson()`. The caller iterates elements using their BSON library's iteration API (e.g., libbson `bson_iter_init_find` + `bson_iter_recurse`, or bsoncxx array view). Pros: reuses existing types and getter, no new API surface, consistent with BSON interchange format. Cons: C callers must know a BSON iteration API; elements of homogeneous type (e.g., all strings) incur BSON encoding overhead for a single concrete type; BSON arrays are stored as `{"0": ..., "1": ...}` internally, which may be surprising for callers expecting a flat C array.
+- Single Typed: a single `mongoac_array_t` with `mongoac_future_t`-like variant accessors (e.g. `get_bson(idx)`).
+- Many Typed: a `mongoac_array_<type>_t` for each type `<type>` (e.g. `mongoac_array_bson_t`).
+- BSON: a BSON array document (e.g. `[{"x": 1}, "string", 123]).
+- Pointer + Length: an internally-allocated buffer storing the results to which a `ptr+len` is returned.
 
-- **Pointer+length out-params:** A getter returning pointers with an explicit count, e.g. `mongoac_future_get_str_array(future, &data, &len, &error)` returning `const char**` for string arrays, or `mongoac_future_get_doc_array(future, &data, &len, &error)` returning `const mongoac_bson_view_t*` for document arrays. Pros: familiar C idiom, avoids BSON parsing for simple types (strings), explicit length and pointer make iteration natural. Cons: introduces a family of getter functions, ownership semantics must be defined per variant (does the caller free elements individually? is the array contiguous?), and heterogeneous arrays cannot be represented without a tag.
-
-- **Dedicated `mongoac_array_t` opaque type:** An opaque handle with accessors like `mongoac_array_count(array, &error)` and `mongoac_array_get(array, index, &error)` returning a `mongoac_bson_view_t` element, plus a `mongoac_array_get_string(array, index, &error)` for string elements. Inspired by the cursor iteration pattern. Pros: type-safe, discoverable, extensible with typed accessors, single ownership convention (destroy the array). Cons: adds another opaque handle lifecycle (create, access, destroy) with its own memory management, requires index-based accessor functions per element type, heavier API surface for simple use cases.
-
-Current approach: **BSON array via `mongoac_bson_t`** — the existing `Bson` variant of `FutureValue` is reused for `listDatabases`, `listDatabaseNames`, and `listCollectionNames`, with the caller iterating the BSON array using their BSON library's iteration API. `listCollections` uses the `Cursor` variant of `FutureValue` instead, consistent with the CRUD cursor pattern. This choice is **not deferrable**: the `FutureValue` variant assigned to each operation determines which typed getter is valid. Changing an operation from one variant to another (e.g., from `Bson` to a dedicated array type) would break existing compiled callers, because `mongoac_future_get_bson()` on a future that no longer stores a `Bson` variant returns a runtime error. The chosen representation for each operation is locked at implementation time. Adding *new* operations with a different representation is always possible, but retrofitting an existing operation is an ABI break.
+To keep the breadth of the FFI minimal and for consistency with other BSON-result API (i.e. CRUD operations), the
+  current implementation proposes using the BSON approach.
+However, this comes at the cost of unconditional serialization of the entire array of elements.
+If we want to preserve the typed structs to represent elements of return values (e.g. if other CRUD operations opt to
+  return typed result structs rather than a BSON document), the single `mongoac_array_t` approach may be preferable.
 
 ### Supported Features
 
@@ -1318,11 +1319,9 @@ Current approach: **BSON array via `mongoac_bson_t`** — the existing `Bson` va
 `VecDeque` is a growable ring buffer.
 If the user enables event monitoring, but does not periodically `clear(n)` the buffer frequently enough relative to the
   rate of incoming events, the memory utilization may grow unbounded.
-`mongoac_client_options_t` could be given one or more configuration options to control whether these internal event
-  buffers have a maximum (possibly preallocated) allocation size, as well as the policy to use when the queue is full
-  (e.g. overwriting oldest events vs. refusing new events and/or whether to return an error).
-
-Current approach: **unbounded buffers** — events are stored until the caller clears them. This decision is deferrable: adding a size limit later does not change the C function signatures or ABI; it only changes runtime behavior.
+We may add one or more mongoac-specific configuration options to `mongoac_client_options_t` to allow users to control
+  whether these internal event buffers have a maximum (possibly preallocated) allocation size, as well as the policy to
+  use when the queue is full (e.g. overwriting oldest events vs. refusing new events and/or whether to return an error).
 
 <a id="event-typed-structs"></a>
 
@@ -1340,5 +1339,6 @@ Furthermore, users are forced to query for the presence/absence of specific fiel
 
 If typed event structs are defined by the FFI, the index-based event API will need to support accessors similar to that
   of `mongoac_future_t`, where one must query the event type and invoke the correct getter.
-The index-based API would then return the non-owning, read-only per-event-category structs (`mongoac_command_event_t`, `mongoac_cmap_event_t`, and `mongoac_sdam_event_t`) each with its own type-getters (e.g.
+The index-based API would then return the non-owning, read-only per-event-category structs (`mongoac_command_event_t`,
+  `mongoac_cmap_event_t`, and `mongoac_sdam_event_t`) each with its own type-getters (e.g.
   `mongoac_command_event_get_command_started()`, etc.).
