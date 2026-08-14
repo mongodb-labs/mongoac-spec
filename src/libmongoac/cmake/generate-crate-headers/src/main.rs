@@ -110,7 +110,7 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
             "mongoac/write_concern.h",
             "mongoac/read_preference.h",
             "mongoac/server_selector.h",
-            "mongoac/tls.h",
+            "mongoac/tls_options.h",
             "mongoac/credential.h",
             "stdbool.h",
             "stdint.h",
