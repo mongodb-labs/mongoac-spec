@@ -751,127 +751,168 @@ Although `authorizedCollections` may be set explicitly, it is only used by `list
 
 #### CRUD Operations
 
-CRUD operations follow the general async pattern with these conventions:
+CRUD operations generally establish the typical async+sync API and implementation pattern, including the optional
+  `session` parameter, `options` parameter, `mongoac_bson_view_t` for BSON arguments (i.e. `filter`), and cursors.
+`estimated_document_count` is a notable exception that does not permit a session parameter.
+`insert_many` and `aggregate` demonstrate the `ptr+len` approach to handling arrays of BSON documents as arguments.
 
-- **Session parameter:** Nullable `mongoac_client_session_t *session` (second param; `NULL` = implicit), except `estimated_document_count`. See [Sessions](#sessions).
-- **Sequence parameters:** `insert_many` and `aggregate` accept a C array of `mongoac_bson_view_t` with explicit count.
-- **Result encoding:** Write operations return `mongoac_bson_t` result documents with `camelCase` fields per CRUD spec. `find_one` returns an optional document (empty `mongoac_bson_t` when no match). `count_documents` and `estimated_document_count` return `uint64_t` directly — no BSON wrapping. `distinct` returns a result document with a BSON array field.
-- **Cursor:** Single `mongoac_cursor_t` type for `find`, `aggregate`, `run_cursor_command`, wrapping `Cursor<T>` or `SessionCursor<T>`. Session embedded; iteration functions have no session parameter. The cursor returns a non-owning `mongoac_bson_view_t` by value via `mongoac_cursor_current()`, borrowing the current document buffer (valid until the next call or destruction).
-- **Cursor iteration:** Sync `mongoac_cursor_next()` (blocks) advances; `mongoac_cursor_current()` returns the current view. Async variants return futures. A future `cursor_next_with_timeout()` may be added for tailable cursors.
-- **Cursor lifecycle:** `mongoac_cursor_destroy()` triggers `killCursors` via `AsyncDropToken`; call `make_progress()` to flush pending killCursors.
-- **Per-getMore options:** `batchSize` and `maxTimeMS` fixed at cursor creation.
-- **Estimated document count:** Uses collection metadata (legacy `count` command); no session parameter; options are `mongoac_estimated_document_count_options_t`.
-- **Deferred (Database-level):** `aggregate` on `Database` and client-level `bulkWrite` (MongoDB 8.0+).
+> [!NOTE]
+> For consistency with return values, we may consider using a BSON array to represent the array of BSON documents:
+>
+> ```c
+> // Currently proposed ptr+len approach:
+> mongoac_bson_view_t docs[] = {a, b, c};
+> mongoac_collection_insert_many(coll, session, docs, 3u, error);
+>
+> // Alternative `mongoac_bson_view_t` approach:
+> bson_t docs;
+> bson_array_builder_t* builder = bson_array_builder_new();
+> bson_array_builder_append_document(builder, a);
+> bson_array_builder_append_document(builder, b);
+> bson_array_builder_append_document(builder, c);
+> bson_array_builder_build(builder, &docs);
+> mongoac_collection_insert_many(coll, session, (mongoac_bson_view_t){bson_get_data(&docs), docs.len}, error);
+> ```
+
+To minimize the breadth of the FFI, results of operations are serialized into BSON documents rather than individual
+  typed result structs (e.g. `{"insertedId": <id>}` instead of `InsertOneResult`).
+A null `mongoac_bson_t` is used to indicate "no match" (as would a null optional).
+
+```c
+mongoac_cursor_t* cursor = mongoac_collection_find(coll, session, filter, options, error);
+while (mongoac_cursor_next(cursor, error)) {
+    mongoac_bson_view_t doc = mongoac_cursor_current(cursor);
+    // ...
+}
+mongoac_cursor_destroy(cursor);
+```
+
+> [!NOTE]
+> Though not in the initial scope of features, these patterns are expected to naturally extend to the client bulk
+>   writes with the addition of structs such as `mongoac_write_model_t` (for
+>   `mongodb::client::options::bulk_write::WriteModel`) and extending `mongoac_error_t` to support
+>   `mongoac_error_get_bulk_write()` (for `mongodb::error::bulk_write::BulkWriteError`).
+
+#### Sessions
+
+The Rust Driver manages server sessions internally.
+The mongoac library only needs to expose handles over `ClientSession` and support its use with session-aware API.
+`mongoac_client_start_session()` begins a session and `mongoac_client_session_destroy()` ends the session.
+The Rust Driver handles cancellation of in-progress transactions when applicable.
+
+> [!IMPORTANT]
+> The requirement that all operations associated with a session MUST be executed sequentially remains unchanged
+>   regardless of support for asynchronous execution:
+>
+> ```c
+> mongoac_future_t* f1 = mongoac_collection_insert_one_async(coll, session, doc1, options, error);
+>
+> // Whether via `block_on*()` or by `make_progress*()` on this thread or another thread...
+> mongoac_runtime_block_on(runtime, f1, error);
+>
+> // ... the operation must have completed its execution...
+> assert(mongoac_future_is_ready(f1));
+>
+> // ... before initiating the next operation for the associated session.
+> mongoac_future_t* f2 = mongoac_collection_insert_one_async(coll, session, doc2, options, error);
+> ```
+>
+> Note it is still acceptable to interleave operations for unrelated sessions (or no sessions at all).
+
+#### Cursors
+
+Where the Rust Driver API returns a `Cursor` or `SessionCursor` (determined by whether an optional `session` argument is
+  provided), the mongoac library returns `mongoac_cursor_t`.
+The session object given at the start of the operation is internally stored by the returned cursor object to avoid
+  burdening the user with explicitly passing the session object to subsequent cursor operations (i.e. `advance()`).
+Destroying a `mongoac_cursor_t` triggers a `killCursors` command as a background task whose execution depends on other
+  progress functions (there is no future to block-on).
 
 > [!TIP]
 > - [Why a single `mongoac_cursor_t` type?](#why-single-cursor-type)
 
-##### Run Command (Database-level)
+#### Run Command
 
-`run_command` and `run_cursor_command` are database-level operations on `mongoac_database_t`, following the same async and options patterns as collection-level CRUD.
-
-Contracts: non-retryable; no `readConcern`/`writeConcern`; read preference follows `SelectionCriteria`; `$db` and Stable API fields set automatically; `run_cursor_command` reuses `mongoac_cursor_t`.
-
-##### Cursor Advance Execution Model
-
-The cursor is backed by the Rust driver's `Cursor<T>` (implicit session) or `SessionCursor<T>` (explicit session), wrapped in the `mongoac`-internal `CursorT`. `advance()` has a fast path (buffer has documents — resolves in a single poll with no yield) and a slow path (buffer empty — issues a `getMore` command, yielding at the TCP send/receive boundary). Alternative first-yield points include server topology changes, connection pool wait, or registered event handlers.
+The mongoac library simply forwards arguments for `mongoac_database_run_command()` and
+  `mongoac_database_run_cursor_command()` to `Database::run_raw_command()` and `Database::run_raw_cursor_command()`
+  respectively.
+When a mismatch occurs between the command type and the function invoked (for document vs. cursor return values), a
+  runtime error is returned by the Rust Driver.
 
 #### Collation
 
-> [!NOTE]
-> Not yet implemented in the current proof-of-concept. Collation is not wired into any exposed CRUD or index operation.
+Collation will be supported as a `mongoac_collation_t` (`Collation`) struct representing a typed options field similar
+  to other options field structs.
 
-> [!TIP]
-> - [Why are opcode-based writes not a concern?](#why-opcode-non-issue)
+> [!NOTE]
+> Opcode-based unacknowledged writes are inapplicable given the Rust Driver only supports `OP_MSG` and does not support
+>   unacknowledged writes.
 
 #### Collection Management
 
-Mongoac provides create and drop operations for collection lifecycle management.
-
-- **`create_collection`** — database-level, will accept `mongoac_create_collection_options_t`. Corresponding typed sub-types are [deferred](#option-field-types); the current implementation uses BSON deserialization to minimize the scope of the reference implementation.
-- **`drop_collection`** — collection-level, accepts `mongoac_drop_collection_options_t` (write concern).
-- **`drop_database`** — database-level, drops the entire database.
-
-`rename_collection` is not exposed — the Rust driver has no dedicated API. View creation uses `create_collection` with `viewOn`+`pipeline`; no separate create-view function.
+Collection management is implemented as straightforward functions operating on `mongoac_database_t`.
+The current implementation uses serde deserialization to minimize scope: the real-world implementation will implement
+  the full `mongoac_create_collection_options_t` struct, which includes support for the `viewOn` and `pipeline` fields.
 
 <a id="index-management"></a>
 
 #### Index Management
 
 The Rust Driver API implements the "Standard API" for index management.
-Accordingly, mongoac will support index management with the following set of `mongoac_collection_t` functions:
+Accordingly, mongoac will support index management with the following `mongoac_collection_t` functions:
 
 - `create_index()`: accepts a single `mongoac_index_model_t` and returns a `mongoac_string_t` (index name).
 - `create_indexes()`: accepts an array (ptr+len) of `mongoac_index_model_t` and returns a `mongoac_bson_t` (BSON array
     of index names).
-- `list_indexes()`: returns a `mongoac_cursor_t` over `IndexModel` objects.
+- `list_indexes()`: returns a `mongoac_cursor_t` over index specification documents.
 - `list_index_names()`: returns an array of strings (index names).
 - `drop_index()`: accepts an index name (as a string).
 - `drop_indexes()`: no parameters or return value.
 
-For simplicity and consistency with the currently proposed cursor API, the cursor returned by `list_indexes()` will
-  likely return its value as a serialized BSON document (`mongoac_bson_view_t`) rather than as a `mongoac_index_model_t`
-  struct.
-If returned as a struct, this would require adding getters to `mongoac_index_model_t` (which are currently absent in all
-  other option structs due to scope).
-
-Relevant options structs (`CreateIndexOptionsT`, `ListIndexesOptionsT`, and `DropIndexOptionsT`) will expose all fields
-  that are supported by their underlying Rust Driver representation.
-A `mongoac_commit_quorum_t` typed field will be necessary to support its range of possible variants (e.g. `Nodes(u32)`, `Custom(String)`, etc.).
+For simplicity and consistency with the cursor API, the cursor returned by `list_indexes()` will return its value as a
+  serialized BSON document (`mongoac_bson_view_t`) rather than as a `mongoac_index_model_t` struct.
 
 > [!TIP]
 > - [Array-like result representation](#array-result-representation)
 > - [Why a single `mongoac_cursor_t` type?](#why-single-cursor-type)
 > - [Why typed options structs?](#why-typed-options)
 
-<a id="sessions"></a>
-
-#### Sessions
-
-> [!NOTE]
-> Partially implemented in the current proof-of-concept. Only `mongoac_client_start_session()`, `mongoac_client_start_session_async()`, and `mongoac_client_session_destroy()` are exposed. Transaction accessors and causal-consistency accessors are not yet implemented.
-
-Session support follows the [Driver Sessions specification](https://github.com/mongodb/specifications/blob/master/source/sessions/driver-sessions.md). The Rust driver manages server session lifetime internally; the FFI layer exposes explicit session handles for C callers.
-
-`mongoac_client_start_session()` (synchronous, via `block_on()`) creates a session and returns the handle directly. An async variant `mongoac_client_start_session_async()` is also provided as part of the public API. Session options are represented by `mongoac_session_options_t`. Validation (`causal_consistency` + `snapshot` conflict) is delegated to the Rust driver. Sessions are destroyed with `mongoac_client_session_destroy()`, dropping the backing `ClientSession` which returns the server session to the pool. If a transaction is in-progress at destroy time, the Rust driver's `Drop` impl fires an async abort task unawaited (matching Rust driver conventions).
-
-The session type wraps `Arc<tokio::sync::Mutex<ClientSession>>`, providing thread safety across the two-thread polling model. All session access — both async spawned tasks and synchronous accessors — goes through the mutex. Multiple tasks queued for the same session yield on contention via `lock().await`; no deadlock occurs.
-
-Planned synchronous accessors (`get_id`, `get_cluster_time`, `get_snapshot_time`, `advance_cluster_time`, `advance_operation_time`) will acquire the mutex via `blocking_lock()`. The Rust driver auto-populates `snapshot_time` from the server response after the first find, aggregate, or distinct operation on a snapshot session — the server picks a time (or returns `cursor.atClusterTime`), and the driver stores it in the session so all subsequent reads use the same snapshot.
-
-Every CRUD operation accepting an explicit session will take a nullable `mongoac_client_session_t*` as its second parameter. `NULL` selects an implicit session. Cursor-creating operations will clone the `Arc` into the cursor so the session outlives the user's handle.
-
 <a id="transactions"></a>
 
-##### Transactions
+#### Transactions
 
-Transaction support will follow the [Driver Transactions specification](https://github.com/mongodb/specifications/blob/master/source/transactions/transactions.md). Transactions build on Driver Sessions (minimum server 4.0 for replica sets, 4.2 for sharded clusters).
+Transactions will be implemented with `start_transaction()`, `commit_transaction()`, and `abort_transaction()` on a
+  `mongoac_client_session_t` object (with async variants).
+The "Convenient API for Transactions" specification is not in scope, as it would require the use of
+  [non-trivial callback functions](#rejected-callbacks).
+When no `options` argument is provided, the session object's default transaction options (specified by
+  `mongoac_session_options_set_default_transaction_options()` during construction) are applied; this is handled
+  internally by the Rust Driver.
 
-Each transaction operation (`start_transaction`, `commit_transaction`, `abort_transaction`) will be provided in two forms: async (`*_async()`) returning a `mongoac_future_t*`, and sync (no suffix) blocking via `runtime.block_on()`. The sync variants must not be called from within a `make_progress()` context, matching the sync session accessor convention.
-
-`TransactionOptions` is represented by `mongoac_transaction_options_t` (`timeoutMS` is [deferred](#deferred-timeoutms)). `NULL` for options uses session-level defaults set via `default_transaction_options` at session creation; per-call options override those defaults — the Rust driver handles the inheritance chain.
-
-Transaction state machine validation (`None → Starting → InProgress → Committed → Aborted`) will be delegated to the Rust driver, which detects invalid transitions synchronously and propagates them through the error out-parameter. Error labels (`"TransientTransactionError"`, `"UnknownTransactionCommitResult"`) are accessible via `mongoac_error_contains_label()`, which delegates directly to the Rust driver's `contains_label()` on the preserved original error.
-
-The Rust driver's `and_run()` retry-loop convenience will not be exposed; C callers will implement their own retry logic around the explicit API. If a session is destroyed while a transaction is `InProgress`, the Rust driver's `Drop` impl fires a fire-and-forget async abort task — callers that need a clean abort should call `abort_transaction` explicitly before `destroy()`.
+All state transitions and validation are handled by the Rust Driver; mongoac only needs to propagate the corresponding
+  results or errors accordingly.
+For the purpose of implementing retries for transactions (given the absence of the Convenient API), the
+  `"TransientTransactionError"` and `"UnknownTransactionCommitResult"` labels may be queried using
+  `mongoac_error_contains_label()`.
 
 <a id="causal-consistency"></a>
 
-##### Causal Consistency
+#### Causal Consistency
 
-> [!NOTE]
-> Not yet implemented in the current proof-of-concept. No session accessors are exposed.
+Causal consistency is enabled by default for explicit sessions, but is otherwise not available.
+All validation (including mutual exclusion with snapshot reads) is handled by the Rust Driver.
+The required Driver behaviors needed to implement causal consistency (e.g. `operationTime`, `afterClusterTime`, etc.)
+  is handled by the Rust Driver.
+The `mongoac_client_session_t` API may expose supported accessors such as `get_operation_time()` or
+  `advance_operation_time()` (though `get_causal_consistency()` is blocked on `ClientSession::causal_consistency()`
+  being made public).
 
-Causal consistency will follow the [Driver Causal Consistency specification](https://github.com/mongodb/specifications/blob/master/source/causal-consistency/causal-consistency.md). It is **enabled by default** for explicit sessions (via `causalConsistency: true` in session options) and **not available** for implicit sessions. Causal consistency and snapshot reads are mutually exclusive — validation is delegated to the Rust driver.
-
-The Rust driver tracks `operationTime` from every server response (including errors) and injects `afterClusterTime` into the `readConcern` of subsequent causally-consistent commands. Cluster time (`$clusterTime`) gossipping is fully automatic.
-
-Synchronous accessors (`get_operation_time`, `advance_operation_time`, `get_cluster_time`, `advance_cluster_time`, `get_causal_consistency`) will exist for cross-session token propagation and acquire the session mutex via `blocking_lock()`.
-
-> [!NOTE]
-> **Known limitation:** Until [RUST-2412](https://jira.mongodb.org/browse/RUST-2412) is released, `afterClusterTime` is not sent on write commands in causally-consistent sessions outside transactions. The `operationTime` from write responses is still captured, so subsequent reads carry the correct value, but the server cannot enforce causal ordering via oplog waiting on writes. This cannot be fixed in the FFI layer.
-
-Explicit sessions are required for causal consistency — operations without a session parameter are non-causally-consistent.
+> [!IMPORTANT]
+> Until [RUST-2412](https://jira.mongodb.org/browse/RUST-2412) is released, `afterClusterTime` is not applied to write
+>   commands in causally-consistent sessions outside a transaction.
+> The `operationTime` from write responses is still captured and applied to subsequent reads, but the server is unable
+>   to enforce the intended causal ordering.
+> There is nothing that can be done by the FFI to address this issue.
 
 ## Rationale
 
@@ -995,7 +1036,8 @@ mongoac_client_t const* client = mongoac_client_new((mongoac_string_view_t){"mon
 The Rust Driver discourages depending on `Deserialize` for options classes.
 Quoting [RUST-2022](https://jira.mongodb.org/browse/RUST-2022):
 
-> The presence of Deserialize on those structs is something of an accident of implementation of our automated testing and something we're avoiding going forward.
+> The presence of Deserialize on those structs is something of an accident of implementation of our automated testing
+>   and something we're avoiding going forward.
 
 Additionally, many option fields are `#[serde(skip)]` or `#[serde(skip_serializing)]` (e.g. `write_concern`), which
   forces the implementation to use a custom type anyways.
@@ -1057,19 +1099,12 @@ To ensure these background tasks are able to run to completion, `mongoac_client_
 
 #### Why a single `mongoac_cursor_t` type?
 
-The Rust driver's dual-type design is a borrow-checker artifact that cannot be enforced at compile time across the C FFI boundary. A single mongoac type embeds the session via `Arc<tokio::sync::Mutex<ClientSession>>` (not `parking_lot::Mutex` — `tokio::sync::MutexGuard` is `Send` and safe to hold across `.await` points), provides non-owning document access via a by-value `mongoac_bson_view_t` returned from `mongoac_cursor_current()`, and simplifies the API with uniform destroy and iteration patterns.
-
-<a id="why-dedicated-session-parameter"></a>
-
-#### Why a dedicated `mongoac_session_t *session` parameter instead of a BSON field?
-
-A dedicated pointer locks the ABI from day one: callers pass `NULL` until sessions arrive (see the [Sessions](#sessions) specification), without requiring an options-BSON migration. Embedding session as a free-form BSON key would be less discoverable for callers and harder to deprecate later. The dedicated pointer also matches the Rust driver's explicit-session API, where `&mut ClientSession` is passed as a separate argument to operation builders.
-
-<a id="why-bson-string-cursortype"></a>
-
-#### Why BSON string for CursorType?
-
-`FindOptions` currently uses a transitional `new_from_bson()` that deserializes a BSON document into the Rust struct via serde, which handles the string-to-enum mapping for `CursorType`. An integer enum would require a parallel C `#define` set and manual conversion code that duplicates serde's work. Once full typed setters are added to `mongoac_find_options_t`, `CursorType` will be exposed as a `#define` enum with a typed setter.
+The separation of `Cursor` and `SessionCursor` in the Rust Driver is motivated by type safety requirements forced by
+  the `&mut ClientSession` argument in calls to `SessionCursor::advance()`.
+Given the (generally unenforceable) contract requiring the given session object to be consistent, it is simpler for the
+  mongoac library to encapsulate this requirement by storing (a handle to) the associated session object instead.
+The `&mut ClientSession` is then obtained via `Mutex<T>` to satisfy the type system (even in the case of
+  single-thread-only programs).
 
 <a id="why-server-selection-callback"></a>
 
@@ -1082,101 +1117,6 @@ However, this callback function is unique compared to other potential callback-b
   expected to occur in this callback function (only accepts or rejects the given server candidate), and the `bool`
   result is returned to Rust Driver internals, not to the user (the user is the one providing the result).
 Therefore, an exemption to the [no callback-based API](#rejected-callbacks) principle is justifiable.
-
-### Supported Features
-
-#### Server Discovery, Selection & Operations
-
-<a id="why-typed-read-preference"></a>
-
-##### Why typed read preference?
-
-`readPreference`, `maxStalenessSeconds`, and `readPreferenceTags` are meaningful at the database, collection, and operation levels in the Rust driver. The `mongodb` crate exposes `SelectionCriteria` on `DatabaseOptions`, `CollectionOptions`, and per-operation option structs such as `FindOptions`. A typed `mongoac_read_preference_t` handle with per-variant setters for mode, max staleness (seconds), tag sets, and hedge provides stronger type checking than a BSON document and reaches `#[serde(skip)]` fields such as `selection_criteria` (unreachable via BSON deserialization). The handle is currently reused for the `selection_criteria` field on `mongoac_client_options_t`, `mongoac_database_options_t`, and `mongoac_collection_options_t`; per-operation option structs such as `FindOptions` will use it once their typed setters are added. `SelectionCriteria::Predicate` (custom closure) is exposed via a separate `mongoac_server_selector_t` handle — see [Why callbacks are avoided](#rejected-callbacks).
-
-`mongoac_read_preference_t` directly wraps `ReadPreference` (`ReadPreferenceT(ReadPreference)`), matching the struct shape of `mongoac_read_concern_t` and `mongoac_write_concern_t`. Because `ReadPreference::Primary` has no `options` slot, the option setters (`max_staleness`, `tag_sets`, `hedge`) reject `Primary` with `MONGOAC_ERROR_CODE_INVALID_ARGUMENT` — mirroring the Rust driver's `ReadPreference::with_tags` / `with_max_staleness`, which return `Err(InvalidArgument)` for `Primary`. Mode setters carry `ReadPreferenceOptions` forward when switching between non-`Primary` modes; switching to `Primary` discards them (inherent to the enum).
-
-<a id="why-internal-no-api"></a>
-
-##### Why do SDAM, retry, and step-down resilience require no C API?
-
-These behaviors are managed entirely inside the Rust driver, which exposes no public API to read topology state, toggle per-operation retry, or manually clear connection pools. Because the C caller cannot influence them through any Rust API, there is no C API surface to expose.
-
-> [!TIP]
-> - The server selection predicate is a callback exception — see [Why callbacks are avoided](#rejected-callbacks).
-> - [Why not snapshot-and-select for custom server selection?](#rejected-snapshot-select)
-
-#### Collation
-
-
-<a id="why-opcode-non-issue"></a>
-
-##### Why are opcode-based writes not a concern?
-
-The Rust driver uses `OP_MSG` exclusively — the opcode-based restriction is inapplicable.
-
-#### Sessions
-
-<a id="why-tokio-sync-mutex"></a>
-
-##### Why `tokio::sync::Mutex` instead of `parking_lot::Mutex` for session state?
-
-`parking_lot::MutexGuard` and `std::sync::MutexGuard` are `!Send` — they cannot be held across `.await` points inside a spawned task. `tokio::sync::MutexGuard` is `Send` and designed for this pattern.
-
-<a id="why-session-mutex-held-across-await"></a>
-
-##### Why hold the session mutex across the entire operation `.await`?
-
-The Rust driver's action builders consume `&mut ClientSession` for the operation's full duration. There is no intermediate point to release the lock before `.await` completes.
-
-<a id="why-session-accessors-block-on-mutex"></a>
-
-##### Why do synchronous session accessors block on the mutex instead of using `try_lock()`?
-
-`try_lock()` would return `WouldBlock` on contention, forcing callers to retry — an unfamiliar pattern for synchronous accessors and inconsistent with the rest of mongoac.
-
-<a id="why-fire-and-forget-abort"></a>
-
-##### Why fire-and-forget async abort on session destroy?
-
-This is inherent to the Rust driver's `ClientSession::Drop`. Diverging would require a synchronous abort path absent from the upstream driver.
-
-<a id="why-session-drop-sends-endsessions"></a>
-
-##### Why is no explicit `endSessions` C API needed?
-
-The Rust driver's `Client::Drop` impl handles this automatically — sending pooled session IDs (in chunks of 10,000) during client destruction.
-
-<a id="why-causal-consistency-automatic"></a>
-
-##### Why is causal consistency mostly automatic (no explicit C API)?
-
-The Rust driver's executor handles `operationTime` capture and `afterClusterTime` injection automatically — the C caller only needs to create a session with `causalConsistency: true`. Manual accessors are only needed for cross-session token propagation (`advance_operation_time`, `advance_cluster_time`), a rare use case.
-
-<a id="why-causal-consistency-writes-known-limitation"></a>
-
-##### Why is the `afterClusterTime`-on-writes limitation documented as a known limitation rather than worked around?
-
-The upstream Rust driver's executor gates `afterClusterTime` injection on `op.read_concern().supported()`, and write operations return `Feature::NotSupported`. The FFI layer cannot override this — the Rust executor controls the wire protocol. Documenting the limitation is the only viable option. Filing an upstream issue is recommended.
-
-#### Transactions
-
-<a id="why-both-async-sync-transaction"></a>
-
-##### Why both async and sync transaction variants?
-
-Transaction operations are typically called in sequence by a single thread with no concurrent work to drive — forcing every call through the future poll loop adds boilerplate without concurrency benefit. The sync variant uses `runtime.block_on()`, matching the existing pattern of `mongoac_client_start_session()` and synchronous cursor iteration. Callers who need non-blocking I/O use the `*_async()` variants.
-
-<a id="why-rust-transaction-state"></a>
-
-##### Why rely on Rust for transaction state validation?
-
-The Rust driver validates all state transitions synchronously (before any async I/O) behind the `Arc<Mutex<ClientSession>>` guard — there is no async hop for pure state errors. Duplicating the state machine on the C side would add drift risk as the Rust driver's state machine evolves, with no measurable performance benefit.
-
-<a id="why-both-default-txn-options"></a>
-
-##### Why support both session-level and per-call default transaction options?
-
-The Rust driver's inheritance chain (session-level defaults overridden by per-call values) is handled entirely on the Rust side — no C-side storage of default options is needed. Supporting both mechanisms gives C callers full flexibility while keeping the FFI boundary stateless.
 
 ## Rejected Ideas
 
