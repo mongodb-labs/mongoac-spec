@@ -1,11 +1,10 @@
 #include <mongoac/server_info.h>
 
-#include <mongoac/bson.h>
-#include <mongoac/string.h>
-
 //
 
 #include <catch2/catch_test_macros.hpp>
+#include <mongoac/bson.h>
+#include <mongoac/string.h>
 
 TEST_CASE("null info", "[mongoac][server_info]")
 {

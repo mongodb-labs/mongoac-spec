@@ -17,6 +17,9 @@
 #include <test_util/owning_ptr.hh>
 #include <test_util/string.hh>
 
+#include <array>
+#include <cstdint>
+
 using mongoac::test_util::bson_from_json;
 using mongoac::test_util::from_mongoac;
 using mongoac::test_util::make_bson_view;

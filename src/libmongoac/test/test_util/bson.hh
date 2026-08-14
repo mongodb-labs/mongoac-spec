@@ -6,7 +6,6 @@
 #include <mongoac/bson.h>
 
 #include <cstddef>
-#include <cstdint>
 #include <cstring>
 #include <utility>
 

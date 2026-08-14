@@ -2,7 +2,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <mongoac/error.h>
-#include <test_util/string.hh>
+#include <test_util/string.hh> // IWYU pragma: keep
 
 #define CHECK_MONGOAC_ERROR_CATEGORY(error, category)       \
    if (1) {                                                 \
