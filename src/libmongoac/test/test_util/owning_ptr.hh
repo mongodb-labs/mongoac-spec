@@ -81,14 +81,14 @@ make_owning_ptr(T *ptr, D *destroy)
 }
 
 // Requires `owning_ptr<mongoac_error_t, ...> error;` to be in scope.
-#define REQUIRE_MAKE_OWNING_PTR(ptr, destroy)                                   \
-   [&, error = static_cast<::mongoac_error_t *>(error)] {                       \
-      auto ret = ::mongoac::test_util::make_owning_ptr((ptr), (destroy));       \
-      CHECKED_IF(::mongoac_error_code(error) != 0)                              \
-      {                                                                         \
-         FAIL(::mongoac::test_util::to_string(::mongoac_error_message(error))); \
-      }                                                                         \
-      return ret;                                                               \
+#define REQUIRE_MAKE_OWNING_PTR(ptr, destroy)                                              \
+   [&, error = static_cast<::mongoac_error_t *>(error)] {                                  \
+      auto ret = ::mongoac::test_util::make_owning_ptr((ptr), (destroy));                  \
+      CHECKED_IF(::mongoac_error_code(error) != 0)                                         \
+      {                                                                                    \
+         FAIL(::mongoac::test_util::owning_string(::mongoac_error_message(error)).view()); \
+      }                                                                                    \
+      return ret;                                                                          \
    }()
 
 } // namespace test_util

@@ -1,6 +1,7 @@
 use crate::bson::BsonViewT;
 use crate::error::{ErrorCodeT, ErrorT};
 use crate::private::macros::*;
+use crate::string::StringViewT;
 
 use mongodb::bson::Document;
 use mongodb::options::{AuthMechanism, Credential};
@@ -42,37 +43,37 @@ pub extern "C" fn mongoac_credential_destroy(cred: *mut CredentialT) {
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_credential_set_username(
     cred: *mut CredentialT,
-    v: *const std::ffi::c_char,
+    v: StringViewT,
     error: *mut ErrorT,
 ) {
     let error = safe_optional_error_as_mut!(error);
     let cred = safe_as_mut_with_error!(cred, error);
 
-    cred.0.username = safe_optional_cstr_from_ptr_with_error!(v, error).map(Into::into);
+    cred.0.username = safe_optional_string_view_with_error!(v, error).map(Into::into);
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_credential_set_source(
     cred: *mut CredentialT,
-    v: *const std::ffi::c_char,
+    v: StringViewT,
     error: *mut ErrorT,
 ) {
     let error = safe_optional_error_as_mut!(error);
     let cred = safe_as_mut_with_error!(cred, error);
 
-    cred.0.source = safe_optional_cstr_from_ptr_with_error!(v, error).map(Into::into);
+    cred.0.source = safe_optional_string_view_with_error!(v, error).map(Into::into);
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_credential_set_password(
     cred: *mut CredentialT,
-    v: *const std::ffi::c_char,
+    v: StringViewT,
     error: *mut ErrorT,
 ) {
     let error = safe_optional_error_as_mut!(error);
     let cred = safe_as_mut_with_error!(cred, error);
 
-    cred.0.password = safe_optional_cstr_from_ptr_with_error!(v, error).map(Into::into);
+    cred.0.password = safe_optional_string_view_with_error!(v, error).map(Into::into);
 }
 
 #[unsafe(no_mangle)]

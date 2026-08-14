@@ -7,11 +7,13 @@
 #include <test_util/bson.hh>
 #include <test_util/error.hh>
 #include <test_util/owning_ptr.hh>
+#include <test_util/string.hh>
 
 #include <cstdint>
 
 using mongoac::test_util::bson_from_json;
 using mongoac::test_util::make_owning_ptr;
+using mongoac::test_util::to_mongoac;
 
 TEST_CASE("new", "[mongoac][credential]")
 {
@@ -38,19 +40,19 @@ TEST_CASE("set_username", "[mongoac][credential]")
 
    SECTION("null options")
    {
-      mongoac_credential_set_username(nullptr, "user", error);
+      mongoac_credential_set_username(nullptr, to_mongoac("user"), error);
       REQUIRE_MONGOAC_INVALID_ARGUMENT(error);
    }
 
    SECTION("null string clears")
    {
-      mongoac_credential_set_username(cred, nullptr, error);
+      mongoac_credential_set_username(cred, {}, error);
       CHECK_MONGOAC_OK(error);
    }
 
    SECTION("valid")
    {
-      mongoac_credential_set_username(cred, "user", error);
+      mongoac_credential_set_username(cred, to_mongoac("user"), error);
       CHECK_MONGOAC_OK(error);
    }
 }
@@ -62,13 +64,13 @@ TEST_CASE("set_source", "[mongoac][credential]")
 
    SECTION("null string clears")
    {
-      mongoac_credential_set_source(cred, nullptr, error);
+      mongoac_credential_set_source(cred, {}, error);
       CHECK_MONGOAC_OK(error);
    }
 
    SECTION("valid")
    {
-      mongoac_credential_set_source(cred, "admin", error);
+      mongoac_credential_set_source(cred, to_mongoac("admin"), error);
       CHECK_MONGOAC_OK(error);
    }
 }
@@ -80,13 +82,13 @@ TEST_CASE("set_password", "[mongoac][credential]")
 
    SECTION("null string clears")
    {
-      mongoac_credential_set_password(cred, nullptr, error);
+      mongoac_credential_set_password(cred, {}, error);
       CHECK_MONGOAC_OK(error);
    }
 
    SECTION("valid")
    {
-      mongoac_credential_set_password(cred, "pass", error);
+      mongoac_credential_set_password(cred, to_mongoac("pass"), error);
       CHECK_MONGOAC_OK(error);
    }
 }

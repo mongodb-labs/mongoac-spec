@@ -4,8 +4,10 @@
 #include <mongoac/error.h>
 #include <test_util/error.hh>
 #include <test_util/owning_ptr.hh>
+#include <test_util/string.hh>
 
 using mongoac::test_util::make_owning_ptr;
+using mongoac::test_util::to_mongoac;
 
 TEST_CASE("new", "[mongoac][write_concern]")
 {
@@ -66,19 +68,19 @@ TEST_CASE("set_w_custom", "[mongoac][write_concern]")
 
    SECTION("null handle")
    {
-      mongoac_write_concern_set_w_custom(nullptr, "custom", error);
+      mongoac_write_concern_set_w_custom(nullptr, to_mongoac("custom"), error);
       REQUIRE_MONGOAC_INVALID_ARGUMENT(error);
    }
 
    SECTION("null string")
    {
-      mongoac_write_concern_set_w_custom(wc, nullptr, error);
+      mongoac_write_concern_set_w_custom(wc, {}, error);
       REQUIRE_MONGOAC_INVALID_ARGUMENT(error);
    }
 
    SECTION("valid")
    {
-      mongoac_write_concern_set_w_custom(wc, "custom", error);
+      mongoac_write_concern_set_w_custom(wc, to_mongoac("custom"), error);
       CHECK_MONGOAC_OK(error);
    }
 }

@@ -1,7 +1,6 @@
-use std::ffi::c_char;
-
 use crate::error::ErrorT;
 use crate::private::macros::*;
+use crate::string::StringViewT;
 
 use mongodb::options::ReadConcern;
 
@@ -45,12 +44,12 @@ pub extern "C" fn mongoac_read_concern_set_level_snapshot(rc: *mut ReadConcernT)
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_read_concern_set_level_string(
     rc: *mut ReadConcernT,
-    v: *const c_char,
+    v: StringViewT,
     error: *mut ErrorT,
 ) {
     let error = safe_optional_error_as_mut!(error);
     let rc = safe_as_mut_with_error!(rc, error);
-    let v = safe_cstr_from_ptr_with_error!(v, error);
+    let v = safe_string_view_with_error!(v, error);
 
     rc.0 = ReadConcern::custom(v);
 }

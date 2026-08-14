@@ -1,5 +1,6 @@
 use crate::error::ErrorT;
 use crate::private::macros::*;
+use crate::string::StringViewT;
 
 use mongodb::options::{Acknowledgment, WriteConcern};
 use std::time::Duration;
@@ -29,12 +30,12 @@ pub extern "C" fn mongoac_write_concern_set_w_nodes(wc: *mut WriteConcernT, v: u
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_write_concern_set_w_custom(
     wc: *mut WriteConcernT,
-    v: *const std::ffi::c_char,
+    v: StringViewT,
     error: *mut ErrorT,
 ) {
     let error = safe_optional_error_as_mut!(error);
     let wc = safe_as_mut_with_error!(wc, error);
-    let v = safe_cstr_from_ptr_with_error!(v, error);
+    let v = safe_string_view_with_error!(v, error);
 
     wc.0.w = Some(Acknowledgment::Custom(v.to_string()));
 }

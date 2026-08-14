@@ -9,10 +9,12 @@
 #include <mongoac/runtime.h>
 #include <test_util/bson.hh>
 #include <test_util/owning_ptr.hh>
+#include <test_util/string.hh>
 
 #include <string>
 
 using mongoac::test_util::make_owning_ptr;
+using mongoac::test_util::to_mongoac;
 
 TEST_CASE("list_databases_async", "[mongoac][client]")
 {
@@ -31,7 +33,7 @@ TEST_CASE("list_databases_async", "[mongoac][client]")
 
    SECTION("valid")
    {
-      auto const client = mongoac_client_new("mongodb://localhost:27017", nullptr);
+      auto const client = mongoac_client_new(to_mongoac("mongodb://localhost:27017"), nullptr);
       REQUIRE(client != nullptr);
 
       auto const future = mongoac_client_list_databases_async(client, nullptr, nullptr, nullptr);
@@ -43,7 +45,7 @@ TEST_CASE("list_databases_async", "[mongoac][client]")
 
    SECTION("valid with options")
    {
-      auto const client = mongoac_client_new("mongodb://localhost:27017", nullptr);
+      auto const client = mongoac_client_new(to_mongoac("mongodb://localhost:27017"), nullptr);
       REQUIRE(client != nullptr);
 
       auto const opts = make_owning_ptr(mongoac_list_databases_options_new(), &mongoac_list_databases_options_destroy);
@@ -75,7 +77,7 @@ TEST_CASE("list_database_names_async", "[mongoac][client]")
 
    SECTION("null options")
    {
-      auto const client = mongoac_client_new("mongodb://localhost:27017", nullptr);
+      auto const client = mongoac_client_new(to_mongoac("mongodb://localhost:27017"), nullptr);
       REQUIRE(client != nullptr);
 
       auto const future = mongoac_client_list_database_names_async(client, nullptr, nullptr, nullptr);
@@ -90,7 +92,8 @@ TEST_CASE("list_database_names_async", "[mongoac][client]")
 TEST_CASE("list_databases_async returns valid BSON", "[mongoac][client][live-server]")
 {
    auto const error = mongoac_error_new();
-   auto const client = mongoac_client_new("mongodb://localhost:27017/?serverSelectionTimeoutMS=2000", nullptr);
+   auto const client =
+      mongoac_client_new(to_mongoac("mongodb://localhost:27017/?serverSelectionTimeoutMS=2000"), nullptr);
    REQUIRE(client != nullptr);
 
    auto const runtime = mongoac_client_get_runtime(client);

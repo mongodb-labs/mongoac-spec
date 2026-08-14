@@ -19,6 +19,7 @@ use crate::private::macros::*;
 use crate::replace_options::ReplaceOptionsT;
 use crate::runtime::RuntimeT;
 use crate::spawn;
+use crate::string::StringViewT;
 use crate::update_options::UpdateOptionsT;
 use crate::{cursor_op_with_session, op_with_session};
 
@@ -31,8 +32,6 @@ use mongodb::options::{
 };
 use mongodb::results::InsertManyResult;
 
-use std::ffi::c_char;
-
 pub struct CollectionT {
     inner: Collection<RawDocumentBuf>,
     runtime: RuntimeT,
@@ -41,12 +40,12 @@ pub struct CollectionT {
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_database_get_collection(
     database: *const DatabaseT,
-    name: *const c_char,
+    name: StringViewT,
     error: *mut ErrorT,
 ) -> *mut CollectionT {
     let error = safe_optional_error_as_mut!(error);
     let database = safe_as_ref_with_error!(database, error);
-    let name = safe_cstr_from_ptr_with_error!(name, error);
+    let name = safe_string_view_with_error!(name, error);
 
     Box::into_raw(Box::new(CollectionT::new(database, name)))
 }
@@ -54,13 +53,13 @@ pub extern "C" fn mongoac_database_get_collection(
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_database_get_collection_with_options(
     database: *const DatabaseT,
-    name: *const c_char,
+    name: StringViewT,
     options: *const CollectionOptionsT,
     error: *mut ErrorT,
 ) -> *mut CollectionT {
     let error = safe_optional_error_as_mut!(error);
     let database = safe_as_ref_with_error!(database, error);
-    let name = safe_cstr_from_ptr_with_error!(name, error);
+    let name = safe_string_view_with_error!(name, error);
     let options = safe_optional_as_ref!(options);
 
     Box::into_raw(Box::new(CollectionT::new_with_options(
@@ -582,7 +581,7 @@ pub extern "C" fn mongoac_collection_estimated_document_count(
 pub extern "C" fn mongoac_collection_distinct_async(
     collection: *const CollectionT,
     session: *mut ClientSessionT,
-    field_name: *const c_char,
+    field_name: StringViewT,
     filter: BsonViewT,
     options: *const DistinctOptionsT,
     error: *mut ErrorT,
@@ -590,7 +589,7 @@ pub extern "C" fn mongoac_collection_distinct_async(
     let error = safe_optional_error_as_mut!(error);
     let collection = safe_as_ref_with_error!(collection, error);
     let session = safe_optional_as_mut!(session);
-    let field_name = safe_cstr_from_ptr_with_error!(field_name, error);
+    let field_name = safe_string_view_with_error!(field_name, error);
     let filter = safe_optional_bson_view!(filter).unwrap_or(BsonViewT::empty_doc());
     let options = safe_optional_as_ref!(options);
 
@@ -606,7 +605,7 @@ pub extern "C" fn mongoac_collection_distinct_async(
 pub extern "C" fn mongoac_collection_distinct(
     collection: *const CollectionT,
     session: *mut ClientSessionT,
-    field_name: *const c_char,
+    field_name: StringViewT,
     filter: BsonViewT,
     options: *const DistinctOptionsT,
     error: *mut ErrorT,
@@ -614,7 +613,7 @@ pub extern "C" fn mongoac_collection_distinct(
     let error = safe_optional_error_as_mut!(error);
     let collection = safe_as_ref_with_error!(collection, error);
     let session = safe_optional_as_mut!(session);
-    let field_name = safe_cstr_from_ptr_with_error!(field_name, error);
+    let field_name = safe_string_view_with_error!(field_name, error);
     let filter = safe_optional_bson_view!(filter).unwrap_or(BsonViewT::empty_doc());
     let options = safe_optional_as_ref!(options);
 

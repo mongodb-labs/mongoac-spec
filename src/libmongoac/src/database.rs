@@ -13,6 +13,7 @@ use crate::run_command_options::RunCommandOptionsT;
 use crate::run_cursor_command_options::RunCursorCommandOptionsT;
 use crate::runtime::RuntimeT;
 use crate::spawn;
+use crate::string::StringViewT;
 use crate::{cursor_op_with_session, op_with_session};
 
 use crate::client::{ClientT, strings_to_bson};
@@ -22,7 +23,6 @@ use mongodb::options::{
     CreateCollectionOptions, DatabaseOptions, DropDatabaseOptions, ListCollectionsOptions,
     RunCommandOptions, RunCursorCommandOptions,
 };
-use std::ffi::c_char;
 
 pub struct DatabaseT {
     inner: Database,
@@ -32,13 +32,13 @@ pub struct DatabaseT {
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_client_get_database(
     client: *const ClientT,
-    name: *const c_char,
+    name: StringViewT,
     options: *const DatabaseOptionsT,
     error: *mut ErrorT,
 ) -> *mut DatabaseT {
     let error = safe_optional_error_as_mut!(error);
     let client = safe_as_ref_with_error!(client, error);
-    let name = safe_cstr_from_ptr_with_error!(name, error);
+    let name = safe_string_view_with_error!(name, error);
     let options = safe_optional_as_ref!(options);
 
     Box::into_raw(Box::new(DatabaseT::new(
@@ -89,14 +89,14 @@ pub extern "C" fn mongoac_database_drop(
 pub extern "C" fn mongoac_database_create_collection_async(
     database: *const DatabaseT,
     session: *mut ClientSessionT,
-    name: *const c_char,
+    name: StringViewT,
     options: *const CreateCollectionOptionsT,
     error: *mut ErrorT,
 ) -> *mut FutureT {
     let error = safe_optional_error_as_mut!(error);
     let database = safe_as_ref_with_error!(database, error);
     let session = safe_optional_as_mut!(session);
-    let name = safe_cstr_from_ptr_with_error!(name, error);
+    let name = safe_string_view_with_error!(name, error);
     let options = safe_optional_as_ref!(options);
     let create_opts = options.map(Into::into);
 
@@ -108,14 +108,14 @@ pub extern "C" fn mongoac_database_create_collection_async(
 pub extern "C" fn mongoac_database_create_collection(
     database: *const DatabaseT,
     session: *mut ClientSessionT,
-    name: *const c_char,
+    name: StringViewT,
     options: *const CreateCollectionOptionsT,
     error: *mut ErrorT,
 ) {
     let error = safe_optional_error_as_mut!(error);
     let database = safe_as_ref_with_error!(database, error);
     let session = safe_optional_as_mut!(session);
-    let name = safe_cstr_from_ptr_with_error!(name, error);
+    let name = safe_string_view_with_error!(name, error);
     let options = safe_optional_as_ref!(options);
     let create_opts = options.map(Into::into);
 

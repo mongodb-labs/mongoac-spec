@@ -8,6 +8,7 @@ use crate::future::FutureT;
 use crate::list_databases_options::ListDatabasesOptionsT;
 use crate::runtime::RuntimeT;
 use crate::session_options::SessionOptionsT;
+use crate::string::StringViewT;
 use crate::version::{MONGOAC_BUILD_PLATFORM, MONGOAC_VERSION_FULL};
 use crate::{op_with_session, spawn};
 
@@ -23,7 +24,6 @@ use mongodb::results::DatabaseSpecification;
 
 use parking_lot::Mutex;
 use std::collections::VecDeque;
-use std::ffi::c_char;
 use std::sync::Arc;
 
 pub struct ClientT {
@@ -33,9 +33,9 @@ pub struct ClientT {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn mongoac_client_new(conn_str: *const c_char, error: *mut ErrorT) -> *mut ClientT {
+pub extern "C" fn mongoac_client_new(conn_str: StringViewT, error: *mut ErrorT) -> *mut ClientT {
     let error = safe_optional_error_as_mut!(error);
-    let conn_str = safe_cstr_from_ptr_with_error!(conn_str, error);
+    let conn_str = safe_string_view_with_error!(conn_str, error);
 
     Box::into_raw(Box::new(safe_error!(ClientT::new(conn_str), error)))
 }
@@ -62,17 +62,17 @@ pub extern "C" fn mongoac_client_get_runtime(client: *const ClientT) -> *mut Run
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_client_append_metadata(
     client: *mut ClientT,
-    name: *const c_char,
-    version: *const c_char,
-    platform: *const c_char,
+    name: StringViewT,
+    version: StringViewT,
+    platform: StringViewT,
     error: *mut ErrorT,
 ) {
     let error = safe_optional_error_as_mut!(error);
     let client = safe_as_mut_with_error!(client, error);
 
-    let name = safe_optional_cstr_from_ptr_with_error!(name, error).unwrap_or_default();
-    let version = safe_optional_cstr_from_ptr_with_error!(version, error);
-    let platform = safe_optional_cstr_from_ptr_with_error!(platform, error);
+    let name = safe_optional_string_view_with_error!(name, error).unwrap_or_default();
+    let version = safe_optional_string_view_with_error!(version, error);
+    let platform = safe_optional_string_view_with_error!(platform, error);
 
     safe_error!(client.append_metadata(name, version, platform), error);
 }

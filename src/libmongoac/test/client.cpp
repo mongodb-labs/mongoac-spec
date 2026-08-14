@@ -11,48 +11,50 @@
 #include <test_util/owning_ptr.hh>
 #include <test_util/string.hh>
 
+using mongoac::test_util::from_mongoac;
 using mongoac::test_util::make_owning_ptr;
 using mongoac::test_util::owning_bson;
-using mongoac::test_util::to_string;
+using mongoac::test_util::owning_string;
+using mongoac::test_util::to_mongoac;
 
 TEST_CASE("new", "[mongoac][client]")
 {
    SECTION("nullptr")
    {
       auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
-      auto const client = mongoac_client_new(nullptr, error);
+      auto const client = mongoac_client_new({}, error);
 
       CHECK(client == nullptr);
 
       CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_MONGOAC);
-      CHECK(to_string(mongoac_error_message(error)) != "");
+      CHECK(owning_string(mongoac_error_message(error)).view() != "");
    }
 
    SECTION("invalid URI")
    {
       auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
-      auto const client = mongoac_client_new("not-a-uri", error);
+      auto const client = mongoac_client_new(to_mongoac("not-a-uri"), error);
 
       CHECK(client == nullptr);
 
       CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_RUST);
-      CHECK(to_string(mongoac_error_message(error)) != "");
+      CHECK(owning_string(mongoac_error_message(error)).view() != "");
    }
 
    SECTION("invalid UTF-8")
    {
       auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
-      auto const client = mongoac_client_new("\x80", error);
+      auto const client = mongoac_client_new(to_mongoac("\x80"), error);
 
       CHECK(client == nullptr);
       CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_MONGOAC);
       CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_INVALID_ARGUMENT);
-      CHECK_THAT(to_string(mongoac_error_message(error)), Catch::Matchers::ContainsSubstring("UTF-8"));
+      CHECK_THAT(owning_string(mongoac_error_message(error)), Catch::Matchers::ContainsSubstring("UTF-8"));
    }
 
    SECTION("valid URI")
    {
-      auto const client = mongoac_client_new("mongodb://localhost:27017", nullptr);
+      auto const client = mongoac_client_new(to_mongoac("mongodb://localhost:27017"), nullptr);
 
       CHECK(client != nullptr);
 
@@ -116,7 +118,7 @@ TEST_CASE("get_runtime", "[mongoac][client]")
    SECTION("valid")
    {
       auto const client =
-         make_owning_ptr(mongoac_client_new("mongodb://localhost:27017", nullptr), &mongoac_client_destroy);
+         make_owning_ptr(mongoac_client_new(to_mongoac("mongodb://localhost:27017"), nullptr), &mongoac_client_destroy);
       REQUIRE(client != nullptr);
 
       auto const runtime = make_owning_ptr(mongoac_client_get_runtime(client), &mongoac_runtime_destroy);
@@ -126,13 +128,13 @@ TEST_CASE("get_runtime", "[mongoac][client]")
 
 TEST_CASE("append_metadata", "[mongoac][client]")
 {
-   auto const client = mongoac_client_new("mongodb://localhost:27017", nullptr);
+   auto const client = mongoac_client_new(to_mongoac("mongodb://localhost:27017"), nullptr);
    REQUIRE(client != nullptr);
 
    SECTION("null")
    {
       auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
-      mongoac_client_append_metadata(nullptr, "name", nullptr, nullptr, error);
+      mongoac_client_append_metadata(nullptr, to_mongoac("name"), {}, {}, error);
 
       CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_MONGOAC);
       CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_INVALID_ARGUMENT);
@@ -141,7 +143,7 @@ TEST_CASE("append_metadata", "[mongoac][client]")
    SECTION("null name")
    {
       auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
-      mongoac_client_append_metadata(client, nullptr, nullptr, nullptr, error);
+      mongoac_client_append_metadata(client, {}, {}, {}, error);
 
       CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_NONE);
       CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_OK);
@@ -150,7 +152,7 @@ TEST_CASE("append_metadata", "[mongoac][client]")
    SECTION("with delimiter")
    {
       auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
-      mongoac_client_append_metadata(client, "bad|name", nullptr, nullptr, error);
+      mongoac_client_append_metadata(client, to_mongoac("bad|name"), {}, {}, error);
 
       CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_NONE);
       CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_OK);
@@ -159,7 +161,7 @@ TEST_CASE("append_metadata", "[mongoac][client]")
    SECTION("invalid UTF-8 name")
    {
       auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
-      mongoac_client_append_metadata(client, "\x80", nullptr, nullptr, error);
+      mongoac_client_append_metadata(client, to_mongoac("\x80"), {}, {}, error);
 
       CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_MONGOAC);
       CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_INVALID_ARGUMENT);
@@ -168,7 +170,7 @@ TEST_CASE("append_metadata", "[mongoac][client]")
    SECTION("invalid UTF-8 version")
    {
       auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
-      mongoac_client_append_metadata(client, "wrapper", "\x80", nullptr, error);
+      mongoac_client_append_metadata(client, to_mongoac("wrapper"), to_mongoac("\x80"), {}, error);
 
       CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_MONGOAC);
       CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_INVALID_ARGUMENT);
@@ -177,7 +179,7 @@ TEST_CASE("append_metadata", "[mongoac][client]")
    SECTION("valid name")
    {
       auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
-      mongoac_client_append_metadata(client, "wrapper", nullptr, nullptr, error);
+      mongoac_client_append_metadata(client, to_mongoac("wrapper"), {}, {}, error);
 
       CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_NONE);
       CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_OK);
@@ -186,7 +188,7 @@ TEST_CASE("append_metadata", "[mongoac][client]")
    SECTION("all valid")
    {
       auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
-      mongoac_client_append_metadata(client, "wrapper", "1.2.3", "linux", error);
+      mongoac_client_append_metadata(client, to_mongoac("wrapper"), to_mongoac("1.2.3"), to_mongoac("linux"), error);
 
       CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_NONE);
       CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_OK);
@@ -219,7 +221,7 @@ TEST_CASE("shutdown", "[mongoac][client]")
    SECTION("valid client")
    {
       auto const client =
-         make_owning_ptr(mongoac_client_new("mongodb://localhost:27017", nullptr), &mongoac_client_destroy);
+         make_owning_ptr(mongoac_client_new(to_mongoac("mongodb://localhost:27017"), nullptr), &mongoac_client_destroy);
       REQUIRE(client != nullptr);
 
       mongoac_client_shutdown(client, error);
@@ -231,7 +233,7 @@ TEST_CASE("shutdown", "[mongoac][client]")
          CHECK_FALSE(owning_bson(mongoac_client_list_databases(client, nullptr, nullptr, error)));
          CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_RUST);
          CHECK(mongoac_error_code(error) != MONGOAC_ERROR_CODE_OK);
-         CHECK_THAT(to_string(mongoac_error_message(error)), Catch::Matchers::ContainsSubstring("shut down"));
+         CHECK_THAT(owning_string(mongoac_error_message(error)), Catch::Matchers::ContainsSubstring("shut down"));
       }
    }
 }
@@ -251,7 +253,7 @@ TEST_CASE("shutdown_async", "[mongoac][client]")
    SECTION("valid client")
    {
       auto const client =
-         make_owning_ptr(mongoac_client_new("mongodb://localhost:27017", nullptr), &mongoac_client_destroy);
+         make_owning_ptr(mongoac_client_new(to_mongoac("mongodb://localhost:27017"), nullptr), &mongoac_client_destroy);
       REQUIRE(client != nullptr);
 
       auto const runtime = make_owning_ptr(mongoac_client_get_runtime(client), &mongoac_runtime_destroy);
@@ -272,7 +274,7 @@ TEST_CASE("shutdown_async", "[mongoac][client]")
          CHECK_FALSE(owning_bson(mongoac_client_list_databases(client, nullptr, nullptr, error)));
          CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_RUST);
          CHECK(mongoac_error_code(error) != MONGOAC_ERROR_CODE_OK);
-         CHECK_THAT(to_string(mongoac_error_message(error)), Catch::Matchers::ContainsSubstring("shut down"));
+         CHECK_THAT(owning_string(mongoac_error_message(error)), Catch::Matchers::ContainsSubstring("shut down"));
       }
    }
 }

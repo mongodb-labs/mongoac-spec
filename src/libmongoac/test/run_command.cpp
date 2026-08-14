@@ -10,19 +10,21 @@
 #include <test_util/bson.hh>
 #include <test_util/error.hh>
 #include <test_util/owning_ptr.hh>
+#include <test_util/string.hh>
 
 using mongoac::test_util::bson_from_json;
 using mongoac::test_util::make_bson_view;
 using mongoac::test_util::make_owning_ptr;
 using mongoac::test_util::owning_bson;
+using mongoac::test_util::to_mongoac;
 
 TEST_CASE("run_command", "[mongoac][database][run_command]")
 {
    auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
-   auto const client =
-      REQUIRE_MAKE_OWNING_PTR(mongoac_client_new("mongodb://localhost:27017", nullptr), &mongoac_client_destroy);
+   auto const client = REQUIRE_MAKE_OWNING_PTR(mongoac_client_new(to_mongoac("mongodb://localhost:27017"), nullptr),
+                                               &mongoac_client_destroy);
    auto const runtime = REQUIRE_MAKE_OWNING_PTR(mongoac_client_get_runtime(client), &mongoac_runtime_destroy);
-   auto const db = REQUIRE_MAKE_OWNING_PTR(mongoac_client_get_database(client, "admin", nullptr, nullptr),
+   auto const db = REQUIRE_MAKE_OWNING_PTR(mongoac_client_get_database(client, to_mongoac("admin"), nullptr, nullptr),
                                            &mongoac_database_destroy);
 
    SECTION("null database")
@@ -69,10 +71,10 @@ TEST_CASE("run_command", "[mongoac][database][run_command]")
 TEST_CASE("run_cursor_command", "[mongoac][database][run_cursor_command]")
 {
    auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
-   auto const client =
-      REQUIRE_MAKE_OWNING_PTR(mongoac_client_new("mongodb://localhost:27017", nullptr), &mongoac_client_destroy);
+   auto const client = REQUIRE_MAKE_OWNING_PTR(mongoac_client_new(to_mongoac("mongodb://localhost:27017"), nullptr),
+                                               &mongoac_client_destroy);
    auto const runtime = REQUIRE_MAKE_OWNING_PTR(mongoac_client_get_runtime(client), &mongoac_runtime_destroy);
-   auto const db = REQUIRE_MAKE_OWNING_PTR(mongoac_client_get_database(client, "admin", nullptr, nullptr),
+   auto const db = REQUIRE_MAKE_OWNING_PTR(mongoac_client_get_database(client, to_mongoac("admin"), nullptr, nullptr),
                                            &mongoac_database_destroy);
 
    SECTION("null database")

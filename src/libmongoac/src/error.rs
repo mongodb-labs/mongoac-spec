@@ -1,5 +1,5 @@
 use crate::private::macros::*;
-use crate::string::StringT;
+use crate::string::{StringT, StringViewT};
 
 use mongodb::error::{ErrorKind, WriteFailure};
 use strum::EnumMessage;
@@ -89,11 +89,8 @@ pub extern "C" fn mongoac_error_message(error: *const ErrorT) -> StringT {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn mongoac_error_contains_label(
-    error: *const ErrorT,
-    label: *const std::ffi::c_char,
-) -> bool {
-    safe_as_ref!(error).contains_label(safe_cstr_from_ptr!(label))
+pub extern "C" fn mongoac_error_contains_label(error: *const ErrorT, label: StringViewT) -> bool {
+    safe_as_ref!(error).contains_label(safe_string_view!(label))
 }
 
 #[derive(Clone, Debug, Default)]

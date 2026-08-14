@@ -103,82 +103,6 @@ macro_rules! safe_as_ref_with_error {
 }
 
 #[macro_export]
-macro_rules! safe_cstr_from_ptr {
-    ($ptr:expr) => {{
-        let ptr = $ptr;
-        if ptr.is_null() {
-            return Default::default();
-        }
-
-        match unsafe { std::ffi::CStr::from_ptr(ptr) }.to_str() {
-            Ok(s) => s,
-            Err(_) => return Default::default(),
-        }
-    }};
-}
-
-#[macro_export]
-macro_rules! safe_cstr_from_ptr_with_error {
-    ($ptr:expr, $error:expr) => {{
-        let ptr = $ptr;
-        if ptr.is_null() {
-            $crate::private::safety::invalid_argument(
-                $error,
-                concat!(stringify!($ptr), ": must not be null"),
-            );
-            return Default::default();
-        }
-
-        match unsafe { std::ffi::CStr::from_ptr(ptr) }.to_str() {
-            Ok(s) => s,
-            Err(_) => {
-                $crate::private::safety::invalid_argument(
-                    $error,
-                    concat!(stringify!($ptr), ": must be valid UTF-8"),
-                );
-                return Default::default();
-            }
-        }
-    }};
-}
-
-#[macro_export]
-macro_rules! safe_optional_cstr_from_ptr {
-    ($ptr:expr) => {{
-        let ptr = $ptr;
-        if ptr.is_null() {
-            None
-        } else {
-            match unsafe { std::ffi::CStr::from_ptr(ptr) }.to_str() {
-                Ok(s) => Some(s),
-                Err(_) => None,
-            }
-        }
-    }};
-}
-
-#[macro_export]
-macro_rules! safe_optional_cstr_from_ptr_with_error {
-    ($ptr:expr, $error:expr) => {{
-        let ptr = $ptr;
-        if ptr.is_null() {
-            None
-        } else {
-            match unsafe { std::ffi::CStr::from_ptr(ptr) }.to_str() {
-                Ok(s) => Some(s),
-                Err(_) => {
-                    $crate::private::safety::invalid_argument(
-                        $error,
-                        concat!(stringify!($ptr), ": must be valid UTF-8"),
-                    );
-                    return Default::default();
-                }
-            }
-        }
-    }};
-}
-
-#[macro_export]
 macro_rules! safe_optional_bson_opts_with_error {
     ($target:ty, $options:expr, $error:expr) => {{
         let options = safe_optional_bson_view!($options);
@@ -244,6 +168,97 @@ macro_rules! safe_bson_view_array_as_vec_with_error {
             vec.push(*e);
         }
         vec
+    }};
+}
+
+#[macro_export]
+macro_rules! safe_string_view {
+    ($sv:expr) => {{
+        let sv: $crate::string::StringViewT = $sv;
+
+        if sv.data.is_null() {
+            return Default::default();
+        }
+
+        // SAFETY: `data` and `len` validity is an uncheckable precondition.
+        match std::str::from_utf8(unsafe {
+            std::slice::from_raw_parts(sv.data.cast::<u8>(), sv.len)
+        }) {
+            Ok(s) => s,
+            Err(_) => return Default::default(),
+        }
+    }};
+}
+
+#[macro_export]
+macro_rules! safe_string_view_with_error {
+    ($sv:expr, $error:expr) => {{
+        let sv: $crate::string::StringViewT = $sv;
+
+        if sv.data.is_null() {
+            $crate::private::safety::invalid_argument(
+                $error,
+                concat!(stringify!($sv), ": must not be null"),
+            );
+            return Default::default();
+        }
+
+        // SAFETY: `data` and `len` validity is an uncheckable precondition.
+        match std::str::from_utf8(unsafe {
+            std::slice::from_raw_parts(sv.data.cast::<u8>(), sv.len)
+        }) {
+            Ok(s) => s,
+            Err(_) => {
+                $crate::private::safety::invalid_argument(
+                    $error,
+                    concat!(stringify!($sv), ": must be valid UTF-8"),
+                );
+                return Default::default();
+            }
+        }
+    }};
+}
+
+#[macro_export]
+macro_rules! safe_optional_string_view {
+    ($sv:expr) => {{
+        let sv: $crate::string::StringViewT = $sv;
+
+        if sv.data.is_null() {
+            None
+        } else {
+            // SAFETY: `data` and `len` validity is an uncheckable precondition.
+            match std::str::from_utf8(unsafe {
+                std::slice::from_raw_parts(sv.data.cast::<u8>(), sv.len)
+            }) {
+                Ok(s) => Some(s),
+                Err(_) => None,
+            }
+        }
+    }};
+}
+
+#[macro_export]
+macro_rules! safe_optional_string_view_with_error {
+    ($sv:expr, $error:expr) => {{
+        let sv: $crate::string::StringViewT = $sv;
+        if sv.data.is_null() {
+            None
+        } else {
+            // SAFETY: `data` and `len` validity is an uncheckable precondition.
+            match std::str::from_utf8(unsafe {
+                std::slice::from_raw_parts(sv.data.cast::<u8>(), sv.len)
+            }) {
+                Ok(s) => Some(s),
+                Err(_) => {
+                    $crate::private::safety::invalid_argument(
+                        $error,
+                        concat!(stringify!($sv), ": must be valid UTF-8"),
+                    );
+                    return Default::default();
+                }
+            }
+        }
     }};
 }
 

@@ -8,12 +8,14 @@
 #include <mongoac/server_api.h>
 #include <mongoac/server_info.h>
 #include <mongoac/server_selector.h>
-#include <mongoac/tls.h>
+#include <mongoac/tls_options.h>
 #include <mongoac/write_concern.h>
 #include <test_util/error.hh>
 #include <test_util/owning_ptr.hh>
+#include <test_util/string.hh>
 
 using mongoac::test_util::make_owning_ptr;
+using mongoac::test_util::to_mongoac;
 
 TEST_CASE("new", "[mongoac][client_options]")
 {
@@ -149,19 +151,19 @@ TEST_CASE("set_app_name", "[mongoac][client_options]")
 
    SECTION("null options")
    {
-      mongoac_client_options_set_app_name(nullptr, "app", error);
+      mongoac_client_options_set_app_name(nullptr, to_mongoac("app"), error);
       CHECK_MONGOAC_INVALID_ARGUMENT(error);
    }
 
    SECTION("null string clears")
    {
-      mongoac_client_options_set_app_name(opts, nullptr, error);
+      mongoac_client_options_set_app_name(opts, {}, error);
       CHECK_MONGOAC_OK(error);
    }
 
    SECTION("valid")
    {
-      mongoac_client_options_set_app_name(opts, "app", error);
+      mongoac_client_options_set_app_name(opts, to_mongoac("app"), error);
       CHECK_MONGOAC_OK(error);
    }
 }
@@ -306,19 +308,19 @@ TEST_CASE("add_host", "[mongoac][client_options]")
 
    SECTION("null options")
    {
-      mongoac_client_options_add_host(nullptr, "localhost");
+      mongoac_client_options_add_host(nullptr, to_mongoac("localhost"));
       SUCCEED();
    }
 
    SECTION("null host")
    {
-      mongoac_client_options_add_host(opts, nullptr);
+      mongoac_client_options_add_host(opts, {});
       SUCCEED();
    }
 
    SECTION("valid with port")
    {
-      mongoac_client_options_add_host(opts, "localhost");
+      mongoac_client_options_add_host(opts, to_mongoac("localhost"));
       SUCCEED();
    }
 }
@@ -329,25 +331,25 @@ TEST_CASE("add_host_and_port", "[mongoac][client_options]")
 
    SECTION("null options")
    {
-      mongoac_client_options_add_host_and_port(nullptr, "localhost", 27017);
+      mongoac_client_options_add_host_and_port(nullptr, to_mongoac("localhost"), 27017);
       SUCCEED();
    }
 
    SECTION("null host")
    {
-      mongoac_client_options_add_host_and_port(opts, nullptr, 27017);
+      mongoac_client_options_add_host_and_port(opts, {}, 27017);
       SUCCEED();
    }
 
    SECTION("valid with port")
    {
-      mongoac_client_options_add_host_and_port(opts, "localhost", 27018);
+      mongoac_client_options_add_host_and_port(opts, to_mongoac("localhost"), 27018);
       SUCCEED();
    }
 
    SECTION("valid with port 0")
    {
-      mongoac_client_options_add_host_and_port(opts, "localhost", 0);
+      mongoac_client_options_add_host_and_port(opts, to_mongoac("localhost"), 0);
       SUCCEED();
    }
 }
@@ -398,25 +400,26 @@ TEST_CASE("set_driver_info", "[mongoac][client_options]")
 
    SECTION("null options")
    {
-      mongoac_client_options_set_driver_info(nullptr, "lib", "1.0", "linux", error);
+      mongoac_client_options_set_driver_info(nullptr, to_mongoac("lib"), to_mongoac("1.0"), to_mongoac("linux"), error);
       CHECK_MONGOAC_INVALID_ARGUMENT(error);
    }
 
    SECTION("null name")
    {
-      mongoac_client_options_set_driver_info(opts, nullptr, nullptr, nullptr, error);
+      mongoac_client_options_set_driver_info(opts, {}, {}, {}, error);
       CHECK_MONGOAC_INVALID_ARGUMENT(error);
    }
 
    SECTION("valid name only")
    {
-      mongoac_client_options_set_driver_info(opts, "driver", nullptr, nullptr, error);
+      mongoac_client_options_set_driver_info(opts, to_mongoac("driver"), {}, {}, error);
       CHECK_MONGOAC_OK(error);
    }
 
    SECTION("valid with version and platform")
    {
-      mongoac_client_options_set_driver_info(opts, "driver", "1.2.3", "platform", error);
+      mongoac_client_options_set_driver_info(
+         opts, to_mongoac("driver"), to_mongoac("1.2.3"), to_mongoac("platform"), error);
       CHECK_MONGOAC_OK(error);
    }
 }
@@ -453,7 +456,7 @@ TEST_CASE("set_credential", "[mongoac][client_options]")
    SECTION("valid")
    {
       auto const cred = make_owning_ptr(mongoac_credential_new(), &mongoac_credential_destroy);
-      mongoac_credential_set_username(cred, "user", nullptr);
+      mongoac_credential_set_username(cred, to_mongoac("user"), nullptr);
       mongoac_credential_set_mechanism(cred, MONGOAC_AUTH_MECHANISM_SCRAM_SHA_256, nullptr);
       mongoac_client_options_set_credential(opts, cred);
       SUCCEED();

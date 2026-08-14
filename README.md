@@ -191,14 +191,15 @@ typedef struct mongoac_example_t mongoac_example_t;
 
 mongoac_example_t* mongoac_example_new();
 void mongoac_example_destroy(mongoac_example_t *example);
-mongoac_future_t* mongoac_example_async(const char *input, mongoac_error_t *error);
+mongoac_future_t* mongoac_example_async(mongoac_string_view_t input, mongoac_error_t *error);
 ```
 
 ```rs
 // example.rs
 
-use crate::error::ErrorT;   // mongoac_error_t
-use crate::future::FutureT; // mongoac_future_t
+use crate::error::ErrorT;       // mongoac_error_t
+use crate::future::FutureT;     // mongoac_future_t
+use crate::string::StringViewT; // mongoac_string_view_t
 
 // `mongoac_example_t`: renamed by cbindgen via generate-crate-headers.
 pub struct ExampleT {
@@ -221,7 +222,7 @@ pub extern "C" fn mongoac_example_destroy(example: *mut ExampleT) {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_example_async(
-  example: *mut ExampleT, input: *const c_char, error: *mut ErrorT
+  example: *mut ExampleT, input: StringViewT, error: *mut ErrorT
 ) -> *mut FutureT {
   // Layer 1: optional pointer.
   // let error = match unsafe { error.as_mut() } {
@@ -243,17 +244,19 @@ pub extern "C" fn mongoac_example_async(
   // }
   let example = safe_as_mut_with_error!(example);
 
-  // Layer 1: required UTF-8 string.
+  // Layer 1: required UTF-8 string view.
   // let input = {
-  //     if input.is_null() {
+  //     if input.data.is_null() {
   //         $crate::private::safety::invalid_argument(
   //             $error,
   //             concat!(stringify!(input), ": must not be null"),
   //         );
   //         return Default::default();
   //     }
-  //     match unsafe { std::ffi::CStr::from_ptr(input) }.to_str() {
-  //         Ok(s) => s.to_string(),
+  //     match std::str::from_utf8(unsafe {
+  //         std::slice::from_raw_parts(input.data.cast::<u8>(), input.len)
+  //     }) {
+  //         Ok(s) => s,
   //         Err(_) => {
   //             $crate::private::safety::invalid_argument(
   //                 $error,
@@ -263,7 +266,7 @@ pub extern "C" fn mongoac_example_async(
   //         }
   //     }
   // }
-  let input = safe_cstr_from_ptr_with_error!(input);
+  let input = safe_string_view_with_error!(input);
 
   // Layer 1: error handling.
   // let future = match example.async(input) {
@@ -289,7 +292,7 @@ impl ExampleT {
 
   // `drop()` is unnecessary in safe Rust.
 
-  fn async(str: String) -> FutureT {
+  fn async(input: &str) -> FutureT {
     // Layer 2: safe Rust implementation.
   }
 }
@@ -334,11 +337,10 @@ Structs such as `mongoac_cursor_t` will need to clearly document which operation
 
 #### Strings
 
-Strings returned by the FFI (e.g. `mongoac_error_message()`) are represented by simple `(ptr, len)` structs.
+Strings are represented by simple `(ptr, len)` structs in the FFI.
 Alongside the [BSON structs](#bson-structs), these are the only non-opaque structs declared in the public API.
 Their behavior mirrors that of the BSON document structs, including the **library-wide invariant** that the ptr+len pair
   satisfies the same validity and accessibility requirements as the BSON structs.
-Strings as input parameters remain simple null-terminated byte strings.
 
 > [!TIP]
 > - [Why ptr+len for strings?](#why-ptr-len-strings)
@@ -380,6 +382,9 @@ The `safe_optional_error_as_mut` macro (whose result is then passed to subsequen
 The macros which handle string-like arguments additionally validate the string is UTF-8 for Rust API compatibility:
   this is also [a language-wide invariant](https://doc.rust-lang.org/book/ch08-02-strings.html).
 These macros are expected to be used exclusively in Layer 1 (Public API) function definitions.
+
+> [!NOTE]
+> Embedded null bytes are valid UTF-8 and therefore *not* rejected by Layer 1 input validation.
 
 #### Concurrency Model
 
@@ -1013,21 +1018,6 @@ Given `str`/`String` (UTF-8, ptr+len) is the native representation used by the R
   ownership (a plain `char const*` which must be freed via mongoac instead of `free()` or `delete`).
 Using an out-parameter for one or both of the ptr+len pair would break consistency with library-wide avoidance of
   out-parameters without solving the ambiguous memory ownership problem.
-
-Input parameters (e.g. the connection string passed to `mongoac_client_new()`) use non-owning, null-terminated
-  `char const*` to avoid burdening callers with conversions to `mongoac_string_view_t`:
-
-```c
-// With char const* (current proposal):
-mongoac_client_t const* client = mongoac_client_new("mongodb://localhost:27017");
-
-// With mongoac_string_view_t:
-char const* conn_str = "mongodb://localhost:27017";
-mongoac_client_t const* client = mongoac_client_new((mongoac_string_view_t){conn_str, strlen(conn_str)});
-
-// With mongoac_string_view_t + convenient internal `strlen()`:
-mongoac_client_t const* client = mongoac_client_new((mongoac_string_view_t){"mongodb://localhost:27017"});
-```
 
 <a id="why-typed-options"></a>
 

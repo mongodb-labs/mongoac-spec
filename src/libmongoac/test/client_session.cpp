@@ -13,6 +13,7 @@
 #include <mongoac/database.h>
 #include <test_util/bson.hh>
 #include <test_util/owning_ptr.hh>
+#include <test_util/string.hh>
 
 #include <cstdint>
 #include <cstring>
@@ -20,6 +21,7 @@
 
 using mongoac::test_util::make_owning_ptr;
 using mongoac::test_util::owning_bson;
+using mongoac::test_util::to_mongoac;
 
 namespace
 {
@@ -113,8 +115,9 @@ TEST_CASE("sessions", "[mongoac][client_session]")
 
    auto const client = make_owning_ptr(mongoac_client_new_with_options(opts, nullptr), &mongoac_client_destroy);
 
-   auto const db = make_owning_ptr(mongoac_client_get_database(client, "mongoac_session_lsid", nullptr, nullptr),
-                                   &mongoac_database_destroy);
+   auto const db =
+      make_owning_ptr(mongoac_client_get_database(client, to_mongoac("mongoac_session_lsid"), nullptr, nullptr),
+                      &mongoac_database_destroy);
 
    // Clean test state.
    {

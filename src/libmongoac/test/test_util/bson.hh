@@ -131,25 +131,25 @@ class owning_bson
 } // namespace mongoac
 
 // Requires `owning_ptr<mongoac_error_t, ...> error;` to be in scope.
-#define REQUIRE_MAKE_OWNING_BSON(expr)                                          \
-   [&, error = static_cast<::mongoac_error_t *>(error)] {                       \
-      auto ret = ::mongoac::test_util::owning_bson((expr));                     \
-      CHECKED_IF(::mongoac_error_code(error) != 0)                              \
-      {                                                                         \
-         FAIL(::mongoac::test_util::to_string(::mongoac_error_message(error))); \
-      }                                                                         \
-      return ret;                                                               \
+#define REQUIRE_MAKE_OWNING_BSON(expr)                                                     \
+   [&, error = static_cast<::mongoac_error_t *>(error)] {                                  \
+      auto ret = ::mongoac::test_util::owning_bson((expr));                                \
+      CHECKED_IF(::mongoac_error_code(error) != 0)                                         \
+      {                                                                                    \
+         FAIL(::mongoac::test_util::owning_string(::mongoac_error_message(error)).view()); \
+      }                                                                                    \
+      return ret;                                                                          \
    }()
 
 // Requires `owning_ptr<mongoac_error_t, ...> error;` to be in scope.
-#define REQUIRE_BSON_VIEW(expr)                                                 \
-   [&, error = static_cast<::mongoac_error_t *>(error)] {                       \
-      auto ret = (expr);                                                        \
-      CHECKED_IF(::mongoac_error_code(error) != 0)                              \
-      {                                                                         \
-         FAIL(::mongoac::test_util::to_string(::mongoac_error_message(error))); \
-      }                                                                         \
-      bson_t bson;                                                              \
-      REQUIRE(::bson_init_static(&bson, ret.data, ret.len));                    \
-      return bson;                                                              \
+#define REQUIRE_BSON_VIEW(expr)                                                            \
+   [&, error = static_cast<::mongoac_error_t *>(error)] {                                  \
+      auto ret = (expr);                                                                   \
+      CHECKED_IF(::mongoac_error_code(error) != 0)                                         \
+      {                                                                                    \
+         FAIL(::mongoac::test_util::owning_string(::mongoac_error_message(error)).view()); \
+      }                                                                                    \
+      bson_t bson;                                                                         \
+      REQUIRE(::bson_init_static(&bson, ret.data, ret.len));                               \
+      return bson;                                                                         \
    }()

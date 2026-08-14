@@ -8,7 +8,7 @@
 
 #include <string_view>
 
-using mongoac::test_util::to_string_view;
+using mongoac::test_util::from_mongoac;
 
 TEST_CASE("macros", "[mongoac][version]")
 {
@@ -18,8 +18,8 @@ TEST_CASE("macros", "[mongoac][version]")
       CHECK(MONGOAC_VERSION_MINOR == mongoac_version_minor());
       CHECK(MONGOAC_VERSION_PATCH == mongoac_version_patch());
 
-      CHECK(to_string_view(mongoac_version()) == MONGOAC_VERSION);
-      CHECK(to_string_view(mongoac_version_prerelease()) == MONGOAC_VERSION_PRERELEASE);
+      CHECK(from_mongoac(mongoac_version()) == MONGOAC_VERSION);
+      CHECK(from_mongoac(mongoac_version_prerelease()) == MONGOAC_VERSION_PRERELEASE);
    }
 
    SECTION("hex")

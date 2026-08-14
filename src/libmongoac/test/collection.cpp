@@ -24,9 +24,10 @@
 
 using mongoac::test_util::bson_array_contains_string;
 using mongoac::test_util::bson_from_json;
+using mongoac::test_util::from_mongoac;
 using mongoac::test_util::make_owning_ptr;
 using mongoac::test_util::owning_bson;
-using mongoac::test_util::to_string;
+using mongoac::test_util::to_mongoac;
 
 TEST_CASE("drop", "[mongoac][collection]")
 {
@@ -35,13 +36,14 @@ TEST_CASE("drop", "[mongoac][collection]")
    auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
    REQUIRE(error);
 
-   auto const client =
-      REQUIRE_MAKE_OWNING_PTR(mongoac_client_new("mongodb://localhost:27017", error), &mongoac_client_destroy);
+   auto const client = REQUIRE_MAKE_OWNING_PTR(mongoac_client_new(to_mongoac("mongodb://localhost:27017"), error),
+                                               &mongoac_client_destroy);
 
    auto const runtime = REQUIRE_MAKE_OWNING_PTR(mongoac_client_get_runtime(client), &mongoac_runtime_destroy);
 
    auto const db = REQUIRE_MAKE_OWNING_PTR(
-      mongoac_client_get_database(client, "mongoac_collection_drop", nullptr, error), &mongoac_database_destroy);
+      mongoac_client_get_database(client, to_mongoac("mongoac_collection_drop"), nullptr, error),
+      &mongoac_database_destroy);
 
    // Clean test state.
    {
@@ -52,9 +54,9 @@ TEST_CASE("drop", "[mongoac][collection]")
          REQUIRE(bson_empty(names.bson_ptr()));
       }
 
-      mongoac_database_create_collection(db, nullptr, "a", nullptr, error);
-      mongoac_database_create_collection(db, nullptr, "b", nullptr, error);
-      mongoac_database_create_collection(db, nullptr, "c", nullptr, error);
+      mongoac_database_create_collection(db, nullptr, to_mongoac("a"), nullptr, error);
+      mongoac_database_create_collection(db, nullptr, to_mongoac("b"), nullptr, error);
+      mongoac_database_create_collection(db, nullptr, to_mongoac("c"), nullptr, error);
       {
          auto const names =
             REQUIRE_MAKE_OWNING_BSON(mongoac_database_list_collection_names(db, nullptr, nullptr, error));
@@ -66,11 +68,11 @@ TEST_CASE("drop", "[mongoac][collection]")
    }
 
    auto const coll_a =
-      REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, "a", error), &mongoac_collection_destroy);
+      REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, to_mongoac("a"), error), &mongoac_collection_destroy);
    auto const coll_b =
-      REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, "b", error), &mongoac_collection_destroy);
+      REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, to_mongoac("b"), error), &mongoac_collection_destroy);
    auto const coll_c =
-      REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, "c", error), &mongoac_collection_destroy);
+      REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, to_mongoac("c"), error), &mongoac_collection_destroy);
 
    SECTION("async")
    {
@@ -135,21 +137,22 @@ TEST_CASE("insert_one", "[mongoac][collection]")
    auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
    REQUIRE(error);
 
-   auto const client =
-      REQUIRE_MAKE_OWNING_PTR(mongoac_client_new("mongodb://localhost:27017", error), &mongoac_client_destroy);
+   auto const client = REQUIRE_MAKE_OWNING_PTR(mongoac_client_new(to_mongoac("mongodb://localhost:27017"), error),
+                                               &mongoac_client_destroy);
 
    auto const runtime = make_owning_ptr(mongoac_client_get_runtime(client), &mongoac_runtime_destroy);
    REQUIRE(runtime);
 
    auto const db = REQUIRE_MAKE_OWNING_PTR(
-      mongoac_client_get_database(client, "mongoac_collection_insert_one", nullptr, error), &mongoac_database_destroy);
+      mongoac_client_get_database(client, to_mongoac("mongoac_collection_insert_one"), nullptr, error),
+      &mongoac_database_destroy);
 
    // Clean test state.
    mongoac_database_drop(db, nullptr, nullptr, error);
    REQUIRE_MONGOAC_OK(error);
 
-   auto const coll =
-      REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, "coll", error), &mongoac_collection_destroy);
+   auto const coll = REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, to_mongoac("coll"), error),
+                                             &mongoac_collection_destroy);
 
    auto const doc = make_owning_ptr(bson_from_json(R"({"x": 1})"), &bson_destroy);
 
@@ -195,20 +198,21 @@ TEST_CASE("find", "[mongoac][collection]")
    auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
    REQUIRE_MONGOAC_OK(error);
 
-   auto const client =
-      REQUIRE_MAKE_OWNING_PTR(mongoac_client_new("mongodb://localhost:27017", error), &mongoac_client_destroy);
+   auto const client = REQUIRE_MAKE_OWNING_PTR(mongoac_client_new(to_mongoac("mongodb://localhost:27017"), error),
+                                               &mongoac_client_destroy);
 
    auto const runtime = REQUIRE_MAKE_OWNING_PTR(mongoac_client_get_runtime(client), &mongoac_runtime_destroy);
 
    auto const db = REQUIRE_MAKE_OWNING_PTR(
-      mongoac_client_get_database(client, "mongoac_collection_find", nullptr, error), &mongoac_database_destroy);
+      mongoac_client_get_database(client, to_mongoac("mongoac_collection_find"), nullptr, error),
+      &mongoac_database_destroy);
 
    // Clean test state.
    mongoac_database_drop(db, nullptr, nullptr, error);
    REQUIRE_MONGOAC_OK(error);
 
-   auto const coll =
-      REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, "coll", error), &mongoac_collection_destroy);
+   auto const coll = REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, to_mongoac("coll"), error),
+                                             &mongoac_collection_destroy);
 
    auto const filter = make_owning_ptr(bson_from_json(R"({"$or": [{"x": 1}, {"z": 3}]})"), &bson_destroy);
    REQUIRE(filter);
@@ -312,20 +316,21 @@ TEST_CASE("find_one", "[mongoac][collection]")
    auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
    REQUIRE(error);
 
-   auto const client =
-      REQUIRE_MAKE_OWNING_PTR(mongoac_client_new("mongodb://localhost:27017", error), &mongoac_client_destroy);
+   auto const client = REQUIRE_MAKE_OWNING_PTR(mongoac_client_new(to_mongoac("mongodb://localhost:27017"), error),
+                                               &mongoac_client_destroy);
 
    auto const runtime = REQUIRE_MAKE_OWNING_PTR(mongoac_client_get_runtime(client), &mongoac_runtime_destroy);
 
    auto const db = REQUIRE_MAKE_OWNING_PTR(
-      mongoac_client_get_database(client, "mongoac_collection_find_one", nullptr, error), &mongoac_database_destroy);
+      mongoac_client_get_database(client, to_mongoac("mongoac_collection_find_one"), nullptr, error),
+      &mongoac_database_destroy);
 
    // Clean test state.
    mongoac_database_drop(db, nullptr, nullptr, error);
    REQUIRE_MONGOAC_OK(error);
 
-   auto const coll =
-      REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, "coll", error), &mongoac_collection_destroy);
+   auto const coll = REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, to_mongoac("coll"), error),
+                                             &mongoac_collection_destroy);
 
    auto const x1 = REQUIRE_MAKE_OWNING_PTR(bson_from_json(R"({"x": 1})"), &bson_destroy);
    auto const x2 = REQUIRE_MAKE_OWNING_PTR(bson_from_json(R"({"x": 2})"), &bson_destroy);
@@ -381,20 +386,21 @@ TEST_CASE("insert_many", "[mongoac][collection]")
 {
    auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
 
-   auto const client =
-      REQUIRE_MAKE_OWNING_PTR(mongoac_client_new("mongodb://localhost:27017", error), &mongoac_client_destroy);
+   auto const client = REQUIRE_MAKE_OWNING_PTR(mongoac_client_new(to_mongoac("mongodb://localhost:27017"), error),
+                                               &mongoac_client_destroy);
 
    auto const runtime = REQUIRE_MAKE_OWNING_PTR(mongoac_client_get_runtime(client), &mongoac_runtime_destroy);
 
    auto const db = REQUIRE_MAKE_OWNING_PTR(
-      mongoac_client_get_database(client, "mongoac_collection_insert_many", nullptr, error), &mongoac_database_destroy);
+      mongoac_client_get_database(client, to_mongoac("mongoac_collection_insert_many"), nullptr, error),
+      &mongoac_database_destroy);
 
    // Clean test state.
    mongoac_database_drop(db, nullptr, nullptr, error);
    REQUIRE_MONGOAC_OK(error);
 
-   auto const coll =
-      REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, "coll", error), &mongoac_collection_destroy);
+   auto const coll = REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, to_mongoac("coll"), error),
+                                             &mongoac_collection_destroy);
 
    auto const x = REQUIRE_MAKE_OWNING_PTR(BCON_NEW("x", BCON_INT32(1)), &bson_destroy);
    auto const y = REQUIRE_MAKE_OWNING_PTR(BCON_NEW("y", BCON_INT32(2)), &bson_destroy);
@@ -444,20 +450,21 @@ TEST_CASE("delete", "[mongoac][collection]")
    auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
    REQUIRE(error);
 
-   auto const client =
-      REQUIRE_MAKE_OWNING_PTR(mongoac_client_new("mongodb://localhost:27017", error), &mongoac_client_destroy);
+   auto const client = REQUIRE_MAKE_OWNING_PTR(mongoac_client_new(to_mongoac("mongodb://localhost:27017"), error),
+                                               &mongoac_client_destroy);
 
    auto const runtime = REQUIRE_MAKE_OWNING_PTR(mongoac_client_get_runtime(client), &mongoac_runtime_destroy);
 
    auto const db = REQUIRE_MAKE_OWNING_PTR(
-      mongoac_client_get_database(client, "mongoac_collection_delete", nullptr, error), &mongoac_database_destroy);
+      mongoac_client_get_database(client, to_mongoac("mongoac_collection_delete"), nullptr, error),
+      &mongoac_database_destroy);
 
    // Clean test state.
    mongoac_database_drop(db, nullptr, nullptr, error);
    REQUIRE_MONGOAC_OK(error);
 
-   auto const coll =
-      REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, "coll", error), &mongoac_collection_destroy);
+   auto const coll = REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, to_mongoac("coll"), error),
+                                             &mongoac_collection_destroy);
 
    auto const count_results = [&](mongoac_bson_view_t filter) -> int {
       auto const cursor =
@@ -563,20 +570,21 @@ TEST_CASE("replace_one", "[mongoac][collection]")
    auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
    REQUIRE(error);
 
-   auto const client =
-      REQUIRE_MAKE_OWNING_PTR(mongoac_client_new("mongodb://localhost:27017", error), &mongoac_client_destroy);
+   auto const client = REQUIRE_MAKE_OWNING_PTR(mongoac_client_new(to_mongoac("mongodb://localhost:27017"), error),
+                                               &mongoac_client_destroy);
 
    auto const runtime = REQUIRE_MAKE_OWNING_PTR(mongoac_client_get_runtime(client), &mongoac_runtime_destroy);
 
    auto const db = REQUIRE_MAKE_OWNING_PTR(
-      mongoac_client_get_database(client, "mongoac_collection_replace_one", nullptr, error), &mongoac_database_destroy);
+      mongoac_client_get_database(client, to_mongoac("mongoac_collection_replace_one"), nullptr, error),
+      &mongoac_database_destroy);
 
    // Clean test state.
    mongoac_database_drop(db, nullptr, nullptr, error);
    REQUIRE_MONGOAC_OK(error);
 
-   auto const coll =
-      REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, "coll", error), &mongoac_collection_destroy);
+   auto const coll = REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, to_mongoac("coll"), error),
+                                             &mongoac_collection_destroy);
 
    auto const check_result = [](bson_t const *result, int64_t matched, int64_t modified) {
       bson_iter_t iter = {};
@@ -621,20 +629,21 @@ TEST_CASE("update", "[mongoac][collection]")
    auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
    REQUIRE(error);
 
-   auto const client =
-      REQUIRE_MAKE_OWNING_PTR(mongoac_client_new("mongodb://localhost:27017", error), &mongoac_client_destroy);
+   auto const client = REQUIRE_MAKE_OWNING_PTR(mongoac_client_new(to_mongoac("mongodb://localhost:27017"), error),
+                                               &mongoac_client_destroy);
 
    auto const runtime = REQUIRE_MAKE_OWNING_PTR(mongoac_client_get_runtime(client), &mongoac_runtime_destroy);
 
    auto const db = REQUIRE_MAKE_OWNING_PTR(
-      mongoac_client_get_database(client, "mongoac_collection_update", nullptr, error), &mongoac_database_destroy);
+      mongoac_client_get_database(client, to_mongoac("mongoac_collection_update"), nullptr, error),
+      &mongoac_database_destroy);
 
    // Clean test state.
    mongoac_database_drop(db, nullptr, nullptr, error);
    REQUIRE_MONGOAC_OK(error);
 
-   auto const coll =
-      REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, "coll", error), &mongoac_collection_destroy);
+   auto const coll = REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, to_mongoac("coll"), error),
+                                             &mongoac_collection_destroy);
 
    auto const get_matched_count = [](bson_t const &result) -> int64_t {
       bson_iter_t iter = {};

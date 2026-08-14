@@ -4,8 +4,10 @@
 #include <mongoac/error.h>
 #include <test_util/error.hh>
 #include <test_util/owning_ptr.hh>
+#include <test_util/string.hh>
 
 using mongoac::test_util::make_owning_ptr;
+using mongoac::test_util::to_mongoac;
 
 TEST_CASE("new", "[mongoac][read_concern]")
 {
@@ -117,19 +119,19 @@ TEST_CASE("set_level_string", "[mongoac][read_concern]")
 
    SECTION("null handle")
    {
-      mongoac_read_concern_set_level_string(nullptr, "custom", error);
+      mongoac_read_concern_set_level_string(nullptr, to_mongoac("custom"), error);
       REQUIRE_MONGOAC_INVALID_ARGUMENT(error);
    }
 
    SECTION("null string")
    {
-      mongoac_read_concern_set_level_string(rc, nullptr, error);
+      mongoac_read_concern_set_level_string(rc, {}, error);
       REQUIRE_MONGOAC_INVALID_ARGUMENT(error);
    }
 
    SECTION("custom level")
    {
-      mongoac_read_concern_set_level_string(rc, "custom", error);
+      mongoac_read_concern_set_level_string(rc, to_mongoac("custom"), error);
       CHECK_MONGOAC_OK(error);
    }
 }

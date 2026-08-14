@@ -4,6 +4,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <mongoac/client.h>
+#include <test_util/string.hh>
+using mongoac::test_util::to_mongoac;
 
 TEST_CASE("make_progress", "[mongoac][runtime]")
 {
@@ -95,7 +97,7 @@ TEST_CASE("block_on_all_with_timeout", "[mongoac][runtime]")
 
 TEST_CASE("lifetime", "[mongoac][runtime]")
 {
-   auto const client = mongoac_client_new("mongodb://localhost:27017", nullptr);
+   auto const client = mongoac_client_new(to_mongoac("mongodb://localhost:27017"), nullptr);
    REQUIRE(client != nullptr);
 
    auto const runtime = mongoac_client_get_runtime(client);

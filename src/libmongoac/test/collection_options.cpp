@@ -10,8 +10,10 @@
 #include <mongoac/write_concern.h>
 #include <test_util/error.hh>
 #include <test_util/owning_ptr.hh>
+#include <test_util/string.hh>
 
 using mongoac::test_util::make_owning_ptr;
+using mongoac::test_util::to_mongoac;
 
 static bool
 noop_predicate(mongoac_server_info_t const *info, void *user_data)
@@ -152,7 +154,7 @@ TEST_CASE("get_collection_with_options", "[mongoac][collection_options]")
 
    SECTION("null database returns null")
    {
-      auto *coll = mongoac_database_get_collection_with_options(nullptr, "coll", opts, error);
+      auto *coll = mongoac_database_get_collection_with_options(nullptr, to_mongoac("coll"), opts, error);
       REQUIRE(coll == nullptr);
       REQUIRE_MONGOAC_INVALID_ARGUMENT(error);
    }

@@ -4,6 +4,7 @@ use crate::read_concern::ReadConcernT;
 use crate::read_preference::ReadPreferenceT;
 use crate::server_api::ServerApiT;
 use crate::server_selector::ServerSelectorT;
+use crate::string::StringViewT;
 use crate::tls_options::TlsOptionsT;
 use crate::write_concern::WriteConcernT;
 use crate::{credential::CredentialT, error::ErrorCodeT};
@@ -11,7 +12,6 @@ use crate::{credential::CredentialT, error::ErrorCodeT};
 use mongodb::options::{
     ClientOptions, Compressor, DriverInfo, ServerAddress, ServerMonitoringMode, Tls,
 };
-use std::ffi::c_char;
 use std::time::Duration;
 
 #[allow(non_camel_case_types)]
@@ -87,13 +87,13 @@ pub extern "C" fn mongoac_client_options_set_server_api(
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_client_options_set_app_name(
     opts: *mut ClientOptionsT,
-    v: *const c_char,
+    v: StringViewT,
     error: *mut ErrorT,
 ) {
     let error = safe_optional_error_as_mut!(error);
     let opts = safe_as_mut_with_error!(opts, error);
 
-    opts.inner.app_name = safe_optional_cstr_from_ptr_with_error!(v, error).map(Into::into);
+    opts.inner.app_name = safe_optional_string_view_with_error!(v, error).map(Into::into);
 }
 
 #[unsafe(no_mangle)]
@@ -109,16 +109,16 @@ pub extern "C" fn mongoac_client_options_set_direct_connection(opts: *mut Client
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_client_options_set_driver_info(
     opts: *mut ClientOptionsT,
-    name: *const c_char,
-    version: *const c_char,
-    platform: *const c_char,
+    name: StringViewT,
+    version: StringViewT,
+    platform: StringViewT,
     error: *mut ErrorT,
 ) {
     let error = safe_optional_error_as_mut!(error);
     let opts = safe_as_mut_with_error!(opts, error);
-    let name = safe_cstr_from_ptr_with_error!(name, error);
-    let version = safe_optional_cstr_from_ptr_with_error!(version, error);
-    let platform = safe_optional_cstr_from_ptr_with_error!(platform, error);
+    let name = safe_string_view_with_error!(name, error);
+    let version = safe_optional_string_view_with_error!(version, error);
+    let platform = safe_optional_string_view_with_error!(platform, error);
 
     opts.inner.driver_info = Some(
         DriverInfo::builder()
@@ -143,9 +143,9 @@ pub extern "C" fn mongoac_client_options_set_heartbeat_freq_ms(opts: *mut Client
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn mongoac_client_options_add_host(opts: *mut ClientOptionsT, host: *const c_char) {
+pub extern "C" fn mongoac_client_options_add_host(opts: *mut ClientOptionsT, host: StringViewT) {
     let opts = safe_as_mut!(opts);
-    let host = safe_cstr_from_ptr!(host);
+    let host = safe_string_view!(host);
 
     opts.inner.hosts.push(ServerAddress::Tcp {
         host: host.to_string(),
@@ -156,11 +156,11 @@ pub extern "C" fn mongoac_client_options_add_host(opts: *mut ClientOptionsT, hos
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_client_options_add_host_and_port(
     opts: *mut ClientOptionsT,
-    host: *const c_char,
+    host: StringViewT,
     port: u16,
 ) {
     let opts = safe_as_mut!(opts);
-    let host = safe_cstr_from_ptr!(host);
+    let host = safe_string_view!(host);
 
     opts.inner.hosts.push(ServerAddress::Tcp {
         host: host.to_string(),
@@ -171,10 +171,10 @@ pub extern "C" fn mongoac_client_options_add_host_and_port(
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_client_options_add_unix_path(
     opts: *mut ClientOptionsT,
-    path: *const c_char,
+    path: StringViewT,
 ) {
     let opts = safe_as_mut!(opts);
-    let path = safe_cstr_from_ptr!(path);
+    let path = safe_string_view!(path);
 
     opts.inner
         .hosts
@@ -254,9 +254,9 @@ pub extern "C" fn mongoac_client_options_set_server_selector(
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_client_options_set_repl_set_name(
     opts: *mut ClientOptionsT,
-    v: *const c_char,
+    v: StringViewT,
 ) {
-    safe_as_mut!(opts).inner.repl_set_name = safe_optional_cstr_from_ptr!(v).map(Into::into);
+    safe_as_mut!(opts).inner.repl_set_name = safe_optional_string_view!(v).map(Into::into);
 }
 
 #[unsafe(no_mangle)]
@@ -293,9 +293,9 @@ pub extern "C" fn mongoac_client_options_set_server_selection_timeout_ms(
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_client_options_set_default_database(
     opts: *mut ClientOptionsT,
-    v: *const c_char,
+    v: StringViewT,
 ) {
-    safe_as_mut!(opts).inner.default_database = safe_optional_cstr_from_ptr!(v).map(Into::into);
+    safe_as_mut!(opts).inner.default_database = safe_optional_string_view!(v).map(Into::into);
 }
 
 #[unsafe(no_mangle)]
@@ -306,9 +306,9 @@ pub extern "C" fn mongoac_client_options_set_srv_max_hosts(opts: *mut ClientOpti
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_client_options_set_srv_service_name(
     opts: *mut ClientOptionsT,
-    v: *const c_char,
+    v: StringViewT,
 ) {
-    safe_as_mut!(opts).inner.srv_service_name = safe_optional_cstr_from_ptr!(v).map(Into::into);
+    safe_as_mut!(opts).inner.srv_service_name = safe_optional_string_view!(v).map(Into::into);
 }
 
 #[unsafe(no_mangle)]
