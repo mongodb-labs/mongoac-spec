@@ -726,7 +726,7 @@ Drivers Specification states:
 As with the database enumeration API, `nameOnly` is not an explicit option despite being used internally by the
   `listCollections` command.
 Although `authorizedCollections` may be set explicitly, it is only used by `list_collection_names`; the Rust Driver
-  ignores this option for `list_collections`.
+  ignores this option when `nameOnly` is not `true`.
 
 #### Read and Write Concerns
 
