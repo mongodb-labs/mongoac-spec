@@ -51,6 +51,10 @@ A C++ compiler is only required to build the Catch2 test suite (with C++17).
 The stricter C/C++ toolchain and CMake version requirements are expected to be acceptable for users given the
   comparatively more-demanding Rust toolchain requirements.
 
+> [!NOTE]
+> Although the `mongoac` project itself does not require a C or C++ compiler, the top-level `mongo-c-driver` project
+>   still requires a C compiler due to `LANGUAGES C`.
+
 > [!TIP]
 > - [Why CMake 3.25?](#why-cmake-325)
 > - [Why patchelf?](#why-patchelf-soname)
