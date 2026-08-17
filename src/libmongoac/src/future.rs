@@ -36,6 +36,14 @@ pub extern "C" fn mongoac_future_is_ready(future: *const FutureT) -> bool {
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn mongoac_future_get_bool(future: *const FutureT, error: *mut ErrorT) -> bool {
+    let error = safe_optional_error_as_mut!(error);
+    let future = safe_as_ref_with_error!(future, error);
+
+    *safe_error!(future.get_bool(), error)
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn mongoac_future_get_bson(future: *const FutureT, error: *mut ErrorT) -> BsonViewT {
     let error = safe_optional_error_as_mut!(error);
     let future = safe_as_ref_with_error!(future, error);
