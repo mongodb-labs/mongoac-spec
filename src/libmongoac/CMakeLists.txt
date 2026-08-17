@@ -221,7 +221,7 @@ if ("$CACHE{ENABLE_SHARED}")
   add_dependencies (mongoac_shared mongoac_shared_target mongoac_crate_headers_target)
   target_link_libraries (mongoac_shared INTERFACE
     "$<BUILD_INTERFACE:${library_shared}>"
-    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_LIBDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}${soname}${CMAKE_SHARED_LIBRARY_SUFFIX}>"
+    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_FULL_LIBDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}${soname}${CMAKE_SHARED_LIBRARY_SUFFIX}>"
   )
   target_sources (mongoac_shared INTERFACE ${mongoac_file_set_headers})
   add_library (mongoac::shared ALIAS mongoac_shared)
@@ -271,7 +271,7 @@ if (NOT "$CACHE{ENABLE_STATIC}" STREQUAL "OFF")
   target_compile_definitions (mongoac_static INTERFACE MONGOAC_STATIC)
   target_link_libraries (mongoac_static INTERFACE
     "$<BUILD_INTERFACE:${library_static}>"
-    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_LIBDIR}/${CMAKE_STATIC_LIBRARY_PREFIX}${soname}${CMAKE_STATIC_LIBRARY_SUFFIX}>"
+    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_FULL_LIBDIR}/${CMAKE_STATIC_LIBRARY_PREFIX}${soname}${CMAKE_STATIC_LIBRARY_SUFFIX}>"
   )
   target_sources (mongoac_static INTERFACE ${mongoac_file_set_headers})
   add_library (mongoac::static ALIAS mongoac_static)
