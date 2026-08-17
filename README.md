@@ -1021,8 +1021,8 @@ Quoting [RUST-2022](https://jira.mongodb.org/browse/RUST-2022):
 > The presence of Deserialize on those structs is something of an accident of implementation of our automated testing
 >   and something we're avoiding going forward.
 
-Additionally, many option fields are `#[serde(skip)]` or `#[serde(skip_serializing)]` (e.g. `write_concern`), which
-  forces the implementation to use a custom type anyways.
+Additionally, many option fields are `#[serde(skip)]` (e.g. `Client::compressors`) or `#[serde(skip_serializing)]` (e.g.
+  `InsertOneOptions::write_concern`), which forces the implementation to use a custom type anyways.
 For consistency, options fields (e.g. `ReadConcern`, `ServerApi`, etc.) are also typed (e.g. `mongoac_read_concern_t`,
   `mongoac_server_api_t`, etc.).
 Only options fields which are fundamentally BSON documents (e.g. `filter`, `comment`, etc.) use `mongoac_bson_view_t`
