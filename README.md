@@ -298,7 +298,7 @@ BSON documents are passed through the FFI as raw bytes represented by simple `(p
 Alongside the [string structs](#string-structs), these are the only non-opaque structs declared in the public API.
 `mongoac_bson_t` represents an owning BSON document and `mongoac_bson_view_t` represents a non-owning BSON document;
   `mongoac_bson_t` must be destroyed, whereas `mongoac_bson_view_t` does not need to be destroyed.
-Both contain a `void const*` pointer and do *not* permit mutability of BSON bytes in any circumstance.
+Both contain a `uint8_t const*` pointer and do *not* permit mutability of BSON bytes in any circumstance.
 
 For mongoac internals, BSON bytes are converted into `mongodb::bson` representations with validation handled by one of
   `from_bytes()`, `from_reader()`, and `deserialize_from_slice()` depending on the context.
