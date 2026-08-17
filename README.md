@@ -903,8 +903,8 @@ The `mongoac_client_session_t` API may expose supported accessors such as `get_o
   being made public).
 
 > [!IMPORTANT]
-> Until [RUST-2412](https://jira.mongodb.org/browse/RUST-2412) is released, `afterClusterTime` is not applied to write
->   commands in causally-consistent sessions outside a transaction.
+> Until [RUST-2412](https://jira.mongodb.org/browse/RUST-2412) is released in 3.9.0, `afterClusterTime` is not applied
+>   to write commands in causally-consistent sessions outside a transaction.
 > The `operationTime` from write responses is still captured and applied to subsequent reads, but the server is unable
 >   to enforce the intended causal ordering.
 > There is nothing that can be done by the FFI to address this issue.
