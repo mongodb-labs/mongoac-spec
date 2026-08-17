@@ -150,8 +150,8 @@ A `PATCH_COMMAND` during `FetchContent_Declare()` adds support for registering C
 TEST_CASE("example", "[a][b][c]") { ... }
 ```
 
-Special tags (e.g. `[!serial]`, `[!mayfail]`, etc.) are excluded in the CTest unique test name.
-However, they are still registered with CTest as labels (e.g. `!serial`, `!mayfail`, etc.).
+Special tags (e.g. `[!throws]`, `[!mayfail]`, etc.) are excluded in the CTest unique test name.
+However, they are still registered with CTest as labels (e.g. `!throws`, `!mayfail`, etc.).
 
 > [!TIP]
 > - [Why Catch2?](#why-catch2)
