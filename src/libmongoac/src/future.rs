@@ -36,6 +36,11 @@ pub extern "C" fn mongoac_future_is_ready(future: *const FutureT) -> bool {
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn mongoac_future_poll(future: *mut FutureT) -> bool {
+    safe_as_mut!(future).poll()
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn mongoac_future_get_bool(future: *const FutureT, error: *mut ErrorT) -> bool {
     let error = safe_optional_error_as_mut!(error);
     let future = safe_as_ref_with_error!(future, error);
@@ -179,11 +184,15 @@ impl FutureT {
         future_value_result!(self, Void, "void")
     }
 
-    pub fn poll_with_context(&self, ctx: &mut Context<'_>) -> bool {
+    pub fn poll(&mut self) -> bool {
+        future_value_op!(self.value, v => v.poll())
+    }
+
+    pub fn poll_with_context(&mut self, ctx: &mut Context<'_>) -> bool {
         future_value_op!(self.value, v => v.poll_with_context(ctx))
     }
 
-    pub fn poll(&self) -> impl Future<Output = ()> + '_ {
+    pub fn poll_fn(&mut self) -> impl Future<Output = ()> + '_ {
         poll_fn(|ctx| {
             if self.poll_with_context(ctx) {
                 Poll::Ready(())
@@ -234,6 +243,10 @@ impl<T: Send + 'static> FutureValueType<T> {
         }
     }
 
+    pub fn poll(&self) -> bool {
+        self.poll_with_context(&mut Context::from_waker(std::task::Waker::noop()))
+    }
+
     pub fn poll_with_context(&self, ctx: &mut Context<'_>) -> bool {
         if self.is_ready() {
             return true;
@@ -267,20 +280,19 @@ macro_rules! spawn {
     }};
 }
 
-#[derive(Clone, Copy)]
 pub struct FutureExt<'a> {
-    pub future: &'a FutureT,
+    pub future: &'a mut FutureT,
     pub index: usize,
 }
 
 impl<'a> FutureExt<'a> {
     #[must_use]
-    pub fn new(future: &'a FutureT) -> Self {
+    pub fn new(future: &'a mut FutureT) -> Self {
         Self::new_with_index(future, 0)
     }
 
     #[must_use]
-    pub fn new_with_index(future: &'a FutureT, index: usize) -> Self {
+    pub fn new_with_index(future: &'a mut FutureT, index: usize) -> Self {
         Self { future, index }
     }
 }
@@ -351,25 +363,25 @@ mod tests {
     #[test]
     fn block_on_immediate() {
         let runtime = make_runtime();
-        let future = spawn_immediate(&runtime);
-        runtime.block_on_future(&future);
+        let mut future = spawn_immediate(&runtime);
+        runtime.block_on_future(&mut future);
         assert!(future.is_ready());
     }
 
     #[test]
     fn block_on_delayed() {
         let runtime = make_runtime();
-        let future = spawn_delayed(&runtime, Duration::from_millis(10));
-        runtime.block_on_future(&future);
+        let mut future = spawn_delayed(&runtime, Duration::from_millis(10));
+        runtime.block_on_future(&mut future);
         assert!(future.is_ready());
     }
 
     #[test]
     fn block_on_already_ready() {
         let runtime = make_runtime();
-        let future = spawn_immediate(&runtime);
-        runtime.block_on_future(&future);
-        runtime.block_on_future(&future);
+        let mut future = spawn_immediate(&runtime);
+        runtime.block_on_future(&mut future);
+        runtime.block_on_future(&mut future);
         assert!(future.is_ready());
     }
 
@@ -377,7 +389,7 @@ mod tests {
     fn block_on_long_sleep_parks_until_ready() {
         let runtime = make_runtime();
         let notify = Arc::new(Notify::new());
-        let future = spawn_notified(&runtime, notify.clone());
+        let mut future = spawn_notified(&runtime, notify.clone());
 
         let notified = Arc::new(AtomicBool::new(false));
         let notified_clone = notified.clone();
@@ -390,7 +402,7 @@ mod tests {
         });
 
         barrier.wait();
-        runtime.block_on_future(&future);
+        runtime.block_on_future(&mut future);
 
         assert!(future.is_ready(), "future should be ready after block_on");
         assert!(
@@ -404,8 +416,8 @@ mod tests {
         let runtime = make_runtime();
         let notify1 = Arc::new(Notify::new());
         let notify2 = Arc::new(Notify::new());
-        let f1 = spawn_notified(&runtime, notify1.clone());
-        let f2 = spawn_notified(&runtime, notify2.clone());
+        let mut f1 = spawn_notified(&runtime, notify1.clone());
+        let mut f2 = spawn_notified(&runtime, notify2.clone());
 
         // Synchronize with a notifier thread so that f1 becomes ready only after
         // block_on_any has begun. The elapsed-time assertion is replaced by this
@@ -417,10 +429,10 @@ mod tests {
             notify1.notify_one();
         });
 
-        let futures = [(0, &f1), (1, &f2)];
+        let mut futures = vec![(0, &mut f1), (1, &mut f2)];
         barrier.wait();
         let index = runtime
-            .block_on_any(&futures)
+            .block_on_any(&mut futures)
             .expect("one future should be ready");
 
         assert_eq!(index, 0);
@@ -431,7 +443,7 @@ mod tests {
         assert!(!f2.is_ready());
 
         notify2.notify_one();
-        runtime.block_on_future(&f2);
+        runtime.block_on_future(&mut f2);
         assert!(f2.is_ready());
     }
 
@@ -440,8 +452,8 @@ mod tests {
         let runtime = make_runtime();
         let notify1 = Arc::new(Notify::new());
         let notify2 = Arc::new(Notify::new());
-        let f1 = spawn_notified(&runtime, notify1.clone());
-        let f2 = spawn_notified(&runtime, notify2.clone());
+        let mut f1 = spawn_notified(&runtime, notify1.clone());
+        let mut f2 = spawn_notified(&runtime, notify2.clone());
 
         let f2_released = Arc::new(AtomicBool::new(false));
         let f2_released_clone = f2_released.clone();
@@ -454,9 +466,9 @@ mod tests {
             notify2.notify_one();
         });
 
-        let futures = [&f1, &f2];
+        let mut futures = vec![&mut f1, &mut f2];
         barrier.wait();
-        runtime.block_on_all(&futures);
+        runtime.block_on_all(&mut futures);
 
         // block_on_all should wait for the slowest task, not just the first.
         assert!(f1.is_ready());
@@ -472,9 +484,9 @@ mod tests {
     #[test]
     fn block_on_future_with_timeout_completes_before_deadline() {
         let runtime = make_runtime();
-        let future = spawn_yielding(&runtime, 3);
+        let mut future = spawn_yielding(&runtime, 3);
 
-        let result = runtime.block_on_future_with_timeout(&future, Duration::from_secs(5));
+        let result = runtime.block_on_future_with_timeout(&mut future, Duration::from_secs(5));
 
         assert!(result.is_ok(), "future should complete before timeout");
         assert!(future.is_ready());
@@ -483,9 +495,9 @@ mod tests {
     #[test]
     fn block_on_future_with_timeout_times_out() {
         let runtime = make_runtime();
-        let future = spawn_delayed(&runtime, Duration::from_millis(500));
+        let mut future = spawn_delayed(&runtime, Duration::from_millis(500));
 
-        let result = runtime.block_on_future_with_timeout(&future, Duration::from_millis(10));
+        let result = runtime.block_on_future_with_timeout(&mut future, Duration::from_millis(10));
 
         assert!(
             result.is_err(),
@@ -502,8 +514,8 @@ mod tests {
         let runtime = make_runtime();
         let notify1 = Arc::new(Notify::new());
         let notify2 = Arc::new(Notify::new());
-        let f1 = spawn_notified(&runtime, notify1.clone());
-        let f2 = spawn_notified(&runtime, notify2);
+        let mut f1 = spawn_notified(&runtime, notify1.clone());
+        let mut f2 = spawn_notified(&runtime, notify2);
 
         let barrier = Arc::new(Barrier::new(2));
         let barrier_clone = barrier.clone();
@@ -512,9 +524,9 @@ mod tests {
             notify1.notify_one();
         });
 
-        let futures = [(0, &f1), (1, &f2)];
+        let mut futures = vec![(0, &mut f1), (1, &mut f2)];
         barrier.wait();
-        let result = runtime.block_on_any_with_timeout(&futures, Duration::from_millis(200));
+        let result = runtime.block_on_any_with_timeout(&mut futures, Duration::from_millis(200));
 
         let index = result
             .expect("should not time out")
@@ -528,11 +540,11 @@ mod tests {
     #[test]
     fn block_on_any_with_timeout_times_out() {
         let runtime = make_runtime();
-        let f1 = spawn_delayed(&runtime, Duration::from_millis(500));
-        let f2 = spawn_delayed(&runtime, Duration::from_millis(600));
+        let mut f1 = spawn_delayed(&runtime, Duration::from_millis(500));
+        let mut f2 = spawn_delayed(&runtime, Duration::from_millis(600));
 
-        let futures = [(0, &f1), (1, &f2)];
-        let result = runtime.block_on_any_with_timeout(&futures, Duration::from_millis(10));
+        let mut futures = vec![(0, &mut f1), (1, &mut f2)];
+        let result = runtime.block_on_any_with_timeout(&mut futures, Duration::from_millis(10));
 
         assert!(
             result.is_err(),
@@ -545,11 +557,11 @@ mod tests {
     #[test]
     fn block_on_all_with_timeout_completes_before_deadline() {
         let runtime = make_runtime();
-        let f1 = spawn_yielding(&runtime, 3);
-        let f2 = spawn_yielding(&runtime, 5);
+        let mut f1 = spawn_yielding(&runtime, 3);
+        let mut f2 = spawn_yielding(&runtime, 5);
 
-        let futures = [&f1, &f2];
-        let result = runtime.block_on_all_with_timeout(&futures, Duration::from_secs(5));
+        let mut futures = vec![&mut f1, &mut f2];
+        let result = runtime.block_on_all_with_timeout(&mut futures, Duration::from_secs(5));
 
         assert!(result.is_ok(), "all futures should complete before timeout");
         assert!(f1.is_ready());
@@ -559,11 +571,11 @@ mod tests {
     #[test]
     fn block_on_all_with_timeout_times_out() {
         let runtime = make_runtime();
-        let f1 = spawn_delayed(&runtime, Duration::from_millis(500));
-        let f2 = spawn_delayed(&runtime, Duration::from_millis(600));
+        let mut f1 = spawn_delayed(&runtime, Duration::from_millis(500));
+        let mut f2 = spawn_delayed(&runtime, Duration::from_millis(600));
 
-        let futures = [&f1, &f2];
-        let result = runtime.block_on_all_with_timeout(&futures, Duration::from_millis(10));
+        let mut futures = vec![&mut f1, &mut f2];
+        let result = runtime.block_on_all_with_timeout(&mut futures, Duration::from_millis(10));
 
         assert!(
             result.is_err(),
@@ -578,8 +590,8 @@ mod tests {
     #[test]
     fn clone_shares_ready_state() {
         let runtime = make_runtime();
-        let future = spawn_immediate(&runtime);
-        runtime.block_on_future(&future);
+        let mut future = spawn_immediate(&runtime);
+        runtime.block_on_future(&mut future);
         assert!(future.is_ready());
 
         let clone = future.clone();
@@ -589,8 +601,8 @@ mod tests {
     #[test]
     fn clone_outlives_original() {
         let runtime = make_runtime();
-        let future = spawn_immediate(&runtime);
-        runtime.block_on_future(&future);
+        let mut future = spawn_immediate(&runtime);
+        runtime.block_on_future(&mut future);
 
         let clone = future.clone();
         drop(future);
@@ -603,11 +615,11 @@ mod tests {
     fn get_int32_ready() {
         let runtime = make_runtime();
         let handle = runtime.spawn(async move { Ok(42) });
-        let future = FutureT::new(
+        let mut future = FutureT::new(
             runtime.clone(),
             FutureValue::Int32(FutureValueType::new(handle)),
         );
-        runtime.block_on_future(&future);
+        runtime.block_on_future(&mut future);
         assert_eq!(
             *future
                 .get_int32()
@@ -636,18 +648,18 @@ mod tests {
     #[test]
     fn is_ready_after_block_on() {
         let runtime = make_runtime();
-        let future = spawn_immediate(&runtime);
+        let mut future = spawn_immediate(&runtime);
         assert!(!future.is_ready());
-        runtime.block_on_future(&future);
+        runtime.block_on_future(&mut future);
         assert!(future.is_ready());
     }
 
     #[test]
     fn poll_with_context_eventually_resolves() {
         let runtime = make_runtime();
-        let future = spawn_delayed(&runtime, Duration::from_millis(10));
+        let mut future = spawn_delayed(&runtime, Duration::from_millis(10));
         let start = Instant::now();
-        while !future.poll_with_context(&mut Context::from_waker(std::task::Waker::noop())) {
+        while !future.poll() {
             if start.elapsed() > Duration::from_secs(5) {
                 panic!("future did not resolve");
             }
@@ -665,7 +677,7 @@ mod tests {
         let done = Arc::new(AtomicBool::new(false));
         let done_clone = done.clone();
 
-        let future = FutureT::new(
+        let mut future = FutureT::new(
             runtime.clone(),
             FutureValue::Void(FutureValueType::new(runtime.spawn(async move {
                 tokio::task::yield_now().await;
@@ -690,7 +702,74 @@ mod tests {
         );
 
         // Now drive the future explicitly.
-        runtime.block_on_future(&future);
+        runtime.block_on_future(&mut future);
         assert!(future.is_ready());
+    }
+
+    // -- mongoac_future_poll tests --
+    //
+    // mongoac_future_poll() probes the future handle one step using a no-op
+    // waker. It is orthogonal to make_progress*(): poll() observes handle
+    // readiness; make_progress*() drives the underlying task. Both are required
+    // to resolve a future non-blockingly. block_on*() does both and blocks.
+
+    #[test]
+    fn future_poll_returns_true_when_already_ready() {
+        let runtime = make_runtime();
+        let mut future = spawn_immediate(&runtime);
+        runtime.block_on_future(&mut future);
+        assert!(future.is_ready());
+
+        // Polling an already-ready future returns true immediately.
+        assert!(future.poll());
+    }
+
+    #[test]
+    fn future_poll_does_not_resolve_without_make_progress() {
+        // poll() alone does not drive the runtime, so a future whose task has
+        // not yet run cannot become ready through poll() alone.
+        let runtime = make_runtime();
+        let mut future = spawn_yielding(&runtime, 1);
+
+        // Polling without driving the runtime must not resolve the future.
+        for _ in 0..100 {
+            assert!(
+                !future.poll(),
+                "poll() should not resolve the future without make_progress"
+            );
+        }
+        assert!(!future.is_ready());
+
+        // Drive the task to completion with make_progress (as proven by
+        // make_progress_does_not_alone_resolve_future, this does not resolve
+        // the future handle). Then poll() observes the completed handle.
+        for _ in 0..100 {
+            runtime.make_progress();
+            if future.poll() {
+                break;
+            }
+        }
+        assert!(
+            future.is_ready(),
+            "poll() after make_progress should resolve"
+        );
+    }
+
+    #[test]
+    fn future_poll_then_block_on_resolves() {
+        // A no-op-waker poll followed by a real-waker block_on must resolve.
+        // This guards the waker-replacement path: the latest waker wins, so
+        // block_on_future must still be able to park until ready even after a
+        // prior poll() with a no-op waker.
+        let runtime = make_runtime();
+        let mut future = spawn_yielding(&runtime, 1);
+
+        // A single poll() with a no-op waker does not resolve (task hasn't run).
+        assert!(!future.poll());
+
+        // block_on_future uses a real waker and drives the runtime to completion.
+        runtime.block_on_future(&mut future);
+        assert!(future.is_ready());
+        assert!(future.poll());
     }
 }

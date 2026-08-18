@@ -59,7 +59,7 @@ TEST_CASE("create_collection", "[mongoac][database]")
                          &mongoac_future_destroy);
 
       {
-         std::array<mongoac_future_t const *, 3u> futures = {a, b, c};
+         std::array<mongoac_future_t *, 3u> futures = {a, b, c};
          mongoac_runtime_block_on_all(runtime, futures.data(), futures.size(), nullptr);
       }
 

@@ -94,7 +94,7 @@ TEST_CASE("drop", "[mongoac][collection]")
       auto const drop_c = REQUIRE_MAKE_OWNING_PTR(mongoac_collection_drop_async(coll_c, nullptr, nullptr, error),
                                                   &mongoac_future_destroy);
       {
-         std::array<mongoac_future_t const *, 2u> futures = {drop_a, drop_c};
+         std::array<mongoac_future_t *, 2u> futures = {drop_a, drop_c};
          mongoac_runtime_block_on_all(runtime, futures.data(), futures.size(), error);
       }
       {
@@ -345,7 +345,7 @@ TEST_CASE("find_one", "[mongoac][collection]")
          mongoac_collection_find_one_async(coll, nullptr, make_bson_view(x2), nullptr, error), &mongoac_future_destroy);
 
       {
-         auto const futures = std::array<mongoac_future_t const *, 2u>{{f1, f2}};
+         auto const futures = std::array<mongoac_future_t *, 2u>{{f1, f2}};
          mongoac_runtime_block_on_all(runtime, futures.data(), futures.size(), error);
       }
 

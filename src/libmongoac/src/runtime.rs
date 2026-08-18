@@ -81,12 +81,12 @@ pub extern "C" fn mongoac_runtime_make_progress_for(runtime: *const RuntimeT, du
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_runtime_block_on(
     runtime: *const RuntimeT,
-    future: *const FutureT,
+    future: *mut FutureT,
     error: *mut ErrorT,
 ) {
     let error = safe_optional_error_as_mut!(error);
     let runtime = safe_as_ref!(runtime);
-    let future = safe_from_runtime_with_error!(safe_as_ref!(future), runtime, error);
+    let future = safe_from_runtime_with_error!(safe_as_mut!(future), runtime, error);
 
     runtime.block_on_future(future);
 }
@@ -97,13 +97,13 @@ pub extern "C" fn mongoac_runtime_block_on(
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_runtime_block_on_with_timeout(
     runtime: *const RuntimeT,
-    future: *const FutureT,
+    future: *mut FutureT,
     timeout_ms: u64,
     error: *mut ErrorT,
 ) {
     let error = safe_optional_error_as_mut!(error);
     let runtime = safe_as_ref!(runtime);
-    let future = safe_from_runtime_with_error!(safe_as_ref!(future), runtime, error);
+    let future = safe_from_runtime_with_error!(safe_as_mut!(future), runtime, error);
 
     safe_error!(
         runtime.block_on_future_with_timeout(future, Duration::from_millis(timeout_ms)),
@@ -121,18 +121,19 @@ pub extern "C" fn mongoac_runtime_block_on_with_timeout(
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn mongoac_runtime_block_on_any(
     runtime: *const RuntimeT,
-    futures: *const *const FutureT,
+    futures: *const *mut FutureT,
     count: usize,
     error: *mut ErrorT,
-) -> *const *const FutureT {
+) -> *const *mut FutureT {
     let error = safe_optional_error_as_mut!(error);
     let runtime = safe_as_ref!(runtime);
 
-    let Some(refs) = safe_error!(futures_as_refs_for_any(futures, count, runtime), error) else {
+    let Some(mut muts) = safe_error!(futures_as_muts_for_any(futures, count, runtime), error)
+    else {
         return Default::default();
     };
 
-    match runtime.block_on_any(&refs) {
+    match runtime.block_on_any(&mut muts) {
         Some(i) => unsafe { futures.add(i) },
         None => Default::default(),
     }
@@ -145,20 +146,21 @@ pub extern "C" fn mongoac_runtime_block_on_any(
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn mongoac_runtime_block_on_any_with_timeout(
     runtime: *const RuntimeT,
-    futures: *const *const FutureT,
+    futures: *const *mut FutureT,
     count: usize,
     timeout_ms: u64,
     error: *mut ErrorT,
-) -> *const *const FutureT {
+) -> *const *mut FutureT {
     let error = safe_optional_error_as_mut!(error);
     let runtime = safe_as_ref!(runtime);
 
-    let Some(refs) = safe_error!(futures_as_refs_for_any(futures, count, runtime), error) else {
+    let Some(mut muts) = safe_error!(futures_as_muts_for_any(futures, count, runtime), error)
+    else {
         return Default::default();
     };
 
     match safe_error!(
-        runtime.block_on_any_with_timeout(&refs, Duration::from_millis(timeout_ms)),
+        runtime.block_on_any_with_timeout(&mut muts, Duration::from_millis(timeout_ms)),
         error
     ) {
         Some(i) => unsafe { futures.add(i) },
@@ -173,18 +175,19 @@ pub extern "C" fn mongoac_runtime_block_on_any_with_timeout(
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_runtime_block_on_all(
     runtime: *const RuntimeT,
-    futures: *const *const FutureT,
+    futures: *const *mut FutureT,
     count: usize,
     error: *mut ErrorT,
 ) {
     let error = safe_optional_error_as_mut!(error);
     let runtime = safe_as_ref!(runtime);
 
-    let Some(refs) = safe_error!(futures_as_refs_for_all(futures, count, runtime), error) else {
+    let Some(mut muts) = safe_error!(futures_as_muts_for_all(futures, count, runtime), error)
+    else {
         return;
     };
 
-    runtime.block_on_all(&refs);
+    runtime.block_on_all(&mut muts);
 }
 
 // Like `block_on_all()`, but (soft) upper-bounded by `timeout_ms`.
@@ -193,7 +196,7 @@ pub extern "C" fn mongoac_runtime_block_on_all(
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_runtime_block_on_all_with_timeout(
     runtime: *const RuntimeT,
-    futures: *const *const FutureT,
+    futures: *const *mut FutureT,
     count: usize,
     timeout_ms: u64,
     error: *mut ErrorT,
@@ -201,12 +204,13 @@ pub extern "C" fn mongoac_runtime_block_on_all_with_timeout(
     let error = safe_optional_error_as_mut!(error);
     let runtime = safe_as_ref!(runtime);
 
-    let Some(refs) = safe_error!(futures_as_refs_for_all(futures, count, runtime), error) else {
+    let Some(mut muts) = safe_error!(futures_as_muts_for_all(futures, count, runtime), error)
+    else {
         return;
     };
 
     safe_error!(
-        runtime.block_on_all_with_timeout(&refs, Duration::from_millis(timeout_ms)),
+        runtime.block_on_all_with_timeout(&mut muts, Duration::from_millis(timeout_ms)),
         error
     );
 }
@@ -254,17 +258,17 @@ impl RuntimeT {
         self.runtime.block_on(future)
     }
 
-    pub(crate) fn block_on_future(&self, future: &FutureT) {
+    pub(crate) fn block_on_future(&self, future: &mut FutureT) {
         if future.is_ready() {
             return; // No work to do.
         }
 
-        self.runtime.block_on(future.poll());
+        self.runtime.block_on(future.poll_fn());
     }
 
     pub(crate) fn block_on_future_with_timeout(
         &self,
-        future: &FutureT,
+        future: &mut FutureT,
         timeout: Duration,
     ) -> Result<(), ErrorT> {
         let deadline = tokio::time::Instant::now() + timeout;
@@ -274,12 +278,15 @@ impl RuntimeT {
         }
 
         self.runtime.block_on(async {
-            tokio::time::timeout_at(deadline, future.poll()).await?;
+            tokio::time::timeout_at(deadline, future.poll_fn()).await?;
             Ok(())
         })
     }
 
-    pub(crate) fn block_on_any<'a>(&self, futures: &'a [(usize, &'a FutureT)]) -> Option<usize> {
+    pub(crate) fn block_on_any<'a>(
+        &self,
+        futures: &'a mut [(usize, &'a mut FutureT)],
+    ) -> Option<usize> {
         // Check for completion before executing `block_on()`.
         if let Some(i) = any_ready(futures) {
             return Some(i);
@@ -291,7 +298,7 @@ impl RuntimeT {
 
     pub(crate) fn block_on_any_with_timeout<'a>(
         &self,
-        futures: &'a [(usize, &'a FutureT)],
+        futures: &'a mut [(usize, &'a mut FutureT)],
         timeout: Duration,
     ) -> Result<Option<usize>, ErrorT> {
         let deadline = tokio::time::Instant::now() + timeout;
@@ -309,7 +316,7 @@ impl RuntimeT {
         })
     }
 
-    pub(crate) fn block_on_all(&self, futures: &[&FutureT]) {
+    pub(crate) fn block_on_all<'a>(&self, futures: &'a mut [&'a mut FutureT]) {
         // Check for completion before executing `block_on()`.
         if all_ready(futures) {
             return;
@@ -321,9 +328,9 @@ impl RuntimeT {
         });
     }
 
-    pub(crate) fn block_on_all_with_timeout(
+    pub(crate) fn block_on_all_with_timeout<'a>(
         &self,
-        futures: &[&FutureT],
+        futures: &'a mut [&'a mut FutureT],
         timeout: Duration,
     ) -> Result<(), ErrorT> {
         let deadline = tokio::time::Instant::now() + timeout;
@@ -361,79 +368,73 @@ impl RuntimeT {
 }
 
 fn futures_unordered_for_any<'a>(
-    futures: &'a [(usize, &'a FutureT)],
+    futures: &'a mut [(usize, &'a mut FutureT)],
 ) -> FuturesUnordered<FutureExt<'a>> {
     futures
-        .iter()
+        .iter_mut()
         .map(|(i, f)| FutureExt::new_with_index(f, *i))
         .collect()
 }
 
-fn futures_unordered_for_all<'a>(futures: &'a [&'a FutureT]) -> FuturesUnordered<FutureExt<'a>> {
-    futures.iter().map(|f| FutureExt::new(f)).collect()
+fn futures_unordered_for_all<'a>(
+    futures: &'a mut [&'a mut FutureT],
+) -> FuturesUnordered<FutureExt<'a>> {
+    futures.iter_mut().map(|f| FutureExt::new(f)).collect()
 }
 
-fn any_ready(futures: &[(usize, &FutureT)]) -> Option<usize> {
+fn any_ready(futures: &[(usize, &mut FutureT)]) -> Option<usize> {
     futures.iter().find(|(_, f)| f.is_ready()).map(|(i, _)| *i)
 }
 
-fn all_ready(futures: &[&FutureT]) -> bool {
+fn all_ready(futures: &[&mut FutureT]) -> bool {
     futures.iter().all(|f| f.is_ready())
 }
 
-fn futures_as_refs_for_any<'a>(
-    futures: *const *const FutureT,
+fn futures_as_muts_for_any<'a>(
+    futures: *const *mut FutureT,
     count: usize,
     runtime: &RuntimeT,
-) -> Result<Option<Vec<(usize, &'a FutureT)>>, ErrorT> {
+) -> Result<Option<Vec<(usize, &'a mut FutureT)>>, ErrorT> {
     if futures.is_null() || count == 0 {
         return Ok(None); // No work to do.
     }
 
     // SAFETY: `futures` and `count` validity is an uncheckable precondition.
-    let refs = futures_as_refs(
+    let refs = futures_as_muts(
         unsafe { std::slice::from_raw_parts(futures, count) },
         runtime,
     )?;
 
-    if refs.is_empty() {
-        return Ok(None); // No work to do.
-    }
-
     Ok(Some(refs))
 }
 
-fn futures_as_refs_for_all<'a>(
-    futures: *const *const FutureT,
+fn futures_as_muts_for_all<'a>(
+    futures: *const *mut FutureT,
     count: usize,
     runtime: &RuntimeT,
-) -> Result<Option<Vec<&'a FutureT>>, ErrorT> {
+) -> Result<Option<Vec<&'a mut FutureT>>, ErrorT> {
     if futures.is_null() || count == 0 {
         return Ok(None); // No work to do.
     }
 
     // SAFETY: `futures` and `count` validity is an uncheckable precondition.
-    let refs: Vec<&'a FutureT> = futures_as_refs(
+    let refs: Vec<&'a mut FutureT> = futures_as_muts(
         unsafe { std::slice::from_raw_parts(futures, count) },
         runtime,
     )
     .map(|v| v.into_iter().map(|(_, f)| f).collect())?;
 
-    if refs.is_empty() {
-        return Ok(None); // No work to do.
-    }
-
     Ok(Some(refs))
 }
 
-fn futures_as_refs<'a>(
-    futures: &'a [*const FutureT],
+fn futures_as_muts<'a>(
+    futures: &[*mut FutureT],
     runtime: &RuntimeT,
-) -> Result<Vec<(usize, &'a FutureT)>, ErrorT> {
+) -> Result<Vec<(usize, &'a mut FutureT)>, ErrorT> {
     let mut ret = Vec::with_capacity(futures.len());
 
     for (i, ptr) in futures.iter().enumerate() {
-        let Some(future) = safe_optional_as_ref!(*ptr) else {
+        let Some(future) = safe_optional_as_mut!(*ptr) else {
             return Err(ErrorT::from_mongoac(
                 ErrorCodeT::InvalidArgument,
                 &format!("futures array element at index {i}: must not be null"),
@@ -690,7 +691,7 @@ mod tests {
     #[test]
     fn future_is_ready_and_clone_are_safe_while_runtime_is_driven() {
         let runtime = make_runtime();
-        let future = FutureT::new(
+        let mut future = FutureT::new(
             runtime.clone(),
             FutureValue::Void(FutureValueType::new(runtime.spawn(async move {
                 Ok(tokio::time::sleep(Duration::from_millis(50)).await)
@@ -707,7 +708,7 @@ mod tests {
             }
         });
 
-        runtime.block_on_future(&future);
+        runtime.block_on_future(&mut future);
         handle.join().unwrap();
         assert!(future.is_ready());
     }
@@ -750,10 +751,10 @@ mod tests {
         let runtime = make_runtime();
         let stop_flag = Arc::new(AtomicBool::new(false));
         let (barrier, driver) = spawn_driver_thread_until_flag(runtime.clone(), stop_flag.clone());
-        let future = long_future(&runtime);
+        let mut future = long_future(&runtime);
 
         barrier.wait();
-        let result = runtime.block_on_future_with_timeout(&future, Duration::from_millis(50));
+        let result = runtime.block_on_future_with_timeout(&mut future, Duration::from_millis(50));
 
         stop_flag.store(true, Ordering::Release);
         driver.join().unwrap();
@@ -782,12 +783,12 @@ mod tests {
         let runtime = make_runtime();
         let stop_flag = Arc::new(AtomicBool::new(false));
         let (barrier, driver) = spawn_driver_thread_until_flag(runtime.clone(), stop_flag.clone());
-        let f1 = long_future(&runtime);
-        let f2 = long_future(&runtime);
+        let mut f1 = long_future(&runtime);
+        let mut f2 = long_future(&runtime);
 
-        let futures = [(0, &f1), (1, &f2)];
+        let mut futures = vec![(0, &mut f1), (1, &mut f2)];
         barrier.wait();
-        let result = runtime.block_on_any_with_timeout(&futures, Duration::from_millis(50));
+        let result = runtime.block_on_any_with_timeout(&mut futures, Duration::from_millis(50));
 
         stop_flag.store(true, Ordering::Release);
         driver.join().unwrap();
@@ -802,12 +803,12 @@ mod tests {
         let runtime = make_runtime();
         let stop_flag = Arc::new(AtomicBool::new(false));
         let (barrier, driver) = spawn_driver_thread_until_flag(runtime.clone(), stop_flag.clone());
-        let f1 = long_future(&runtime);
-        let f2 = long_future(&runtime);
+        let mut f1 = long_future(&runtime);
+        let mut f2 = long_future(&runtime);
 
-        let futures = [&f1, &f2];
+        let mut futures = vec![&mut f1, &mut f2];
         barrier.wait();
-        let result = runtime.block_on_all_with_timeout(&futures, Duration::from_millis(50));
+        let result = runtime.block_on_all_with_timeout(&mut futures, Duration::from_millis(50));
 
         stop_flag.store(true, Ordering::Release);
         driver.join().unwrap();

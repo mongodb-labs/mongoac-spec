@@ -389,7 +389,8 @@ The concurrency model used by mongoac uses an "executor + task handle + manual p
 - `mongoac_runtime_t` is a per-client "executor" backed by a Tokio `current_thread` runtime.
   It owns the task queue, I/O and timer drivers, and task scheduler.
 - `mongoac_future_t` is a "task handle" representing an asynchronous task scheduled with the associated runtime.
-  `mongoac_future_is_ready()` returns true once the task has completed and a result (value or error) is ready.
+  `mongoac_future_is_ready()` returns true once the future is complete and the future has been polled at least once
+    via `block_on*()` or `mongoac_future_poll()`.
 - An async "task" is a Rust future spawned with the associated runtime.
   The task makes progress by a call to `make_progress*()` or `block_on*()`.
   The result of a task is returned via an associated `mongoac_future_t` when `is_ready()` returns `true` by calling
@@ -427,7 +428,9 @@ When the result is a return value, `mongoac_error_code(error)` equals `MONGOAC_E
 
 All async operations in the mongoac API return a `mongoac_future_t`, even when the return value is `void` (e.g.
   `mongoac_collection_drop_async()`).
-A given future may make progress by a call to `block_on*()` on its associated runtime.
+A given future may make progress by a call to `block_on*()` or `make_progress*()` on its associated runtime.
+Once a given future is _complete_, it must be _polled_ at least once (via `block_on*()` or via `mongoac_future_poll()`)
+  in order for the result of the underlying task to be made ready.
 
 > [!NOTE]
 > In terms of C++26 Execution, `mongoac_future_t` is not like a lazy "Sender" (the task is already spawned) or a oneshot

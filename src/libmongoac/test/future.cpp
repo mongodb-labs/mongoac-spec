@@ -35,6 +35,14 @@ TEST_CASE("is_ready", "[mongoac][future]")
    }
 }
 
+TEST_CASE("poll", "[mongoac][future]")
+{
+   SECTION("null")
+   {
+      CHECK(mongoac_future_poll(nullptr) == false);
+   }
+}
+
 TEST_CASE("get_void", "[mongoac][future]")
 {
    SECTION("null future")
