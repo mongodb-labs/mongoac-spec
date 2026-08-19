@@ -1338,3 +1338,393 @@ If typed event structs are defined by the FFI, the index-based event API will ne
 The index-based API would then return the non-owning, read-only per-event-category structs (`mongoac_command_event_t`,
   `mongoac_cmap_event_t`, and `mongoac_sdam_event_t`) each with its own type-getters (e.g.
   `mongoac_command_event_get_command_started()`, etc.).
+
+## Sequence Diagrams
+
+This section provides sequence diagrams to visually explain mongoac's concurrency model and control flow through the
+  mongoac library, Tokio runtime, and Rust Driver.
+
+The following diagram conventions are used:
+
+- Activations (solid vertical bars): the duration of a given function call.
+- Normal Arrow: normal function entry (right) and exit (left).
+- Async Arrow: (large arrowhead): task await/resume (right) and suspend (left).
+- Dotted Arrow: visual shortcut for an event without explicitly describing control flow (e.g. a state change).
+
+Minor specifics and details irrelevant to the general control flow being described are omitted for simplicity.
+
+### Sequential Block-On
+
+```c
+mongoac_future_t* fut = mongoac_database_drop_async(db, ...);
+mongoac_runtime_block_on(rt, fut, ...);
+mongoac_future_get_void(fut);
+```
+
+```mermaid
+sequenceDiagram
+
+participant U@{"alias": "User", "type": "boundary"}
+participant M@{"alias": "MongoAC", "type": "control"}
+participant T@{"alias": "Tokio", "type": "control"}
+participant R@{"alias": "Rust Driver", "type": "control"}
+participant S@{"alias": "MongoDB Server", "type": "database"}
+
+Note over U: Spawn
+U ->> M: mongoac_database_drop_async()
+activate U
+  M ->> T: runtime.spawn()
+  activate M
+    T ->> M: JoinHandle
+    deactivate M
+  M ->> U: mongoac_future_t
+deactivate U
+
+Note over U: Block On
+U ->> M: mongoac_runtime_block_on()
+activate U
+  M ->> T: runtime.block_on()
+  activate M
+    loop
+      opt
+        Note left of T: Poll: Not Ready
+        T ->> R: handle.poll()
+        activate T
+          R ->> T: Poll::Pending
+        deactivate T
+      end
+      opt
+        Note left of T: Yield to other<br>scheduled tasks
+        T -) R: db.drop().await
+        activate T
+          R -->> S: { "dropDatabase": 1 }
+          R -) T: Poll::Pending
+        deactivate T
+      end
+      opt
+        Note left of T: Park and wait for<br>I/O, timer, or signal
+        S -->> R: { "ok": 1.0 }
+        Note right of T: Waker::wake()
+        T -) R: db.drop().await
+        activate T
+          R -) T: Poll::Ready
+        deactivate T
+      end
+      opt
+        Note left of T: Poll: Ready
+        T ->> R: handle.poll()
+        activate T
+          R ->> T: Poll::Ready
+        deactivate T
+        T -->> M: f.result.set()
+      end
+    end
+    T ->> M: ()
+  deactivate M
+  M ->> U: void
+deactivate U
+
+Note over U: Result
+U ->> M: mongoac_future_get_void(f)
+activate U
+  M ->> U: void
+deactivate U
+```
+
+### Concurrent Block-On
+
+```c
+mongoac_future_t* futs[] = {
+  mongoac_database_drop_async(db1, ...),
+  mongoac_database_drop_async(db2, ...),
+};
+
+mongoac_runtime_block_on_all(rt, futs, ...);
+
+mongoac_future_get_void(futs[0]);
+mongoac_future_get_void(futs[1]);
+```
+
+```mermaid
+sequenceDiagram
+
+participant U@{"alias": "User", "type": "boundary"}
+participant M@{"alias": "MongoAC", "type": "control"}
+participant T@{"alias": "Tokio", "type": "control"}
+participant R@{"alias": "Rust Driver", "type": "control"}
+participant S@{"alias": "MongoDB Server", "type": "database"}
+
+Note right of U: Spawn Futures
+U ->> M: mongoac_database_drop_async(db1)
+activate U
+  M ->> T: rt.spawn()
+  activate M
+    T ->> M: JoinHandle
+    deactivate M
+  M ->> U: mongoac_future_t (f1)
+deactivate U
+
+U ->> M: mongoac_database_drop_async(db2)
+activate U
+  M ->> T: rt.spawn()
+  activate M
+    T ->> M: JoinHandle
+    deactivate M
+  M ->> U: mongoac_future_t (f2)
+deactivate U
+
+Note right of U: Block On
+U ->> M: mongoac_runtime_block_on_all()
+activate U
+  Note right of M: FuturesUnordered
+  M ->> T: runtime.block_on()
+  activate M
+    loop
+      opt
+        Note left of T: Poll: Not Ready
+        alt
+          T ->> R: handle.poll() (f1)
+          activate T
+            R ->> T: Poll::Pending
+          deactivate T
+        else
+          T ->> R: handle.poll() (f2)
+          activate T
+            R ->> T: Poll::Pending
+          deactivate T
+        end
+      end
+      opt
+        Note left of T: Yield to other<br>scheduled tasks
+        alt
+          T -) R: db1.drop().await
+          activate T
+            R --) S: { "dropDatabase": 1 }
+            R -) T: Poll::Pending
+          deactivate T
+        else
+          T -) R: db2.drop().await
+          activate T
+            R --) S: { "dropDatabase": 1 }
+            R -) T: Poll::Pending
+          deactivate T
+        end
+      end
+      opt
+        Note left of T: Park and wait for<br>I/O, timer, or signal
+        alt
+          S --) R: { "ok": 1.0 }
+          Note right of T: Waker::wake()
+          T -) R: db1.drop().await
+          activate T
+            R -) T: Poll::Ready
+          deactivate T
+        else
+          S --) R: { "ok": 1.0 }
+          Note right of T: Waker::wake()
+          T -) R: db2.drop().await
+          activate T
+            R -) T: Poll::Ready
+          deactivate T
+        end
+      end
+      opt
+        Note left of T: Poll: Ready
+        alt
+          T ->> R: handle.poll() (f1)
+          activate T
+            R ->> T: Poll::Ready
+          deactivate T
+          T -->> M: f1.result.set()
+        else
+          T ->> R: handle.poll() (f2)
+          activate T
+            R ->> T: Poll::Ready
+          deactivate T
+          T -->> M: f2.result.set()
+        end
+      end
+    end
+    T ->> M: ()
+  deactivate M
+  M ->> U: void
+deactivate U
+
+Note right of U: Get Results
+U ->> M: mongoac_future_get_void(f1)
+activate U
+  M ->> U: void
+deactivate U
+U ->> M: mongoac_future_get_void(f2)
+activate U
+  M ->> U: void
+deactivate U
+```
+
+### Concurrent and Interleaved
+
+> [!NOTE]
+> For the sake of example, this diagram assumes the futures are completed in exactly three `make_progress()` calls as
+>   described below.
+> For simplicity, specifics concerning task scheduling (including thread-parking and wakers) are also omitted.
+> This diagram DOES NOT accurately describe the timing and sequence of events that are expected in a real-world program.
+
+```c
+mongoac_future_t* f1 = mongoac_database_drop_async(db1, ...);
+mongoac_future_t* f2 = mongoac_database_drop_async(db2, ...);
+
+mongoac_runtime_make_progress(rt);
+mongoac_future_poll(f1); // false
+mongoac_future_poll(f2); // false
+
+mongoac_runtime_make_progress(rt);
+mongoac_future_poll(f1); // true
+mongoac_future_poll(f2); // false
+
+mongoac_runtime_make_progress(rt);
+mongoac_future_poll(f1); // true
+mongoac_future_poll(f2); // true
+```
+
+```mermaid
+sequenceDiagram
+
+participant U@{"alias": "User", "type": "boundary"}
+participant M@{"alias": "MongoAC", "type": "control"}
+participant T@{"alias": "Tokio", "type": "control"}
+participant R@{"alias": "Rust Driver", "type": "control"}
+participant S@{"alias": "MongoDB Server", "type": "database"}
+
+U ->> M: mongoac_database_drop_async() (db1)
+activate U
+  M ->> T: rt.spawn()
+  activate M
+    T ->> M: JoinHandle
+    deactivate M
+  M ->> U: mongoac_future_t (f1)
+deactivate U
+
+U ->> M: mongoac_database_drop_async() (db2)
+activate U
+  M ->> T: rt.spawn()
+  activate M
+    T ->> M: JoinHandle
+    deactivate M
+  M ->> U: mongoac_future_t (f2)
+deactivate U
+
+U ->> M: mongoac_runtime_make_progress()
+activate U
+  M ->> T: runtime.block_on()
+  activate M
+    alt
+      Note left of T: yield_now().await
+      T ->> T:
+      T -) R: db1.drop().await
+      activate T
+        R --) S: { "dropDatabase": 1 }
+        R -) T: Poll::Pending
+      deactivate T
+      T -) R: db2.drop().await
+      activate T
+        R --) S: { "dropDatabase": 1 }
+        R -) T: Poll::Pending
+      deactivate T
+    end
+    T ->> M: ()
+  deactivate M
+  M ->> U: void
+deactivate U
+
+U ->> M: mongoac_future_poll() (f1)
+activate U
+  Note over M: future.poll()
+  Note right of M: handle.poll()
+  Note right of M: Poll::Pending
+  Note over M: false
+  M ->> U: false
+deactivate U
+
+U ->> M: mongoac_future_poll() (f2)
+activate U
+  Note over M: future.poll()
+  Note right of M: handle.poll()
+  Note right of M: Poll::Pending
+  Note over M: false
+  M ->> U: false
+deactivate U
+
+U ->> M: mongoac_runtime_make_progress()
+activate U
+  M ->> T: runtime.block_on()
+  activate M
+    alt
+      Note left of T:  yield_now().await
+      T ->> T:
+      T -) R: db1.drop().await
+      activate T
+        S --) R: { "ok": 1.0 }
+        R -) T: Poll::Ready
+      deactivate T
+      T -) R: db2.drop().await
+      activate T
+        R -) T: Poll::Pending
+      deactivate T
+    end
+    T ->> M: ()
+  deactivate M
+  M ->> U: void
+deactivate U
+
+U ->> M: mongoac_future_poll() (f1)
+activate U
+  Note over M: future.poll()
+  Note right of M: handle.poll()
+  Note right of M: Poll::Ready
+  Note over M: true
+  M ->> U: true
+deactivate U
+
+U ->> M: mongoac_future_poll() (f2)
+activate U
+  Note over M: future.poll()
+  Note right of M: handle.poll()
+  Note right of M: Poll::Pending
+  Note over M: false
+  M ->> U: false
+deactivate U
+
+U ->> M: mongoac_runtime_make_progress()
+activate U
+  M ->> T: runtime.block_on()
+  activate M
+    alt
+      Note left of T:  yield_now().await
+      T ->> T:
+      T -) R: db2.drop().await
+      activate T
+        S --) R: { "ok": 1.0 }
+        R -) T: Poll::Ready
+      deactivate T
+    end
+    T ->> M: ()
+  deactivate M
+  M ->> U: void
+deactivate U
+
+U ->> M: mongoac_future_poll() (f1)
+activate U
+  Note over M: future.poll()
+  Note over M: true
+  M ->> U: true
+deactivate U
+
+U ->> M: mongoac_future_poll() (f2)
+activate U
+  Note over M: future.poll()
+  Note right of M: handle.poll()
+  Note right of M: Poll::Ready
+  Note over M: true
+  M ->> U: true
+deactivate U
+```
