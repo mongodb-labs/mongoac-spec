@@ -128,12 +128,12 @@ pub extern "C" fn mongoac_runtime_block_on_any(
     let error = safe_optional_error_as_mut!(error);
     let runtime = safe_as_ref!(runtime);
 
-    let Some(mut muts) = safe_error!(futures_as_muts_for_any(futures, count, runtime), error)
+    let Some(mut futs) = safe_error!(futures_as_muts_for_any(futures, count, runtime), error)
     else {
         return Default::default();
     };
 
-    match runtime.block_on_any(&mut muts) {
+    match runtime.block_on_any(&mut futs) {
         Some(i) => unsafe { futures.add(i) },
         None => Default::default(),
     }
@@ -154,13 +154,13 @@ pub extern "C" fn mongoac_runtime_block_on_any_with_timeout(
     let error = safe_optional_error_as_mut!(error);
     let runtime = safe_as_ref!(runtime);
 
-    let Some(mut muts) = safe_error!(futures_as_muts_for_any(futures, count, runtime), error)
+    let Some(mut futs) = safe_error!(futures_as_muts_for_any(futures, count, runtime), error)
     else {
         return Default::default();
     };
 
     match safe_error!(
-        runtime.block_on_any_with_timeout(&mut muts, Duration::from_millis(timeout_ms)),
+        runtime.block_on_any_with_timeout(&mut futs, Duration::from_millis(timeout_ms)),
         error
     ) {
         Some(i) => unsafe { futures.add(i) },
@@ -182,12 +182,12 @@ pub extern "C" fn mongoac_runtime_block_on_all(
     let error = safe_optional_error_as_mut!(error);
     let runtime = safe_as_ref!(runtime);
 
-    let Some(mut muts) = safe_error!(futures_as_muts_for_all(futures, count, runtime), error)
+    let Some(mut futs) = safe_error!(futures_as_muts_for_all(futures, count, runtime), error)
     else {
         return;
     };
 
-    runtime.block_on_all(&mut muts);
+    runtime.block_on_all(&mut futs);
 }
 
 // Like `block_on_all()`, but (soft) upper-bounded by `timeout_ms`.
@@ -204,13 +204,13 @@ pub extern "C" fn mongoac_runtime_block_on_all_with_timeout(
     let error = safe_optional_error_as_mut!(error);
     let runtime = safe_as_ref!(runtime);
 
-    let Some(mut muts) = safe_error!(futures_as_muts_for_all(futures, count, runtime), error)
+    let Some(mut futs) = safe_error!(futures_as_muts_for_all(futures, count, runtime), error)
     else {
         return;
     };
 
     safe_error!(
-        runtime.block_on_all_with_timeout(&mut muts, Duration::from_millis(timeout_ms)),
+        runtime.block_on_all_with_timeout(&mut futs, Duration::from_millis(timeout_ms)),
         error
     );
 }
@@ -263,7 +263,7 @@ impl RuntimeT {
             return; // No work to do.
         }
 
-        self.runtime.block_on(future.poll_fn());
+        self.runtime.block_on(future.poll_async());
     }
 
     pub(crate) fn block_on_future_with_timeout(
@@ -278,7 +278,7 @@ impl RuntimeT {
         }
 
         self.runtime.block_on(async {
-            tokio::time::timeout_at(deadline, future.poll_fn()).await?;
+            tokio::time::timeout_at(deadline, future.poll_async()).await?;
             Ok(())
         })
     }

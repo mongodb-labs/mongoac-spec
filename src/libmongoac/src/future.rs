@@ -192,7 +192,7 @@ impl FutureT {
         future_value_op!(self.value, v => v.poll_with_context(ctx))
     }
 
-    pub fn poll_fn(&mut self) -> impl Future<Output = ()> + '_ {
+    pub fn poll_async(&mut self) -> impl Future<Output = ()> + '_ {
         poll_fn(|ctx| {
             if self.poll_with_context(ctx) {
                 Poll::Ready(())
