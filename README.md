@@ -816,9 +816,16 @@ CRUD operations generally establish the typical async+sync API and implementatio
 > mongoac_collection_insert_many(coll, session, (mongoac_bson_view_t){bson_get_data(&docs), docs.len}, error);
 > ```
 
-To minimize the breadth of the FFI, results of operations are serialized into BSON documents rather than individual
-  typed result structs (e.g. `{"insertedId": <id>}` instead of `InsertOneResult`).
-A null `mongoac_bson_t` is used to indicate "no match" (as would a null optional).
+> [!NOTE]
+> The reference implementation uses BSON serialization instead of typed result structs (e.g. `{"insertedId": <id>}`
+>   instead of `InsertOneResult`) and uses BSON serialization for `Find*Options` and `CreateCollectionOptions`.
+> This is only to minimize the scope of the reference implementation: the real-world implementation will fully implement
+>   typed structs both for options and for return values.
+
+All result types for individual operations will have a corresponding typed struct (e.g. `mongoac_insert_one_result_t`
+  for `InsertOneResult`) for consistency with the CRUD specification.
+`mongoac_future_t` will need extensions to its `get_*()` API accordingly (e.g.
+  `mongoac_future_get_insert_one_result() -> mongoac_insert_one_result_t*`).
 
 ```c
 mongoac_cursor_t* cursor = mongoac_collection_find(coll, session, filter, options, error);
@@ -1186,13 +1193,17 @@ Rejected: the mongoac library prioritizes compatibility with the underlying Rust
 Declaring structs as concrete types in public headers would impose FFI-specific ABI compatibility requirements.
 This includes the use of inline buffers for raw bytes (e.g. `bson_t`) and strings (e.g. `bson_error_t`).
 
-#### Future Struct per Result Type
+<a id="rejected-per-type-future-handles"></a>
 
-Rejected: `mongoac_runtime_block_on*()` needs a consistent type for future handles on which to block-on.
-Declaring a unique struct per future result type would greatly complicate both the public `RuntimeT` API as well as the
-  mongoac implementation for little-to-no additional type safety.
-Clearly documenting the expected return type for a given future and ensuring well-defined runtime errors for incorrect
-  result value access is sufficient.
+#### Per-Result-Type Future Handle Structs
+
+Rejected: using `mongoac_future_<type>_t` (e.g. `mongoac_future_void_t`, `mongoac_future_bson_t`, etc.) will
+  unnecessarily force both users and mongoac to implement generics over every `<type>` in the FFI, e.g. when
+  passing futures to the `block_on*()` API.
+Clearly documenting the expected return type for a given `mongoac_future_t` (which is completely determined by the
+  operation which spawns it, e.g. `insert_one() -> InsertOneResult` implies `InsertOneResult` is the result type of
+  `insert_one_async() -> FutureT`) and ensuring well-defined runtime errors for incorrect result type access is
+  sufficient for type safety.
 
 #### Cursor Struct per Cursor Type
 
