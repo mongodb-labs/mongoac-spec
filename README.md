@@ -608,6 +608,9 @@ Users may also append metadata post-construction using `mongoac_client_append_me
 
 #### Event API
 
+> [!NOTE]
+> The reference implementation only support command events and uses BSON serialization instead of typed structs.
+
 The Rust Driver API supports tracking events by registering a callback function for commands, CMAP, and SDAM.
 To [avoid using callback functions](#rejected-callbacks) in the FFI, an index-based buffer API is used instead.
 When the boolean toggle is enabled in `mongoac_client_options_t` (defaults to `false`), `mongoac_client_t` registers an
@@ -620,11 +623,48 @@ The event queues are implemented as `VecDeque`: a "double-ended queue implemente
 The `count()` and `get(n)` operations are O(1) operations, whereas `clear(n)` is O(n).
 Due to being a ring buffer, the O(n) clear does not require any internal reallocations of existing objects.
 
-> [!NOTE]
-> Only command event monitoring is currently implemented by the current mongoac implementation.
+Events will be represented as typed structs per event category:
 
-> [!TIP]
-> - [Should the FFI define typed event structs?](#event-typed-structs)
+- `mongoac_command_event_t`: `mongodb::event::command::CommandEvent`
+- `mongoac_sdam_event_t`: `mongodb::event::sdam::SdamEvent`
+- `mongoac_cmap_event_t`: `mongodb::event::cmap::CmapEvent`
+
+All three event category structs, as well as their corresponding event type structs, are non-owning, read-only views to
+  the underlying event object within the buffer, e.g. `mongoac_command_started_event_get_command_name()` returns
+  `mongoac_string_view_t` (not `mongoac_string_t`).
+To obtain the underlying variant (e.g. `CommandEventStarted` from `CommandEvent`), the event category structs will
+  provide an `get_<type>()` API similar to `get_<type>()` for `mongoac_future_t`.
+Unlike `mongoac_future_t`, the underlying type must be queryable by the user due to the lack of an explicit,
+  deterministic correspondance between any given event object and its expected type (unlike futures, where the result
+  type is completely determined by the operation which spawns the future).
+Therefore, a `*_get_type() -> mongoac_<event>_type_t` "enumeration" (constant macros) will be required (similar to
+  the C++ Driver's `bsoncxx::v1::element::view::type_id()` API).
+
+```c
+mongoac_command_event_t* event = mongoac_client_get_command_event(client, 0);
+
+switch (mongoac_command_event_get_type(event)) {
+  case MONGOAC_COMMAND_EVENT_TYPE_STARTED: {
+    mongoac_command_started_event_t* e = mongoac_command_event_get_started(event);
+    mongoac_command_started_event_get_command_name(e); // mongoac_string_view_t
+    mongoac_command_started_event_destroy(e);
+  } break;
+
+  case MONGOAC_COMMAND_EVENT_TYPE_SUCCEEDED: {
+    mongoac_command_succeeded_event_t* e = mongoac_command_event_get_succeeded(event);
+    mongoac_command_succeeded_event_get_command_name(e); // mongoac_string_view_t
+    mongoac_command_succeeded_event_destroy(e);
+  } break;
+
+  case MONGOAC_COMMAND_EVENT_TYPE_FAILED: {
+    mongoac_command_failed_event_t* e = mongoac_command_event_get_failed(event);
+    mongoac_command_failed_event_get_command_name(e); // mongoac_string_view_t
+    mongoac_command_failed_event_destroy(e);
+  } break;
+}
+
+mongoac_command_event_destroy(e);
+```
 
 #### Server Discovery and Monitoring
 
@@ -1318,26 +1358,6 @@ If the user enables event monitoring, but does not periodically `clear(n)` the b
 We may add one or more mongoac-specific configuration options to `mongoac_client_options_t` to allow users to control
   whether these internal event buffers have a maximum (possibly preallocated) allocation size, as well as the policy to
   use when the queue is full (e.g. overwriting oldest events vs. refusing new events and/or whether to return an error).
-
-<a id="event-typed-structs"></a>
-
-##### Should the FFI define typed event structs?
-
-There are a large number of event types, each with its own set of fields requiring accessors:
-
-- Command: 3 structs, 18 fields total.
-- CmapEvent: 11 structs, 27 fields total.
-- SdamEvent: 9 structs, 29 fields total.
-
-For simplicity, the current mongoac implementation proposes returning all events as BSON documents.
-However, this imposes the unconditional performance cost of serde serialization.
-Furthermore, users are forced to query for the presence/absence of specific fields to derive the original event type.
-
-If typed event structs are defined by the FFI, the index-based event API will need to support accessors similar to that
-  of `mongoac_future_t`, where one must query the event type and invoke the correct getter.
-The index-based API would then return the non-owning, read-only per-event-category structs (`mongoac_command_event_t`,
-  `mongoac_cmap_event_t`, and `mongoac_sdam_event_t`) each with its own type-getters (e.g.
-  `mongoac_command_event_get_command_started()`, etc.).
 
 ## Sequence Diagrams
 
