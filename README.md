@@ -1401,7 +1401,6 @@ participant T@{"alias": "Tokio", "type": "control"}
 participant R@{"alias": "Rust Driver", "type": "control"}
 participant S@{"alias": "MongoDB Server", "type": "database"}
 
-Note over U: Spawn
 U ->> M: mongoac_database_drop_async()
 activate U
   M ->> T: runtime.spawn()
@@ -1411,7 +1410,6 @@ activate U
   M ->> U: mongoac_future_t
 deactivate U
 
-Note over U: Block On
 U ->> M: mongoac_runtime_block_on()
 activate U
   M ->> T: runtime.block_on()
@@ -1441,21 +1439,17 @@ activate U
           R -) T: Poll::Ready
         deactivate T
       end
-      opt
-        Note left of T: Poll: Ready
-        T ->> R: handle.poll()
-        activate T
-          R ->> T: Poll::Ready
-        deactivate T
-        T -->> M: f.result.set()
-      end
     end
+    T ->> R: handle.poll()
+    activate T
+      R ->> T: Poll::Ready
+    deactivate T
+    T -->> M: f.result.set()
     T ->> M: ()
   deactivate M
   M ->> U: void
 deactivate U
 
-Note over U: Result
 U ->> M: mongoac_future_get_void(f)
 activate U
   M ->> U: void
@@ -1485,7 +1479,6 @@ participant T@{"alias": "Tokio", "type": "control"}
 participant R@{"alias": "Rust Driver", "type": "control"}
 participant S@{"alias": "MongoDB Server", "type": "database"}
 
-Note right of U: Spawn Futures
 U ->> M: mongoac_database_drop_async(db1)
 activate U
   M ->> T: rt.spawn()
@@ -1504,7 +1497,6 @@ activate U
   M ->> U: mongoac_future_t (f2)
 deactivate U
 
-Note right of U: Block On
 U ->> M: mongoac_runtime_block_on_all()
 activate U
   Note right of M: FuturesUnordered
@@ -1559,29 +1551,22 @@ activate U
           deactivate T
         end
       end
-      opt
-        Note left of T: Poll: Ready
-        alt
-          T ->> R: handle.poll() (f1)
-          activate T
-            R ->> T: Poll::Ready
-          deactivate T
-          T -->> M: f1.result.set()
-        else
-          T ->> R: handle.poll() (f2)
-          activate T
-            R ->> T: Poll::Ready
-          deactivate T
-          T -->> M: f2.result.set()
-        end
-      end
     end
+    T ->> R: handle.poll() (f1)
+    activate T
+      R ->> T: Poll::Ready
+    deactivate T
+    T -->> M: f1.result.set()
+    T ->> R: handle.poll() (f2)
+    activate T
+      R ->> T: Poll::Ready
+    deactivate T
+    T -->> M: f2.result.set()
     T ->> M: ()
   deactivate M
   M ->> U: void
 deactivate U
 
-Note right of U: Get Results
 U ->> M: mongoac_future_get_void(f1)
 activate U
   M ->> U: void
@@ -1595,10 +1580,9 @@ deactivate U
 ### Concurrent and Interleaved
 
 > [!NOTE]
-> For the sake of example, this diagram assumes the futures are completed in exactly three `make_progress()` calls as
->   described below.
-> For simplicity, specifics concerning task scheduling (including thread-parking and wakers) are also omitted.
-> This diagram DOES NOT accurately describe the timing and sequence of events that are expected in a real-world program.
+> This diagram assumes the futures are completed in exactly three `make_progress()` calls as described below.
+> This is for illustrative purposes only: this diagram does NOT accurately describe the sequence or timing of events
+>   expected in a real world program.
 
 ```c
 mongoac_future_t* f1 = mongoac_database_drop_async(db1, ...);
