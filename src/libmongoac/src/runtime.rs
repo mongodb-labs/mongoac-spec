@@ -786,7 +786,7 @@ mod tests {
         let mut f1 = long_future(&runtime);
         let mut f2 = long_future(&runtime);
 
-        let mut futures = vec![(0, &mut f1), (1, &mut f2)];
+        let mut futures = [(0, &mut f1), (1, &mut f2)];
         barrier.wait();
         let result = runtime.block_on_any_with_timeout(&mut futures, Duration::from_millis(50));
 
@@ -806,7 +806,7 @@ mod tests {
         let mut f1 = long_future(&runtime);
         let mut f2 = long_future(&runtime);
 
-        let mut futures = vec![&mut f1, &mut f2];
+        let mut futures = [&mut f1, &mut f2];
         barrier.wait();
         let result = runtime.block_on_all_with_timeout(&mut futures, Duration::from_millis(50));
 

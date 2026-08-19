@@ -429,7 +429,7 @@ mod tests {
             notify1.notify_one();
         });
 
-        let mut futures = vec![(0, &mut f1), (1, &mut f2)];
+        let mut futures = [(0, &mut f1), (1, &mut f2)];
         barrier.wait();
         let index = runtime
             .block_on_any(&mut futures)
@@ -466,7 +466,7 @@ mod tests {
             notify2.notify_one();
         });
 
-        let mut futures = vec![&mut f1, &mut f2];
+        let mut futures = [&mut f1, &mut f2];
         barrier.wait();
         runtime.block_on_all(&mut futures);
 
@@ -524,7 +524,7 @@ mod tests {
             notify1.notify_one();
         });
 
-        let mut futures = vec![(0, &mut f1), (1, &mut f2)];
+        let mut futures = [(0, &mut f1), (1, &mut f2)];
         barrier.wait();
         let result = runtime.block_on_any_with_timeout(&mut futures, Duration::from_millis(200));
 
@@ -543,7 +543,7 @@ mod tests {
         let mut f1 = spawn_delayed(&runtime, Duration::from_millis(500));
         let mut f2 = spawn_delayed(&runtime, Duration::from_millis(600));
 
-        let mut futures = vec![(0, &mut f1), (1, &mut f2)];
+        let mut futures = [(0, &mut f1), (1, &mut f2)];
         let result = runtime.block_on_any_with_timeout(&mut futures, Duration::from_millis(10));
 
         assert!(
@@ -560,7 +560,7 @@ mod tests {
         let mut f1 = spawn_yielding(&runtime, 3);
         let mut f2 = spawn_yielding(&runtime, 5);
 
-        let mut futures = vec![&mut f1, &mut f2];
+        let mut futures = [&mut f1, &mut f2];
         let result = runtime.block_on_all_with_timeout(&mut futures, Duration::from_secs(5));
 
         assert!(result.is_ok(), "all futures should complete before timeout");
@@ -574,7 +574,7 @@ mod tests {
         let mut f1 = spawn_delayed(&runtime, Duration::from_millis(500));
         let mut f2 = spawn_delayed(&runtime, Duration::from_millis(600));
 
-        let mut futures = vec![&mut f1, &mut f2];
+        let mut futures = [&mut f1, &mut f2];
         let result = runtime.block_on_all_with_timeout(&mut futures, Duration::from_millis(10));
 
         assert!(
