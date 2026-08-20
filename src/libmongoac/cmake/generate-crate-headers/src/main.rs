@@ -6,10 +6,15 @@ macro_rules! includes {
     };
 }
 
-// List include directives needed by each crate header.
-fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
-    // Rename structs from `ExampleT` to `mongoac_example_t`.
-    for (from, to) in [
+// Keep synchronized with `skip_cargo_headers` in src/libmongoac/CMakeLists.txt.
+const SKIP_CARGO_HEADERS: &[&str] = &["lib", "mod", "version"];
+
+// Keep synchronized with `skip_forward_headers` in src/libmongoac/CMakeLists.txt.
+const SKIP_FORWARD_HEADERS: &[&str] = &["bson", "cursor_type", "sanity_check", "string"];
+
+// Rename structs from `ExampleT` to `mongoac_example_t`.
+fn rename_structs() -> std::collections::HashMap<String, String> {
+    let pairs: &[(&str, &str)] = &[
         ("AggregateOptionsT", "mongoac_aggregate_options_t"),
         ("BsonT", "mongoac_bson_t"),
         ("BsonViewT", "mongoac_bson_view_t"),
@@ -70,277 +75,295 @@ fn configure(name: &str, mut config: cbindgen::Config) -> cbindgen::Config {
         ("TlsOptionsT", "mongoac_tls_options_t"),
         ("UpdateOptionsT", "mongoac_update_options_t"),
         ("WriteConcernT", "mongoac_write_concern_t"),
-    ] {
-        config
-            .export
-            .rename
-            .insert(from.to_string(), to.to_string());
-    }
+    ];
 
-    config.sys_includes = match name {
-        "bson" => includes!["mongoac/export.h", "stdint.h"],
+    pairs
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
+}
+
+// List include directives needed by each crate header.
+fn configure(name: &str, config: &mut cbindgen::Config) {
+    let headers = match name {
+        "bson" => includes!["stdint.h"],
         "aggregate_options" => includes![
-            "mongoac/export.h",
-            "mongoac/error.h",
-            "mongoac/read_concern.h",
-            "mongoac/write_concern.h",
+            "mongoac/error-fwd.h",
+            "mongoac/read_concern-fwd.h",
+            "mongoac/write_concern-fwd.h",
             "mongoac/bson.h",
             "stdbool.h",
             "stdint.h",
         ],
-        "sanity_check" => includes!["mongoac/export.h", "stdint.h"],
+        "sanity_check" => includes!["stdint.h"],
         "client" => includes![
-            "mongoac/export.h",
-            "mongoac/client_options.h",
-            "mongoac/client_session.h",
-            "mongoac/error.h",
-            "mongoac/future.h",
-            "mongoac/list_databases_options.h",
-            "mongoac/session_options.h",
-            "mongoac/runtime.h",
+            "mongoac/client_options-fwd.h",
+            "mongoac/client_session-fwd.h",
+            "mongoac/error-fwd.h",
+            "mongoac/future-fwd.h",
+            "mongoac/list_databases_options-fwd.h",
+            "mongoac/session_options-fwd.h",
+            "mongoac/runtime-fwd.h",
             "mongoac/bson.h",
             "mongoac/string.h",
             "stdint.h",
         ],
         "client_options" => includes![
-            "mongoac/export.h",
-            "mongoac/error.h",
-            "mongoac/server_api.h",
-            "mongoac/read_concern.h",
-            "mongoac/write_concern.h",
-            "mongoac/read_preference.h",
-            "mongoac/server_selector.h",
-            "mongoac/tls_options.h",
-            "mongoac/credential.h",
+            "mongoac/error-fwd.h",
+            "mongoac/server_api-fwd.h",
+            "mongoac/read_concern-fwd.h",
+            "mongoac/write_concern-fwd.h",
+            "mongoac/read_preference-fwd.h",
+            "mongoac/server_selector-fwd.h",
+            "mongoac/tls_options-fwd.h",
+            "mongoac/credential-fwd.h",
             "mongoac/string.h",
             "stdbool.h",
             "stdint.h",
         ],
-        "client_session" => includes!["mongoac/export.h", "mongoac/error.h", "mongoac/future.h"],
+        "client_session" => includes!["mongoac/error-fwd.h", "mongoac/future-fwd.h"],
         "collection" => includes![
-            "mongoac/export.h",
-            "mongoac/database.h",
-            "mongoac/client_session.h",
-            "mongoac/cursor.h",
-            "mongoac/error.h",
-            "mongoac/future.h",
-            "mongoac/drop_collection_options.h",
-            "mongoac/insert_one_options.h",
-            "mongoac/insert_many_options.h",
-            "mongoac/find_options.h",
-            "mongoac/find_one_options.h",
-            "mongoac/delete_options.h",
-            "mongoac/replace_options.h",
-            "mongoac/update_options.h",
-            "mongoac/count_options.h",
-            "mongoac/estimated_document_count_options.h",
-            "mongoac/distinct_options.h",
-            "mongoac/aggregate_options.h",
-            "mongoac/collection_options.h",
+            "mongoac/database-fwd.h",
+            "mongoac/client_session-fwd.h",
+            "mongoac/cursor-fwd.h",
+            "mongoac/error-fwd.h",
+            "mongoac/future-fwd.h",
+            "mongoac/drop_collection_options-fwd.h",
+            "mongoac/insert_one_options-fwd.h",
+            "mongoac/insert_many_options-fwd.h",
+            "mongoac/find_options-fwd.h",
+            "mongoac/find_one_options-fwd.h",
+            "mongoac/delete_options-fwd.h",
+            "mongoac/replace_options-fwd.h",
+            "mongoac/update_options-fwd.h",
+            "mongoac/count_options-fwd.h",
+            "mongoac/estimated_document_count_options-fwd.h",
+            "mongoac/distinct_options-fwd.h",
+            "mongoac/aggregate_options-fwd.h",
+            "mongoac/collection_options-fwd.h",
             "mongoac/bson.h",
             "mongoac/string.h",
             "stdint.h",
         ],
-        "create_collection_options" => {
-            includes!["mongoac/export.h", "mongoac/error.h", "mongoac/bson.h"]
-        }
+        "create_collection_options" => includes!["mongoac/error-fwd.h", "mongoac/bson.h"],
         "collection_options" => includes![
-            "mongoac/export.h",
-            "mongoac/read_concern.h",
-            "mongoac/write_concern.h",
-            "mongoac/read_preference.h",
-            "mongoac/server_selector.h",
+            "mongoac/read_concern-fwd.h",
+            "mongoac/write_concern-fwd.h",
+            "mongoac/read_preference-fwd.h",
+            "mongoac/server_selector-fwd.h",
         ],
         "credential" => includes![
-            "mongoac/export.h",
-            "mongoac/error.h",
+            "mongoac/error-fwd.h",
             "mongoac/bson.h",
             "mongoac/string.h",
             "stdint.h",
         ],
         "cursor_type" => includes!["stdint.h"],
         "cursor" => includes![
-            "mongoac/export.h",
-            "mongoac/error.h",
-            "mongoac/future.h",
+            "mongoac/error-fwd.h",
+            "mongoac/future-fwd.h",
             "mongoac/bson.h",
             "stdbool.h",
         ],
         "database" => includes![
-            "mongoac/export.h",
-            "mongoac/client.h",
-            "mongoac/client_session.h",
-            "mongoac/cursor.h",
-            "mongoac/error.h",
-            "mongoac/future.h",
-            "mongoac/list_collections_options.h",
-            "mongoac/drop_database_options.h",
-            "mongoac/database_options.h",
-            "mongoac/create_collection_options.h",
-            "mongoac/run_command_options.h",
-            "mongoac/run_cursor_command_options.h",
+            "mongoac/client-fwd.h",
+            "mongoac/client_session-fwd.h",
+            "mongoac/cursor-fwd.h",
+            "mongoac/error-fwd.h",
+            "mongoac/future-fwd.h",
+            "mongoac/list_collections_options-fwd.h",
+            "mongoac/drop_database_options-fwd.h",
+            "mongoac/database_options-fwd.h",
+            "mongoac/create_collection_options-fwd.h",
+            "mongoac/run_command_options-fwd.h",
+            "mongoac/run_cursor_command_options-fwd.h",
             "mongoac/bson.h",
             "mongoac/string.h",
         ],
         "database_options" => includes![
-            "mongoac/export.h",
-            "mongoac/read_concern.h",
-            "mongoac/write_concern.h",
-            "mongoac/read_preference.h",
-            "mongoac/server_selector.h",
+            "mongoac/read_concern-fwd.h",
+            "mongoac/write_concern-fwd.h",
+            "mongoac/read_preference-fwd.h",
+            "mongoac/server_selector-fwd.h",
         ],
-        "drop_collection_options" => includes!["mongoac/export.h", "mongoac/write_concern.h"],
         "delete_options" => includes![
-            "mongoac/export.h",
-            "mongoac/error.h",
-            "mongoac/write_concern.h",
+            "mongoac/error-fwd.h",
+            "mongoac/write_concern-fwd.h",
             "mongoac/bson.h",
         ],
         "replace_options" => includes![
-            "mongoac/export.h",
-            "mongoac/error.h",
-            "mongoac/write_concern.h",
+            "mongoac/error-fwd.h",
+            "mongoac/write_concern-fwd.h",
             "mongoac/bson.h",
             "stdbool.h",
         ],
         "update_options" => includes![
-            "mongoac/export.h",
-            "mongoac/error.h",
-            "mongoac/write_concern.h",
+            "mongoac/error-fwd.h",
+            "mongoac/write_concern-fwd.h",
             "mongoac/bson.h",
             "stdbool.h",
         ],
         "count_options" => includes![
-            "mongoac/export.h",
-            "mongoac/error.h",
-            "mongoac/read_concern.h",
+            "mongoac/error-fwd.h",
+            "mongoac/read_concern-fwd.h",
             "mongoac/bson.h",
             "stdint.h",
         ],
         "estimated_document_count_options" => includes![
-            "mongoac/export.h",
-            "mongoac/error.h",
-            "mongoac/read_concern.h",
+            "mongoac/error-fwd.h",
+            "mongoac/read_concern-fwd.h",
             "mongoac/bson.h",
             "stdint.h",
         ],
         "distinct_options" => includes![
-            "mongoac/export.h",
-            "mongoac/error.h",
-            "mongoac/read_concern.h",
+            "mongoac/error-fwd.h",
+            "mongoac/read_concern-fwd.h",
             "mongoac/bson.h",
             "stdint.h",
         ],
-        "drop_database_options" => includes!["mongoac/export.h", "mongoac/write_concern.h"],
-        "error" => includes![
-            "mongoac/export.h",
-            "mongoac/string.h",
-            "stdbool.h",
-            "stdint.h"
-        ],
-        "find_options" => includes!["mongoac/export.h", "mongoac/error.h", "mongoac/bson.h"],
-        "find_one_options" => includes!["mongoac/export.h", "mongoac/error.h", "mongoac/bson.h"],
+        "drop_collection_options" => includes!["mongoac/write_concern-fwd.h"],
+        "drop_database_options" => includes!["mongoac/write_concern-fwd.h"],
+        "error" => includes!["mongoac/string.h", "stdbool.h", "stdint.h"],
+        "find_options" => includes!["mongoac/error-fwd.h", "mongoac/bson.h"],
+        "find_one_options" => includes!["mongoac/error-fwd.h", "mongoac/bson.h"],
         "future" => includes![
-            "mongoac/export.h",
-            "mongoac/error.h",
+            "mongoac/error-fwd.h",
+            "mongoac/runtime-fwd.h",
             "mongoac/bson.h",
             "stdbool.h",
             "stdint.h",
         ],
         "insert_many_options" => includes![
-            "mongoac/export.h",
-            "mongoac/error.h",
-            "mongoac/write_concern.h",
+            "mongoac/error-fwd.h",
+            "mongoac/write_concern-fwd.h",
             "mongoac/bson.h",
             "stdbool.h",
         ],
         "insert_one_options" => includes![
-            "mongoac/export.h",
-            "mongoac/error.h",
-            "mongoac/write_concern.h",
+            "mongoac/error-fwd.h",
+            "mongoac/write_concern-fwd.h",
             "mongoac/bson.h",
             "stdbool.h",
         ],
         "list_collections_options" => includes![
-            "mongoac/export.h",
-            "mongoac/error.h",
+            "mongoac/error-fwd.h",
             "mongoac/bson.h",
             "stdbool.h",
             "stdint.h",
         ],
-        "list_databases_options" => includes![
-            "mongoac/export.h",
-            "mongoac/error.h",
-            "mongoac/bson.h",
-            "stdbool.h",
-        ],
-        "read_concern" => includes!["mongoac/export.h", "mongoac/error.h", "mongoac/string.h"],
+        "list_databases_options" => includes!["mongoac/error-fwd.h", "mongoac/bson.h", "stdbool.h"],
+        "read_concern" => includes!["mongoac/error-fwd.h", "mongoac/string.h"],
         "run_command_options" => includes![
-            "mongoac/export.h",
-            "mongoac/read_preference.h",
-            "mongoac/server_selector.h",
+            "mongoac/read_preference-fwd.h",
+            "mongoac/server_selector-fwd.h",
         ],
         "run_cursor_command_options" => includes![
-            "mongoac/export.h",
             "mongoac/cursor_type.h",
-            "mongoac/read_preference.h",
-            "mongoac/server_selector.h",
-            "mongoac/error.h",
+            "mongoac/read_preference-fwd.h",
+            "mongoac/server_selector-fwd.h",
+            "mongoac/error-fwd.h",
             "mongoac/bson.h",
             "stdint.h",
         ],
         "read_preference" => includes![
-            "mongoac/export.h",
-            "mongoac/error.h",
+            "mongoac/error-fwd.h",
             "mongoac/bson.h",
             "stdbool.h",
             "stdint.h",
         ],
-        "runtime" => includes![
-            "mongoac/export.h",
-            "mongoac/error.h",
-            "mongoac/future.h",
-            "stdint.h"
-        ],
-        "server_api" => includes!["mongoac/export.h", "stdbool.h"],
+        "runtime" => includes!["mongoac/error-fwd.h", "mongoac/future-fwd.h", "stdint.h"],
+        "server_api" => includes!["stdbool.h"],
         "server_info" => includes![
-            "mongoac/export.h",
             "mongoac/bson.h",
             "mongoac/string.h",
             "stdbool.h",
             "stdint.h",
         ],
-        "server_selector" => includes!["mongoac/export.h", "mongoac/server_info.h", "stdbool.h",],
-        "session_options" => includes![
-            "mongoac/export.h",
-            "mongoac/transaction_options.h",
-            "stdbool.h",
-            "stdint.h",
-        ],
-        "string" => includes!["mongoac/export.h", "stdint.h"],
-        "tls_options" => includes![
-            "mongoac/export.h",
-            "mongoac/error.h",
-            "mongoac/string.h",
-            "stdbool.h",
-        ],
+        "server_selector" => includes!["mongoac/server_info-fwd.h", "stdbool.h"],
+        "session_options" => {
+            includes!["mongoac/transaction_options-fwd.h", "stdbool.h", "stdint.h"]
+        }
+        "string" => includes!["stdint.h"],
+        "tls_options" => includes!["mongoac/error-fwd.h", "mongoac/string.h", "stdbool.h",],
         "transaction_options" => includes![
-            "mongoac/export.h",
-            "mongoac/read_concern.h",
-            "mongoac/write_concern.h",
-            "mongoac/read_preference.h",
+            "mongoac/read_concern-fwd.h",
+            "mongoac/write_concern-fwd.h",
+            "mongoac/read_preference-fwd.h",
             "stdint.h",
         ],
         "write_concern" => includes![
-            "mongoac/export.h",
-            "mongoac/error.h",
+            "mongoac/error-fwd.h",
             "mongoac/string.h",
             "stdbool.h",
             "stdint.h",
         ],
         _ => vec![],
     };
-    config
+
+    config.sys_includes.extend(headers);
+}
+
+fn default_config() -> cbindgen::Config {
+    cbindgen::Config {
+        language: cbindgen::Language::C,
+        style: cbindgen::Style::Type,
+        autogen_warning: Some(
+            "// Generated by src/libmongoac/cmake/generate-crate-headers/src/main.rs".to_owned(),
+        ),
+        include_version: true,
+        cpp_compat: true,
+        braces: cbindgen::Braces::NextLine,
+        line_length: 120,
+        tab_width: 3,
+        documentation: false,
+        documentation_style: cbindgen::DocumentationStyle::C99,
+        export: cbindgen::ExportConfig {
+            rename: rename_structs(),
+            ..Default::default()
+        },
+        function: cbindgen::FunctionConfig {
+            prefix: Some("MONGOAC_API".to_owned()),
+            ..Default::default()
+        },
+        no_includes: true,
+        ..Default::default()
+    }
+}
+
+fn generate_forward_header(crate_path: &Path, rel_stem: &Path, include_dir: &Path) {
+    let rel_str = rel_stem.to_str().expect("invalid UTF-8");
+
+    // `path/to/crate` -> `MONGOAC_PATH_TO_CRATE_FWD_H`
+    let include_guard = format!(
+        "MONGOAC_{}_FWD_H",
+        rel_str
+            .replace(std::path::MAIN_SEPARATOR, "_")
+            .to_uppercase()
+    );
+
+    // `path/to/crate` -> `<include_dir>/path/to/crate-fwd.h`
+    // Parent directories are already created by `generate_crate_header()`.
+    let header_path = include_dir.join(rel_stem).with_file_name(format!(
+        "{}-fwd.h",
+        rel_stem
+            .file_name()
+            .and_then(|s| s.to_str())
+            .expect("invalid UTF-8")
+    ));
+
+    let mut config = default_config();
+
+    // Only forward declarations of opaque structs.
+    config.export.item_types = vec![cbindgen::ItemType::OpaqueItems];
+
+    // Generate the forward header.
+    cbindgen::Builder::new()
+        .with_config(config)
+        .with_include_guard(&include_guard)
+        .with_src(crate_path)
+        .generate()
+        .expect("cbindgen failed")
+        .write_to_file(&header_path);
 }
 
 fn generate_crate_header(crate_path: &Path, src_dir: &Path, include_dir: &Path) {
@@ -349,9 +372,6 @@ fn generate_crate_header(crate_path: &Path, src_dir: &Path, include_dir: &Path) 
         .and_then(|s| s.to_str())
         .expect("invalid UTF-8");
 
-    // These crates must not generate a header.
-    // Keep synchronized with `skip_cargo_headers` in src/libmongoac/CMakeLists.txt.
-    const SKIP_CARGO_HEADERS: &[&str] = &["lib", "mod", "version"];
     if SKIP_CARGO_HEADERS.contains(&file_stem) {
         return;
     }
@@ -379,29 +399,29 @@ fn generate_crate_header(crate_path: &Path, src_dir: &Path, include_dir: &Path) 
     }
 
     // Default cbindgen configuration for all crates.
-    let config = cbindgen::Config {
-        language: cbindgen::Language::C,
-        style: cbindgen::Style::Type,
-        autogen_warning: Some(
-            "// Generated by src/libmongoac/cmake/generate-crate-headers/src/main.rs".to_owned(),
-        ),
-        include_version: true,
-        cpp_compat: true,
-        braces: cbindgen::Braces::NextLine,
-        line_length: 120,
-        tab_width: 3,
-        documentation: true,
-        documentation_style: cbindgen::DocumentationStyle::C99,
-        function: cbindgen::FunctionConfig {
-            prefix: Some("MONGOAC_API".to_owned()),
-            ..Default::default()
-        },
-        no_includes: true,
-        ..Default::default()
-    };
+    let mut config = default_config();
+
+    // All except `OpaqueItems` (which is declared in the forward header).
+    config.export.item_types = vec![
+        cbindgen::ItemType::Functions,
+        cbindgen::ItemType::Typedefs,
+        cbindgen::ItemType::Constants,
+        cbindgen::ItemType::Enums,
+        cbindgen::ItemType::Structs,
+        cbindgen::ItemType::Unions,
+    ];
+
+    // Always include the component's forward header first.
+    if !SKIP_FORWARD_HEADERS.contains(&file_stem) {
+        generate_forward_header(crate_path, &rel_stem, include_dir);
+        config.sys_includes.push(format!("mongoac/{rel_str}-fwd.h"));
+    }
+
+    // Normal headers typically export at least one symbol.
+    config.sys_includes.push("mongoac/export.h".into());
 
     // Apply per-crate configuration options.
-    let config = configure(rel_str, config);
+    configure(rel_str, &mut config);
 
     // Generate the crate header.
     cbindgen::Builder::new()
