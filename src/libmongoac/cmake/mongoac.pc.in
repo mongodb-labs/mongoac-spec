@@ -6,6 +6,5 @@ Name: @pkgname@
 Description: The MongoDB Async C Driver library
 URL: https://github.com/mongodb/mongo-c-driver
 Version: @version@
-Requires: @requires@
 Cflags: @cflags@
 Libs: @libs@

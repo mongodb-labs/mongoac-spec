@@ -1,7 +1,5 @@
 include (CMakePackageConfigHelpers)
 
-set (BSON_REQUIRED_VERSION "${mongo-c-driver_VERSION}")
-
 # Generate and install modern CMake package config files.
 if (1)
   write_basic_package_version_file (
@@ -50,7 +48,6 @@ if (1)
           -D "soname=${soname}"
           -D "version=${PROJECT_VERSION}"
           -D "is_static=${is_static}"
-          -D "bson_req_ver=${BSON_REQUIRED_VERSION}"
           -P ${CMAKE_CURRENT_SOURCE_DIR}/generate-pc.cmake
       MAIN_DEPENDENCY
         ${CMAKE_CURRENT_SOURCE_DIR}/mongoac.pc.in

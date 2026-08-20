@@ -1,3 +1,2 @@
 include(CMakeFindDependencyMacro)
-find_dependency(bson @BSON_REQUIRED_VERSION@)
 include("${CMAKE_CURRENT_LIST_DIR}/mongoac-targets.cmake")
