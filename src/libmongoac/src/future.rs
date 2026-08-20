@@ -31,6 +31,11 @@ pub extern "C" fn mongoac_future_clone(future: *const FutureT) -> *mut FutureT {
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn mongoac_future_get_runtime(future: *const FutureT) -> *mut RuntimeT {
+    Box::into_raw(Box::new(safe_as_ref!(future).get_runtime().clone()))
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn mongoac_future_is_ready(future: *const FutureT) -> bool {
     safe_as_ref!(future).is_ready()
 }
