@@ -208,7 +208,7 @@ impl FutureT {
     }
 }
 
-/// The dynamic type of an `async` block which returns a `Result<T, ErrorT>`.
+// The dynamic type of an `async` block which returns a `Result<T, ErrorT>`.
 type Async<T> = Pin<Box<dyn Future<Output = Result<T, ErrorT>> + Send>>;
 
 pub struct FutureValueType<T> {
