@@ -10,7 +10,7 @@ macro_rules! includes {
 const SKIP_CARGO_HEADERS: &[&str] = &["lib", "mod", "version"];
 
 // Keep synchronized with `skip_forward_headers` in src/libmongoac/CMakeLists.txt.
-const SKIP_FORWARD_HEADERS: &[&str] = &["bson", "cursor_type", "sanity_check", "string"];
+const SKIP_FORWARD_HEADERS: &[&str] = &["bson", "cursor_type", "string"];
 
 // Rename structs from `ExampleT` to `mongoac_example_t`.
 fn rename_structs() -> std::collections::HashMap<String, String> {
@@ -95,7 +95,6 @@ fn configure(name: &str, config: &mut cbindgen::Config) {
             "stdbool.h",
             "stdint.h",
         ],
-        "sanity_check" => includes!["stdint.h"],
         "client" => includes![
             "mongoac/client_options-fwd.h",
             "mongoac/client_session-fwd.h",

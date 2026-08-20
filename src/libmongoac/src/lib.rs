@@ -33,7 +33,6 @@ pub mod replace_options;
 pub mod run_command_options;
 pub mod run_cursor_command_options;
 pub mod runtime;
-pub mod sanity_check;
 pub mod server_api;
 pub mod server_info;
 pub mod server_selector;

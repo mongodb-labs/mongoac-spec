@@ -120,7 +120,7 @@ foreach (source IN LISTS cargo_sources)
   list (APPEND cargo_headers "${include_dir}/mongoac/${header}")
 
   # Keep synchronized with `SKIP_FORWARD_HEADERS` in cmake/generate-crate-headers/src/main.rs.
-  set (skip_forward_headers "bson" "cursor_type" "sanity_check" "string")
+  set (skip_forward_headers "bson" "cursor_type" "string")
   cmake_path (GET header STEM LAST_ONLY fwd_stem)
   cmake_path (GET fwd_stem FILENAME fwd_name)
   if (NOT fwd_name IN_LIST skip_forward_headers)
