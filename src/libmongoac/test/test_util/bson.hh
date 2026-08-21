@@ -57,8 +57,8 @@ class owning_bson
 
    explicit owning_bson(mongoac_bson_t d) : _owner{d}, _bson{}
    {
-      if (_owner.data != nullptr) {
-         bson_init_static(&_bson, _owner.data, _owner.len);
+      if (_owner.ptr != nullptr) {
+         bson_init_static(&_bson, _owner.ptr, _owner.len);
       } else {
          bson_init(&_bson);
       }
@@ -67,7 +67,7 @@ class owning_bson
    explicit
    operator bool() const
    {
-      return _owner.data != nullptr;
+      return _owner.ptr != nullptr;
    }
 
    mongoac_bson_t
@@ -79,7 +79,7 @@ class owning_bson
    /* explicit(false) */
    operator mongoac_bson_view_t() const
    {
-      return {_owner.data, _owner.len};
+      return {_owner.ptr, _owner.len};
    }
 
    bson_t const &
@@ -109,7 +109,7 @@ class owning_bson
    void const *
    data() const
    {
-      return _owner.data;
+      return _owner.ptr;
    }
 
    std::size_t
@@ -149,6 +149,6 @@ class owning_bson
          FAIL(::mongoac::test_util::owning_string(::mongoac_error_message(error)).view()); \
       }                                                                                    \
       bson_t bson;                                                                         \
-      REQUIRE(::bson_init_static(&bson, ret.data, ret.len));                               \
+      REQUIRE(::bson_init_static(&bson, ret.ptr, ret.len));                               \
       return bson;                                                                         \
    }()

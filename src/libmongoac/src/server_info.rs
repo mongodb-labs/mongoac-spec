@@ -59,7 +59,7 @@ pub extern "C" fn mongoac_server_info_get_host(info: *const ServerInfoT) -> Stri
             use std::os::unix::ffi::OsStrExt;
             let bytes = path.as_os_str().as_bytes();
             StringViewT {
-                data: bytes.as_ptr().cast::<c_char>(),
+                ptr: bytes.as_ptr().cast::<c_char>(),
                 len: bytes.len(),
             }
         }

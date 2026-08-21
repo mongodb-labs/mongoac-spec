@@ -6,27 +6,27 @@ use mongodb::bson::{Document, RawDocument, RawDocumentBuf};
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct BsonViewT {
-    pub data: *const u8,
+    pub ptr: *const u8,
     pub len: usize,
 }
 
 #[repr(C)]
 #[derive(Default)]
 pub struct BsonT {
-    pub data: *const u8,
+    pub ptr: *const u8,
     pub len: usize,
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_bson_destroy(bson: BsonT) {
-    if bson.data.is_null() {
+    if bson.ptr.is_null() {
         return;
     }
 
     // SAFETY: bytes `[0, len)` at `data` MUST be accessible when `data` is not null.
-    // SAFETY: `bson.data` is always allocated as a `Box<[u8]>`.
+    // SAFETY: `bson.ptr` is always allocated as a `Box<[u8]>`.
     safe_drop!(std::ptr::slice_from_raw_parts_mut(
-        bson.data.cast_mut(),
+        bson.ptr.cast_mut(),
         bson.len,
     ));
 }
@@ -42,18 +42,18 @@ impl BsonViewT {
     #[must_use]
     pub const fn empty_doc() -> Self {
         BsonViewT {
-            data: EMPTY_DOC.as_ptr(),
+            ptr: EMPTY_DOC.as_ptr(),
             len: EMPTY_DOC.len(),
         }
     }
 
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
-        if self.data.is_null() {
+        if self.ptr.is_null() {
             &[]
         } else {
             // SAFETY: bytes `[0, len)` at `data` MUST be accessible when `data` is not null.
-            unsafe { std::slice::from_raw_parts(self.data.cast::<u8>(), self.len) }
+            unsafe { std::slice::from_raw_parts(self.ptr.cast::<u8>(), self.len) }
         }
     }
 }
@@ -61,11 +61,11 @@ impl BsonViewT {
 impl BsonT {
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
-        if self.data.is_null() {
+        if self.ptr.is_null() {
             &[]
         } else {
             // SAFETY: bytes `[0, len)` at `data` MUST be accessible when `data` is not null.
-            unsafe { std::slice::from_raw_parts(self.data.cast::<u8>(), self.len) }
+            unsafe { std::slice::from_raw_parts(self.ptr.cast::<u8>(), self.len) }
         }
     }
 }
@@ -99,7 +99,7 @@ impl From<&RawDocument> for BsonViewT {
         let bytes = doc.as_bytes();
 
         BsonViewT {
-            data: bytes.as_ptr().cast::<u8>(),
+            ptr: bytes.as_ptr().cast::<u8>(),
             len: bytes.len(),
         }
     }
@@ -110,7 +110,7 @@ impl From<&RawDocumentBuf> for BsonViewT {
         let bytes = doc.as_bytes();
 
         BsonViewT {
-            data: bytes.as_ptr().cast::<u8>(),
+            ptr: bytes.as_ptr().cast::<u8>(),
             len: bytes.len(),
         }
     }
@@ -121,7 +121,7 @@ impl<'a> TryFrom<&'a BsonT> for &'a RawDocument {
 
     fn try_from(bson: &'a BsonT) -> Result<Self, Self::Error> {
         RawDocument::from_bytes(unsafe {
-            std::slice::from_raw_parts(bson.data.cast::<u8>(), bson.len)
+            std::slice::from_raw_parts(bson.ptr.cast::<u8>(), bson.len)
         })
         .map_err(Into::into)
     }
@@ -133,7 +133,7 @@ impl From<RawDocumentBuf> for BsonT {
         let len = bytes.len();
 
         BsonT {
-            data: Box::into_raw(bytes.into_boxed_slice()).cast::<u8>(),
+            ptr: Box::into_raw(bytes.into_boxed_slice()).cast::<u8>(),
             len,
         }
     }
@@ -145,7 +145,7 @@ impl From<&RawDocumentBuf> for BsonT {
         let len = bytes.len();
 
         BsonT {
-            data: Box::into_raw(bytes.into_boxed_slice()).cast::<u8>(),
+            ptr: Box::into_raw(bytes.into_boxed_slice()).cast::<u8>(),
             len,
         }
     }
@@ -157,7 +157,7 @@ impl From<&RawDocument> for BsonT {
         let len = bytes.len();
 
         BsonT {
-            data: Box::into_raw(bytes.into_boxed_slice()).cast::<u8>(),
+            ptr: Box::into_raw(bytes.into_boxed_slice()).cast::<u8>(),
             len,
         }
     }

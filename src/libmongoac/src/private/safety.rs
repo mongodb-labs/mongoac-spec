@@ -120,7 +120,7 @@ macro_rules! safe_optional_bson_opts_with_error {
 macro_rules! safe_bson_view_with_error {
     ($ptr:expr, $error:expr) => {{
         let bson: $crate::bson::BsonViewT = $ptr;
-        if bson.data.is_null() {
+        if bson.ptr.is_null() {
             $crate::private::safety::invalid_argument(
                 $error,
                 concat!(stringify!($ptr), ": must not be null"),
@@ -135,11 +135,7 @@ macro_rules! safe_bson_view_with_error {
 macro_rules! safe_optional_bson_view {
     ($ptr:expr) => {{
         let bson: $crate::bson::BsonViewT = $ptr;
-        if bson.data.is_null() {
-            None
-        } else {
-            Some(bson)
-        }
+        if bson.ptr.is_null() { None } else { Some(bson) }
     }};
 }
 
@@ -158,7 +154,7 @@ macro_rules! safe_bson_view_array_as_vec_with_error {
 
         let mut vec: Vec<$crate::bson::BsonViewT> = Vec::with_capacity(len);
         for (i, e) in arr.iter().enumerate() {
-            if e.data.is_null() {
+            if e.ptr.is_null() {
                 $crate::private::safety::invalid_argument(
                     $error,
                     &format!("BSON array element at index {i}: must not be null"),
@@ -176,13 +172,13 @@ macro_rules! safe_string_view {
     ($sv:expr) => {{
         let sv: $crate::string::StringViewT = $sv;
 
-        if sv.data.is_null() {
+        if sv.ptr.is_null() {
             return Default::default();
         }
 
         // SAFETY: `data` and `len` validity is an uncheckable precondition.
         match std::str::from_utf8(unsafe {
-            std::slice::from_raw_parts(sv.data.cast::<u8>(), sv.len)
+            std::slice::from_raw_parts(sv.ptr.cast::<u8>(), sv.len)
         }) {
             Ok(s) => s,
             Err(_) => return Default::default(),
@@ -195,7 +191,7 @@ macro_rules! safe_string_view_with_error {
     ($sv:expr, $error:expr) => {{
         let sv: $crate::string::StringViewT = $sv;
 
-        if sv.data.is_null() {
+        if sv.ptr.is_null() {
             $crate::private::safety::invalid_argument(
                 $error,
                 concat!(stringify!($sv), ": must not be null"),
@@ -205,7 +201,7 @@ macro_rules! safe_string_view_with_error {
 
         // SAFETY: `data` and `len` validity is an uncheckable precondition.
         match std::str::from_utf8(unsafe {
-            std::slice::from_raw_parts(sv.data.cast::<u8>(), sv.len)
+            std::slice::from_raw_parts(sv.ptr.cast::<u8>(), sv.len)
         }) {
             Ok(s) => s,
             Err(_) => {
@@ -224,12 +220,12 @@ macro_rules! safe_optional_string_view {
     ($sv:expr) => {{
         let sv: $crate::string::StringViewT = $sv;
 
-        if sv.data.is_null() {
+        if sv.ptr.is_null() {
             None
         } else {
             // SAFETY: `data` and `len` validity is an uncheckable precondition.
             match std::str::from_utf8(unsafe {
-                std::slice::from_raw_parts(sv.data.cast::<u8>(), sv.len)
+                std::slice::from_raw_parts(sv.ptr.cast::<u8>(), sv.len)
             }) {
                 Ok(s) => Some(s),
                 Err(_) => None,
@@ -242,12 +238,12 @@ macro_rules! safe_optional_string_view {
 macro_rules! safe_optional_string_view_with_error {
     ($sv:expr, $error:expr) => {{
         let sv: $crate::string::StringViewT = $sv;
-        if sv.data.is_null() {
+        if sv.ptr.is_null() {
             None
         } else {
             // SAFETY: `data` and `len` validity is an uncheckable precondition.
             match std::str::from_utf8(unsafe {
-                std::slice::from_raw_parts(sv.data.cast::<u8>(), sv.len)
+                std::slice::from_raw_parts(sv.ptr.cast::<u8>(), sv.len)
             }) {
                 Ok(s) => Some(s),
                 Err(_) => {

@@ -16,7 +16,7 @@ TEST_CASE("null info", "[mongoac][server_info]")
    SECTION("get_host")
    {
       mongoac_string_view_t const host = mongoac_server_info_get_host(nullptr);
-      CHECK(host.data == nullptr);
+      CHECK(host.ptr == nullptr);
       CHECK(host.len == 0);
    }
 
@@ -53,7 +53,7 @@ TEST_CASE("null info", "[mongoac][server_info]")
    SECTION("get_replica_set_name")
    {
       mongoac_string_view_t const name = mongoac_server_info_get_replica_set_name(nullptr);
-      CHECK(name.data == nullptr);
+      CHECK(name.ptr == nullptr);
       CHECK(name.len == 0);
    }
 
@@ -66,7 +66,7 @@ TEST_CASE("null info", "[mongoac][server_info]")
    SECTION("get_tags")
    {
       mongoac_bson_t const tags = mongoac_server_info_get_tags(nullptr);
-      CHECK(tags.data == nullptr);
+      CHECK(tags.ptr == nullptr);
       CHECK(tags.len == 0);
    }
 

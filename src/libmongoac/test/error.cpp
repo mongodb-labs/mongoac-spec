@@ -107,7 +107,7 @@ TEST_CASE("runtime_error", "[mongoac][error]")
 
    auto const view = mongoac_future_get_bson(future, error); // No progress: future is not ready.
 
-   CHECK(view.data == nullptr);
+   CHECK(view.ptr == nullptr);
    CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_MONGOAC);
    CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_RUNTIME_ERROR);
 

@@ -31,21 +31,21 @@ to_mongoac(std::string_view v)
 inline std::string_view
 from_mongoac(mongoac_string_view_t v)
 {
-   if (v.data == nullptr) {
+   if (v.ptr == nullptr) {
       return {};
    }
 
-   return std::string_view{v.data, v.len};
+   return std::string_view{v.ptr, v.len};
 }
 
 inline std::string
 to_string(mongoac_string_view_t v)
 {
-   if (v.data == nullptr) {
+   if (v.ptr == nullptr) {
       return {};
    }
 
-   return std::string(v.data, v.len);
+   return std::string(v.ptr, v.len);
 }
 
 class owning_string
@@ -83,26 +83,26 @@ class owning_string
    explicit
    operator bool() const
    {
-      return _str.data != nullptr;
+      return _str.ptr != nullptr;
    }
 
    std::string_view
    view() const
    {
-      if (_str.data == nullptr) {
+      if (_str.ptr == nullptr) {
          return {};
       }
-      return {_str.data, _str.len};
+      return {_str.ptr, _str.len};
    }
 
    std::string
    value() const
    {
-      if (_str.data == nullptr) {
+      if (_str.ptr == nullptr) {
          return {};
       }
 
-      return {_str.data, _str.len};
+      return {_str.ptr, _str.len};
    }
 
    /* explicit(false) */
