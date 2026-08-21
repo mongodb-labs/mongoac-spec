@@ -993,7 +993,7 @@ Using `configure_file()` follows the same pattern used by mongo-c-driver and ens
 
 #### Why `patchelf`?
 
-Cargo currently does not support setting custom SONAME for cdylib: see [rust-lang/cargo#5045](/rust-lang/cargo/issues/5045).
+Cargo currently does not support setting custom SONAME for cdylib: see [rust-lang/cargo#5045](https://redirect.github.com/rust-lang/cargo/issues/5045).
 
 On Linux, CMake owns packaging, versioning, and install rules. Using `patchelf` as a post-link step keeps the SONAME fix in the packaging layer without touching the Rust crate or Cargo.
 
