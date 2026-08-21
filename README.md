@@ -597,7 +597,7 @@ The mongoac library always appends the following client metadata on construction
 
 where `<build-type>` is either Debug ("d") or Release ("r") and `<link-type>` is either shared ("h") or static ("t"),
   deliberately mirroring the
-  [library filename ABI tag pattern](https://github.com/mongodb/mongo-cxx-driver/blob/70935c76a1153d564c622968899085991042e249/cmake/BsoncxxUtil.cmake#L40-L60)
+  [library filename ABI tag pattern](/mongodb/mongo-cxx-driver/blob/70935c76a1153d564c622968899085991042e249/cmake/BsoncxxUtil.cmake#L40-L60)
   used by the C++ Driver.
 
 When the user sets `driver_info` for `mongoac_client_options_t`, the metadata is appended _after_ client construction in
@@ -735,7 +735,7 @@ The current implementation returns both values as a BSON array:
 ```
 
 In order to return the array of values as `mongoac_database_specification_t` or `mongoac_string_t`, an approach to
-  support [typed arrays in the FFI](https://github.com/eramongodb/mongoac-spec/issues/25) will be necessary.
+  support [typed arrays in the FFI](/eramongodb/mongoac-spec/issues/25) will be necessary.
 
 Drivers Specification states:
 
@@ -921,7 +921,7 @@ For simplicity and consistency with the cursor API, the cursor returned by `list
   serialized BSON document (`mongoac_bson_view_t`) rather than as a `mongoac_index_model_t` struct.
 
 > [!TIP]
-> - [Open Question: Array Representation](https://github.com/eramongodb/mongoac-spec/issues/25)
+> - [Open Question: Array Representation](/eramongodb/mongoac-spec/issues/25)
 > - [Why a single `mongoac_cursor_t` type?](#why-single-cursor-type)
 > - [Why typed options structs?](#why-typed-options)
 
@@ -993,7 +993,7 @@ Using `configure_file()` follows the same pattern used by mongo-c-driver and ens
 
 #### Why `patchelf`?
 
-Cargo currently does not support setting custom SONAME for cdylib: see [rust-lang/cargo#5045](https://github.com/rust-lang/cargo/issues/5045).
+Cargo currently does not support setting custom SONAME for cdylib: see [rust-lang/cargo#5045](/rust-lang/cargo/issues/5045).
 
 On Linux, CMake owns packaging, versioning, and install rules. Using `patchelf` as a post-link step keeps the SONAME fix in the packaging layer without touching the Rust crate or Cargo.
 
