@@ -706,7 +706,6 @@ The callback's only parameter is a non-owning, read-only `mongoac_server_info_t`
 
 > [!TIP]
 > - [Why use a callback for custom server selection?](#why-server-selection-callback)
-> - [Why typed read preference?](#why-typed-read-preference)
 
 #### Retryable Reads and Writes
 
@@ -736,7 +735,7 @@ The current implementation returns both values as a BSON array:
 ```
 
 In order to return the array of values as `mongoac_database_specification_t` or `mongoac_string_t`, an approach to
-  support [typed arrays in the FFI](#array-result-representation) will be necessary.
+  support [typed arrays in the FFI](https://github.com/eramongodb/mongoac-spec/issues/25) will be necessary.
 
 Drivers Specification states:
 
@@ -922,7 +921,7 @@ For simplicity and consistency with the cursor API, the cursor returned by `list
   serialized BSON document (`mongoac_bson_view_t`) rather than as a `mongoac_index_model_t` struct.
 
 > [!TIP]
-> - [Array-like result representation](#array-result-representation)
+> - https://github.com/eramongodb/mongoac-spec/issues/25
 > - [Why a single `mongoac_cursor_t` type?](#why-single-cursor-type)
 > - [Why typed options structs?](#why-typed-options)
 
@@ -1318,57 +1317,6 @@ Deferred due to scope.
 #### `timeoutMS`
 
 Deferred: Rust Driver API currently does not support CSOT (see: [RUST-582](https://jira.mongodb.org/browse/RUST-582)).
-
-## Open Issues
-
-This section lists open design decisions which need to be addressed by the real-world implementation.
-
-### Build System
-
-#### Versioning: Independent or Coupled?
-
-Should mongoac use its own `VERSION_CURRENT` or share the root `VERSION_CURRENT` from the `mongo-c-driver` repository?
-
-The current implementation proposes using an independent `VERSION_CURRENT` to avoid coupling the versioning of logically
-  independent libraries.
-
-### Rust FFI Design
-
-#### Async Operations
-
-<a id="array-result-representation"></a>
-
-##### Array Representation
-
-Some operations (e.g. `listDatabases`, `listDatabaseNames`, `listCollectionNames`, `listIndexNames`) return an array
-  of values, each with different element types.
-There are several approaches to representing these array-like return values:
-
-- Single Typed: a single `mongoac_array_t` with `mongoac_future_t`-like variant accessors (e.g. `get_bson(idx)`).
-- Many Typed: a `mongoac_array_<type>_t` for each type `<type>` (e.g. `mongoac_array_bson_t`).
-- BSON: a BSON array document (e.g. `[{"x": 1}, "string", 123]).
-- Pointer + Length: an internally-allocated buffer storing the results to which a `ptr+len` is returned.
-
-To keep the breadth of the FFI minimal and for consistency with other BSON-result API (i.e. CRUD operations), the
-  current implementation proposes using the BSON approach.
-However, this comes at the cost of unconditional serialization of the entire array of elements.
-If we want to preserve the typed structs to represent elements of return values (e.g. if other CRUD operations opt to
-  return typed result structs rather than a BSON document), the single `mongoac_array_t` approach may be preferable.
-
-### Supported Features
-
-<a id="event-buffer-limits"></a>
-
-#### Event API
-
-##### Should event buffers have a size limit?
-
-`VecDeque` is a growable ring buffer.
-If the user enables event monitoring, but does not periodically `clear(n)` the buffer frequently enough relative to the
-  rate of incoming events, the memory utilization may grow unbounded.
-We may add one or more mongoac-specific configuration options to `mongoac_client_options_t` to allow users to control
-  whether these internal event buffers have a maximum (possibly preallocated) allocation size, as well as the policy to
-  use when the queue is full (e.g. overwriting oldest events vs. refusing new events and/or whether to return an error).
 
 ## Sequence Diagrams
 
