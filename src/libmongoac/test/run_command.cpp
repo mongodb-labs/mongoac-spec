@@ -68,7 +68,7 @@ TEST_CASE("run_command", "[mongoac][database][run_command]")
    }
 }
 
-TEST_CASE("run_cursor_command", "[mongoac][database][run_cursor_command]")
+TEST_CASE("run_cursor_command", "[mongoac][database]")
 {
    auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
    auto const client = REQUIRE_MAKE_OWNING_PTR(mongoac_client_new(to_mongoac("mongodb://localhost:27017"), nullptr),
