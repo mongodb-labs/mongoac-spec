@@ -28,10 +28,21 @@ use parking_lot::Mutex;
 use std::collections::VecDeque;
 use std::sync::Arc;
 
+#[derive(Clone)]
 pub struct ClientT {
     inner: Client,
     runtime: RuntimeT,
     command_events: Option<Arc<Mutex<VecDeque<CommandEvent>>>>,
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_client_destroy(client: *mut ClientT) {
+    safe_drop!(client);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_client_clone(client: *const ClientT) -> *mut ClientT {
+    Box::into_raw(Box::new(safe_as_ref!(client).clone()))
 }
 
 #[unsafe(no_mangle)]
@@ -116,11 +127,6 @@ pub extern "C" fn mongoac_client_get_command_event(client: *const ClientT, index
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_client_clear_command_events(client: *mut ClientT, n: usize) {
     safe_as_mut!(client).clear_command_events(n);
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn mongoac_client_destroy(client: *mut ClientT) {
-    safe_drop!(client);
 }
 
 #[unsafe(no_mangle)]

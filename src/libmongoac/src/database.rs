@@ -25,6 +25,7 @@ use mongodb::options::{
     RunCommandOptions, RunCursorCommandOptions,
 };
 
+#[derive(Clone)]
 pub struct DatabaseT {
     inner: Database,
     runtime: RuntimeT,
@@ -33,6 +34,11 @@ pub struct DatabaseT {
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_database_destroy(database: *mut DatabaseT) {
     safe_drop!(database);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_database_clone(database: *const DatabaseT) -> *mut DatabaseT {
+    Box::into_raw(Box::new(safe_as_ref!(database).clone()))
 }
 
 #[unsafe(no_mangle)]

@@ -32,6 +32,7 @@ use mongodb::options::{
 };
 use mongodb::results::InsertManyResult;
 
+#[derive(Clone)]
 pub struct CollectionT {
     inner: Collection<RawDocumentBuf>,
     runtime: RuntimeT,
@@ -40,6 +41,11 @@ pub struct CollectionT {
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_collection_destroy(collection: *mut CollectionT) {
     safe_drop!(collection);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_collection_clone(collection: *const CollectionT) -> *mut CollectionT {
+    Box::into_raw(Box::new(safe_as_ref!(collection).clone()))
 }
 
 #[unsafe(no_mangle)]
