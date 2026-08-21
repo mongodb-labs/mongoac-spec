@@ -67,12 +67,12 @@ TEST_CASE("drop", "[mongoac][collection]")
       }
    }
 
-   auto const coll_a =
-      REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, to_mongoac("a"), error), &mongoac_collection_destroy);
-   auto const coll_b =
-      REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, to_mongoac("b"), error), &mongoac_collection_destroy);
-   auto const coll_c =
-      REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, to_mongoac("c"), error), &mongoac_collection_destroy);
+   auto const coll_a = REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, to_mongoac("a"), nullptr, error),
+                                               &mongoac_collection_destroy);
+   auto const coll_b = REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, to_mongoac("b"), nullptr, error),
+                                               &mongoac_collection_destroy);
+   auto const coll_c = REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, to_mongoac("c"), nullptr, error),
+                                               &mongoac_collection_destroy);
 
    SECTION("async")
    {
@@ -151,7 +151,7 @@ TEST_CASE("insert_one", "[mongoac][collection]")
    mongoac_database_drop(db, nullptr, nullptr, error);
    REQUIRE_MONGOAC_OK(error);
 
-   auto const coll = REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, to_mongoac("coll"), error),
+   auto const coll = REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, to_mongoac("coll"), nullptr, error),
                                              &mongoac_collection_destroy);
 
    auto const doc = make_owning_ptr(bson_from_json(R"({"x": 1})"), &bson_destroy);
@@ -211,7 +211,7 @@ TEST_CASE("find", "[mongoac][collection]")
    mongoac_database_drop(db, nullptr, nullptr, error);
    REQUIRE_MONGOAC_OK(error);
 
-   auto const coll = REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, to_mongoac("coll"), error),
+   auto const coll = REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, to_mongoac("coll"), nullptr, error),
                                              &mongoac_collection_destroy);
 
    auto const filter = make_owning_ptr(bson_from_json(R"({"$or": [{"x": 1}, {"z": 3}]})"), &bson_destroy);
@@ -329,7 +329,7 @@ TEST_CASE("find_one", "[mongoac][collection]")
    mongoac_database_drop(db, nullptr, nullptr, error);
    REQUIRE_MONGOAC_OK(error);
 
-   auto const coll = REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, to_mongoac("coll"), error),
+   auto const coll = REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, to_mongoac("coll"), nullptr, error),
                                              &mongoac_collection_destroy);
 
    auto const x1 = REQUIRE_MAKE_OWNING_PTR(bson_from_json(R"({"x": 1})"), &bson_destroy);
@@ -399,7 +399,7 @@ TEST_CASE("insert_many", "[mongoac][collection]")
    mongoac_database_drop(db, nullptr, nullptr, error);
    REQUIRE_MONGOAC_OK(error);
 
-   auto const coll = REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, to_mongoac("coll"), error),
+   auto const coll = REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, to_mongoac("coll"), nullptr, error),
                                              &mongoac_collection_destroy);
 
    auto const x = REQUIRE_MAKE_OWNING_PTR(BCON_NEW("x", BCON_INT32(1)), &bson_destroy);
@@ -463,7 +463,7 @@ TEST_CASE("delete", "[mongoac][collection]")
    mongoac_database_drop(db, nullptr, nullptr, error);
    REQUIRE_MONGOAC_OK(error);
 
-   auto const coll = REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, to_mongoac("coll"), error),
+   auto const coll = REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, to_mongoac("coll"), nullptr, error),
                                              &mongoac_collection_destroy);
 
    auto const count_results = [&](mongoac_bson_view_t filter) -> int {
@@ -583,7 +583,7 @@ TEST_CASE("replace_one", "[mongoac][collection]")
    mongoac_database_drop(db, nullptr, nullptr, error);
    REQUIRE_MONGOAC_OK(error);
 
-   auto const coll = REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, to_mongoac("coll"), error),
+   auto const coll = REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, to_mongoac("coll"), nullptr, error),
                                              &mongoac_collection_destroy);
 
    auto const check_result = [](bson_t const *result, int64_t matched, int64_t modified) {
@@ -642,7 +642,7 @@ TEST_CASE("update", "[mongoac][collection]")
    mongoac_database_drop(db, nullptr, nullptr, error);
    REQUIRE_MONGOAC_OK(error);
 
-   auto const coll = REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, to_mongoac("coll"), error),
+   auto const coll = REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, to_mongoac("coll"), nullptr, error),
                                              &mongoac_collection_destroy);
 
    auto const get_matched_count = [](bson_t const &result) -> int64_t {

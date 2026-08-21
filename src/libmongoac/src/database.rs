@@ -1,9 +1,10 @@
 use crate::bson::BsonT;
 use crate::bson::BsonViewT;
 use crate::client_session::ClientSessionT;
+use crate::collection::CollectionT;
+use crate::collection_options::CollectionOptionsT;
 use crate::create_collection_options::CreateCollectionOptionsT;
 use crate::cursor::CursorT;
-use crate::database_options::DatabaseOptionsT;
 use crate::drop_database_options::DropDatabaseOptionsT;
 use crate::error::ErrorT;
 use crate::future::FutureT;
@@ -30,27 +31,27 @@ pub struct DatabaseT {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn mongoac_client_get_database(
-    client: *const ClientT,
-    name: StringViewT,
-    options: *const DatabaseOptionsT,
-    error: *mut ErrorT,
-) -> *mut DatabaseT {
-    let error = safe_optional_error_as_mut!(error);
-    let client = safe_as_ref_with_error!(client, error);
-    let name = safe_string_view_with_error!(name, error);
-    let options = safe_optional_as_ref!(options);
-
-    Box::into_raw(Box::new(DatabaseT::new(
-        client,
-        name,
-        options.map(Into::into),
-    )))
+pub extern "C" fn mongoac_database_destroy(database: *mut DatabaseT) {
+    safe_drop!(database);
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn mongoac_database_destroy(database: *mut DatabaseT) {
-    safe_drop!(database);
+pub extern "C" fn mongoac_database_get_collection(
+    database: *const DatabaseT,
+    name: StringViewT,
+    options: *const CollectionOptionsT,
+    error: *mut ErrorT,
+) -> *mut CollectionT {
+    let error = safe_optional_error_as_mut!(error);
+    let database = safe_as_ref_with_error!(database, error);
+    let name = safe_string_view_with_error!(name, error);
+    let options = safe_optional_as_ref!(options);
+
+    Box::into_raw(Box::new(CollectionT::new(
+        database,
+        name,
+        options.map(Into::into),
+    )))
 }
 
 #[unsafe(no_mangle)]
@@ -287,7 +288,7 @@ pub extern "C" fn mongoac_database_run_cursor_command(
 }
 
 impl DatabaseT {
-    fn new(client: &ClientT, name: &str, options: Option<DatabaseOptions>) -> Self {
+    pub fn new(client: &ClientT, name: &str, options: Option<DatabaseOptions>) -> Self {
         let db = match options {
             Some(o) => client.inner().database_with_options(name, o),
             None => client.inner().database(name),

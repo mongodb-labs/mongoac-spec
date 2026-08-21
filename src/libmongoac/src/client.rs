@@ -1,3 +1,5 @@
+use crate::database::DatabaseT;
+use crate::database_options::DatabaseOptionsT;
 use crate::private::macros::*;
 
 use crate::bson::BsonT;
@@ -57,6 +59,25 @@ pub extern "C" fn mongoac_client_new_with_options(
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_client_get_runtime(client: *const ClientT) -> *mut RuntimeT {
     Box::into_raw(Box::new(safe_as_ref!(client).get_runtime()))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mongoac_client_get_database(
+    client: *const ClientT,
+    name: StringViewT,
+    options: *const DatabaseOptionsT,
+    error: *mut ErrorT,
+) -> *mut DatabaseT {
+    let error = safe_optional_error_as_mut!(error);
+    let client = safe_as_ref_with_error!(client, error);
+    let name = safe_string_view_with_error!(name, error);
+    let options = safe_optional_as_ref!(options);
+
+    Box::into_raw(Box::new(DatabaseT::new(
+        client,
+        name,
+        options.map(Into::into),
+    )))
 }
 
 #[unsafe(no_mangle)]

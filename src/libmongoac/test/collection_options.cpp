@@ -1,11 +1,11 @@
 #include <mongoac/collection_options.h>
 
 #include <catch2/catch_test_macros.hpp>
-#include <mongoac/collection.h>
+#include <mongoac/database.h>
 #include <mongoac/error.h>
 #include <mongoac/read_concern.h>
 #include <mongoac/read_preference.h>
-#include <mongoac/server_info.h>
+#include <mongoac/server_info-fwd.h>
 #include <mongoac/server_selector.h>
 #include <mongoac/write_concern.h>
 #include <test_util/error.hh>
@@ -154,7 +154,7 @@ TEST_CASE("get_collection_with_options", "[mongoac][collection_options]")
 
    SECTION("null database returns null")
    {
-      auto *coll = mongoac_database_get_collection_with_options(nullptr, to_mongoac("coll"), opts, error);
+      auto *coll = mongoac_database_get_collection(nullptr, to_mongoac("coll"), opts, error);
       REQUIRE(coll == nullptr);
       REQUIRE_MONGOAC_INVALID_ARGUMENT(error);
    }

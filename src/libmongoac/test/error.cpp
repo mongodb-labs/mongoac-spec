@@ -173,7 +173,7 @@ TEST_CASE("server write error", "[mongoac][error]")
    mongoac_database_drop(db, nullptr, nullptr, error);
    REQUIRE_MONGOAC_OK(error);
 
-   auto const coll = REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, to_mongoac("coll"), error),
+   auto const coll = REQUIRE_MAKE_OWNING_PTR(mongoac_database_get_collection(db, to_mongoac("coll"), nullptr, error),
                                              &mongoac_collection_destroy);
    auto const doc = make_owning_ptr(bson_from_json(R"({"_id": 1})"), &bson_destroy);
 

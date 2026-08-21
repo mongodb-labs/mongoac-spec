@@ -38,36 +38,6 @@ pub struct CollectionT {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn mongoac_database_get_collection(
-    database: *const DatabaseT,
-    name: StringViewT,
-    error: *mut ErrorT,
-) -> *mut CollectionT {
-    let error = safe_optional_error_as_mut!(error);
-    let database = safe_as_ref_with_error!(database, error);
-    let name = safe_string_view_with_error!(name, error);
-
-    Box::into_raw(Box::new(CollectionT::new(database, name)))
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn mongoac_database_get_collection_with_options(
-    database: *const DatabaseT,
-    name: StringViewT,
-    options: *const CollectionOptionsT,
-    error: *mut ErrorT,
-) -> *mut CollectionT {
-    let error = safe_optional_error_as_mut!(error);
-    let database = safe_as_ref_with_error!(database, error);
-    let name = safe_string_view_with_error!(name, error);
-    let options = safe_optional_as_ref!(options);
-
-    Box::into_raw(Box::new(CollectionT::new_with_options(
-        database, name, options,
-    )))
-}
-
-#[unsafe(no_mangle)]
 pub extern "C" fn mongoac_collection_destroy(collection: *mut CollectionT) {
     safe_drop!(collection);
 }
@@ -724,16 +694,7 @@ pub extern "C" fn mongoac_collection_find_one(
 }
 
 impl CollectionT {
-    fn new(db: &DatabaseT, name: &str) -> Self {
-        let coll = db.inner().collection::<RawDocumentBuf>(name);
-
-        CollectionT {
-            inner: coll,
-            runtime: db.get_runtime(),
-        }
-    }
-
-    fn new_with_options(db: &DatabaseT, name: &str, options: Option<&CollectionOptionsT>) -> Self {
+    pub fn new(db: &DatabaseT, name: &str, options: Option<&CollectionOptionsT>) -> Self {
         let coll = match options {
             Some(opts) => db
                 .inner()
