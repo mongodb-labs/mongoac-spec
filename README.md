@@ -921,7 +921,7 @@ For simplicity and consistency with the cursor API, the cursor returned by `list
   serialized BSON document (`mongoac_bson_view_t`) rather than as a `mongoac_index_model_t` struct.
 
 > [!TIP]
-> - https://github.com/eramongodb/mongoac-spec/issues/25
+> - [Open Question: Array Representation](https://github.com/eramongodb/mongoac-spec/issues/25)
 > - [Why a single `mongoac_cursor_t` type?](#why-single-cursor-type)
 > - [Why typed options structs?](#why-typed-options)
 
