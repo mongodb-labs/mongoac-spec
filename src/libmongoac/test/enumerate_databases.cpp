@@ -18,89 +18,77 @@ using mongoac::test_util::to_mongoac;
 
 TEST_CASE("list_databases_async", "[mongoac][client]")
 {
+   auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
+   REQUIRE(error);
+
+   auto const client = REQUIRE_MAKE_OWNING_PTR(mongoac_client_new(to_mongoac("mongodb://localhost:27017"), error),
+                                               &mongoac_client_destroy);
+
    SECTION("client is null")
    {
-      auto const error = mongoac_error_new();
       auto const future = mongoac_client_list_databases_async(nullptr, nullptr, nullptr, error);
 
       CHECK(future == nullptr);
 
       CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_MONGOAC);
       CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_INVALID_ARGUMENT);
-
-      mongoac_error_destroy(error);
    }
 
    SECTION("valid")
    {
-      auto const client = mongoac_client_new(to_mongoac("mongodb://localhost:27017"), nullptr);
-      REQUIRE(client != nullptr);
-
-      auto const future = mongoac_client_list_databases_async(client, nullptr, nullptr, nullptr);
-      CHECK(future != nullptr);
-
-      mongoac_future_destroy(future);
-      mongoac_client_destroy(client);
+      auto const future = REQUIRE_MAKE_OWNING_PTR(mongoac_client_list_databases_async(client, nullptr, nullptr, error),
+                                                  &mongoac_future_destroy);
    }
 
    SECTION("valid with options")
    {
-      auto const client = mongoac_client_new(to_mongoac("mongodb://localhost:27017"), nullptr);
-      REQUIRE(client != nullptr);
-
       auto const opts = make_owning_ptr(mongoac_list_databases_options_new(), &mongoac_list_databases_options_destroy);
       mongoac_list_databases_options_set_authorized_databases(opts, true);
 
-      auto const future = mongoac_client_list_databases_async(client, nullptr, opts, nullptr);
-
-      CHECK(future != nullptr);
-
-      mongoac_future_destroy(future);
-      mongoac_client_destroy(client);
+      REQUIRE_MAKE_OWNING_PTR(mongoac_client_list_databases_async(client, nullptr, opts, error),
+                              &mongoac_future_destroy);
    }
 }
 
 TEST_CASE("list_database_names_async", "[mongoac][client]")
 {
+   auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
+   REQUIRE(error);
+
+   auto const client = REQUIRE_MAKE_OWNING_PTR(mongoac_client_new(to_mongoac("mongodb://localhost:27017"), error),
+                                               &mongoac_client_destroy);
+
    SECTION("null client")
    {
-      auto const error = mongoac_error_new();
       auto const future = mongoac_client_list_database_names_async(nullptr, nullptr, nullptr, error);
 
       CHECK(future == nullptr);
 
       CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_MONGOAC);
       CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_INVALID_ARGUMENT);
-
-      mongoac_error_destroy(error);
    }
 
    SECTION("null options")
    {
-      auto const client = mongoac_client_new(to_mongoac("mongodb://localhost:27017"), nullptr);
-      REQUIRE(client != nullptr);
-
-      auto const future = mongoac_client_list_database_names_async(client, nullptr, nullptr, nullptr);
+      auto const future = REQUIRE_MAKE_OWNING_PTR(
+         mongoac_client_list_database_names_async(client, nullptr, nullptr, error), &mongoac_future_destroy);
 
       CHECK(future != nullptr);
-
-      mongoac_future_destroy(future);
-      mongoac_client_destroy(client);
    }
 }
 
-TEST_CASE("list_databases_async returns valid BSON", "[mongoac][client][live-server]")
+TEST_CASE("list_databases_async returns valid BSON", "[mongoac][client]")
 {
-   auto const error = mongoac_error_new();
-   auto const client =
-      mongoac_client_new(to_mongoac("mongodb://localhost:27017/?serverSelectionTimeoutMS=2000"), nullptr);
-   REQUIRE(client != nullptr);
+   auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
+   REQUIRE(error);
 
-   auto const runtime = mongoac_client_get_runtime(client);
-   REQUIRE(runtime != nullptr);
+   auto const client = REQUIRE_MAKE_OWNING_PTR(mongoac_client_new(to_mongoac("mongodb://localhost:27017"), error),
+                                               &mongoac_client_destroy);
 
-   auto const future = mongoac_client_list_databases_async(client, nullptr, nullptr, error);
-   REQUIRE(future != nullptr);
+   auto const runtime = make_owning_ptr(mongoac_client_get_runtime(client), &mongoac_runtime_destroy);
+
+   auto const future = REQUIRE_MAKE_OWNING_PTR(mongoac_client_list_databases_async(client, nullptr, nullptr, error),
+                                               &mongoac_future_destroy);
 
    mongoac_runtime_block_on(runtime, future, error);
    REQUIRE(mongoac_error_code(error) == MONGOAC_ERROR_CODE_OK);
@@ -112,9 +100,4 @@ TEST_CASE("list_databases_async returns valid BSON", "[mongoac][client][live-ser
    REQUIRE(json != nullptr);
    // list_databases returns an indexed array: {"0": { ... }, ...}.
    CHECK_THAT(json.get(), Catch::Matchers::ContainsSubstring("\"0\""));
-
-   mongoac_future_destroy(future);
-   mongoac_runtime_destroy(runtime);
-   mongoac_client_destroy(client);
-   mongoac_error_destroy(error);
 }
