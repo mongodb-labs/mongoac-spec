@@ -1407,15 +1407,15 @@ deactivate U
 ### Concurrent Block-On
 
 ```c
-mongoac_future_t* futs[] = {
-  mongoac_database_drop_async(db1, ...),
-  mongoac_database_drop_async(db2, ...),
-};
+mongoac_future_t* f1 = mongoac_database_drop_async(db1, ...);
+mongoac_future_t* f2 = mongoac_database_drop_async(db2, ...);
+
+mongoac_future_t* futs[] = {f1, f2};
 
 mongoac_runtime_block_on_all(rt, futs, ...);
 
-mongoac_future_get_void(futs[0]);
-mongoac_future_get_void(futs[1]);
+mongoac_future_get_void(f1);
+mongoac_future_get_void(f2);
 ```
 
 ```mermaid
@@ -1429,7 +1429,7 @@ participant S@{"alias": "MongoDB Server", "type": "database"}
 
 U ->> M: mongoac_database_drop_async(db1)
 activate U
-  M ->> T: rt.spawn()
+  M ->> T: runtime.spawn()
   activate M
     T ->> M: JoinHandle
     deactivate M
@@ -1438,7 +1438,7 @@ deactivate U
 
 U ->> M: mongoac_database_drop_async(db2)
 activate U
-  M ->> T: rt.spawn()
+  M ->> T: runtime.spawn()
   activate M
     T ->> M: JoinHandle
     deactivate M
@@ -1560,7 +1560,7 @@ participant S@{"alias": "MongoDB Server", "type": "database"}
 
 U ->> M: mongoac_database_drop_async() (db1)
 activate U
-  M ->> T: rt.spawn()
+  M ->> T: runtime.spawn()
   activate M
     T ->> M: JoinHandle
     deactivate M
@@ -1569,7 +1569,7 @@ deactivate U
 
 U ->> M: mongoac_database_drop_async() (db2)
 activate U
-  M ->> T: rt.spawn()
+  M ->> T: runtime.spawn()
   activate M
     T ->> M: JoinHandle
     deactivate M
