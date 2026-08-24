@@ -856,7 +856,7 @@ The Rust Driver handles cancellation of in-progress transactions when applicable
 > mongoac_future_t* f1 = mongoac_collection_insert_one_async(coll, session, doc1, options, error);
 >
 > // Whether via `block_on*()` or by `make_progress*()` on this thread or another thread...
-> mongoac_runtime_block_on(runtime, f1, error);
+> mongoac_runtime_block_on(rt, f1, error);
 >
 > // ... the operation must have completed its execution...
 > assert(mongoac_future_is_ready(f1));
