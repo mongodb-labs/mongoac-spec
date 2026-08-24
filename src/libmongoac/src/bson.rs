@@ -82,7 +82,7 @@ impl TryFrom<&BsonViewT> for RawDocumentBuf {
     type Error = ErrorT;
 
     fn try_from(view: &BsonViewT) -> Result<Self, Self::Error> {
-        RawDocumentBuf::from_bytes(view.as_bytes().to_vec()).map_err(Into::into)
+        RawDocumentBuf::from_bytes(view.as_bytes().to_vec()).map_err(Into::into) // Deep-copy!
     }
 }
 
@@ -90,7 +90,7 @@ impl TryFrom<&BsonViewT> for Document {
     type Error = ErrorT;
 
     fn try_from(view: &BsonViewT) -> Result<Self, Self::Error> {
-        Document::from_reader(view.as_bytes()).map_err(Into::into)
+        Document::from_reader(view.as_bytes()).map_err(Into::into) // Deep-copy!
     }
 }
 

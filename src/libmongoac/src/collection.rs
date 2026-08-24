@@ -1,7 +1,6 @@
 use crate::aggregate_options::AggregateOptionsT;
 use crate::bson::{BsonT, BsonViewT};
 use crate::client_session::ClientSessionT;
-use crate::collection_options::CollectionOptionsT;
 use crate::count_options::CountOptionsT;
 use crate::cursor::CursorT;
 use crate::database::DatabaseT;
@@ -26,9 +25,9 @@ use crate::{cursor_op_with_session, op_with_session};
 use mongodb::Collection;
 use mongodb::bson::{Document, RawDocument, RawDocumentBuf, serialize_to_raw_document_buf};
 use mongodb::options::{
-    AggregateOptions, CountOptions, DeleteOptions, DistinctOptions, DropCollectionOptions,
-    EstimatedDocumentCountOptions, FindOneOptions, FindOptions, InsertManyOptions,
-    InsertOneOptions, ReplaceOptions, UpdateOptions,
+    AggregateOptions, CollectionOptions, CountOptions, DeleteOptions, DistinctOptions,
+    DropCollectionOptions, EstimatedDocumentCountOptions, FindOneOptions, FindOptions,
+    InsertManyOptions, InsertOneOptions, ReplaceOptions, UpdateOptions,
 };
 use mongodb::results::InsertManyResult;
 
@@ -96,7 +95,7 @@ pub extern "C" fn mongoac_collection_find_async(
 
     Box::into_raw(Box::new(collection.find_async(
         session,
-        safe_error!((&filter).try_into(), error),
+        safe_error!((&filter).try_into(), error), // Deep-copy!
         options.map(Into::into),
     )))
 }
@@ -118,7 +117,7 @@ pub extern "C" fn mongoac_collection_find(
     Box::into_raw(Box::new(safe_error!(
         collection.find(
             session,
-            safe_error!((&filter).try_into(), error),
+            safe_error!((&filter).try_into(), error), // Deep-copy!
             options.map(Into::into)
         ),
         error
@@ -245,7 +244,7 @@ pub extern "C" fn mongoac_collection_delete_one_async(
 
     Box::into_raw(Box::new(collection.delete_one_async(
         session,
-        safe_error!((&filter).try_into(), error),
+        safe_error!((&filter).try_into(), error), // Deep-copy!
         options.map(Into::into),
     )))
 }
@@ -267,7 +266,7 @@ pub extern "C" fn mongoac_collection_delete_one(
     safe_error!(
         collection.delete_one(
             session,
-            safe_error!((&filter).try_into(), error),
+            safe_error!((&filter).try_into(), error), // Deep-copy!
             options.map(Into::into)
         ),
         error
@@ -291,7 +290,7 @@ pub extern "C" fn mongoac_collection_delete_many_async(
 
     Box::into_raw(Box::new(collection.delete_many_async(
         session,
-        safe_error!((&filter).try_into(), error),
+        safe_error!((&filter).try_into(), error), // Deep-copy!
         options.map(Into::into),
     )))
 }
@@ -313,7 +312,7 @@ pub extern "C" fn mongoac_collection_delete_many(
     safe_error!(
         collection.delete_many(
             session,
-            safe_error!((&filter).try_into(), error),
+            safe_error!((&filter).try_into(), error), // Deep-copy!
             options.map(Into::into)
         ),
         error
@@ -339,8 +338,8 @@ pub extern "C" fn mongoac_collection_replace_one_async(
 
     Box::into_raw(Box::new(collection.replace_one_async(
         session,
-        safe_error!((&filter).try_into(), error),
-        safe_error!((&replacement).try_into(), error),
+        safe_error!((&filter).try_into(), error), // Deep-copy!
+        safe_error!((&replacement).try_into(), error), // Deep-copy!
         options.map(Into::into),
     )))
 }
@@ -364,8 +363,8 @@ pub extern "C" fn mongoac_collection_replace_one(
     safe_error!(
         collection.replace_one(
             session,
-            safe_error!((&filter).try_into(), error),
-            safe_error!((&replacement).try_into(), error),
+            safe_error!((&filter).try_into(), error), // Deep-copy!
+            safe_error!((&replacement).try_into(), error), // Deep-copy!
             options.map(Into::into)
         ),
         error
@@ -391,8 +390,8 @@ pub extern "C" fn mongoac_collection_update_one_async(
 
     Box::into_raw(Box::new(collection.update_one_async(
         session,
-        safe_error!((&filter).try_into(), error),
-        safe_error!((&update).try_into(), error),
+        safe_error!((&filter).try_into(), error), // Deep-copy!
+        safe_error!((&update).try_into(), error), // Deep-copy!
         options.map(Into::into),
     )))
 }
@@ -416,8 +415,8 @@ pub extern "C" fn mongoac_collection_update_one(
     safe_error!(
         collection.update_one(
             session,
-            safe_error!((&filter).try_into(), error),
-            safe_error!((&update).try_into(), error),
+            safe_error!((&filter).try_into(), error), // Deep-copy!
+            safe_error!((&update).try_into(), error), // Deep-copy!
             options.map(Into::into)
         ),
         error
@@ -443,8 +442,8 @@ pub extern "C" fn mongoac_collection_update_many_async(
 
     Box::into_raw(Box::new(collection.update_many_async(
         session,
-        safe_error!((&filter).try_into(), error),
-        safe_error!((&update).try_into(), error),
+        safe_error!((&filter).try_into(), error), // Deep-copy!
+        safe_error!((&update).try_into(), error), // Deep-copy!
         options.map(Into::into),
     )))
 }
@@ -468,8 +467,8 @@ pub extern "C" fn mongoac_collection_update_many(
     safe_error!(
         collection.update_many(
             session,
-            safe_error!((&filter).try_into(), error),
-            safe_error!((&update).try_into(), error),
+            safe_error!((&filter).try_into(), error), // Deep-copy!
+            safe_error!((&update).try_into(), error), // Deep-copy!
             options.map(Into::into)
         ),
         error
@@ -493,7 +492,7 @@ pub extern "C" fn mongoac_collection_count_documents_async(
 
     Box::into_raw(Box::new(collection.count_documents_async(
         session,
-        safe_error!((&filter).try_into(), error),
+        safe_error!((&filter).try_into(), error), // Deep-copy!
         options.map(Into::into),
     )))
 }
@@ -515,7 +514,7 @@ pub extern "C" fn mongoac_collection_count_documents(
     safe_error!(
         collection.count_documents(
             session,
-            safe_error!((&filter).try_into(), error),
+            safe_error!((&filter).try_into(), error), // Deep-copy!
             options.map(Into::into)
         ),
         error
@@ -572,7 +571,7 @@ pub extern "C" fn mongoac_collection_distinct_async(
     Box::into_raw(Box::new(collection.distinct_async(
         session,
         field_name,
-        safe_error!((&filter).try_into(), error),
+        safe_error!((&filter).try_into(), error), // Deep-copy!
         options.map(Into::into),
     )))
 }
@@ -597,7 +596,7 @@ pub extern "C" fn mongoac_collection_distinct(
         collection.distinct(
             session,
             field_name,
-            safe_error!((&filter).try_into(), error),
+            safe_error!((&filter).try_into(), error), // Deep-copy!
             options.map(Into::into)
         ),
         error
@@ -622,7 +621,7 @@ pub extern "C" fn mongoac_collection_aggregate_async(
 
     Box::into_raw(Box::new(collection.aggregate_async(
         session,
-        safe_error!(pipeline.iter().map(TryInto::try_into).collect(), error),
+        safe_error!(pipeline.iter().map(TryInto::try_into).collect(), error), // Deep-copy!
         options.map(Into::into),
     )))
 }
@@ -645,7 +644,7 @@ pub extern "C" fn mongoac_collection_aggregate(
     Box::into_raw(Box::new(safe_error!(
         collection.aggregate(
             session,
-            safe_error!(pipeline.iter().map(TryInto::try_into).collect(), error),
+            safe_error!(pipeline.iter().map(TryInto::try_into).collect(), error), // Deep-copy!
             options.map(Into::into)
         ),
         error
@@ -668,7 +667,7 @@ pub extern "C" fn mongoac_collection_find_one_async(
 
     Box::into_raw(Box::new(collection.find_one_async(
         session,
-        safe_error!((&filter).try_into(), error),
+        safe_error!((&filter).try_into(), error), // Deep-copy!
         options.map(Into::into),
     )))
 }
@@ -690,7 +689,7 @@ pub extern "C" fn mongoac_collection_find_one(
     safe_error!(
         collection.find_one(
             session,
-            safe_error!((&filter).try_into(), error),
+            safe_error!((&filter).try_into(), error), // Deep-copy!
             options.map(Into::into)
         ),
         error
@@ -700,11 +699,12 @@ pub extern "C" fn mongoac_collection_find_one(
 }
 
 impl CollectionT {
-    pub fn new(db: &DatabaseT, name: &str, options: Option<&CollectionOptionsT>) -> Self {
+    #[must_use]
+    pub fn new(db: &DatabaseT, name: &str, options: Option<CollectionOptions>) -> Self {
         let coll = match options {
             Some(opts) => db
                 .inner()
-                .collection_with_options::<RawDocumentBuf>(name, opts.into()),
+                .collection_with_options::<RawDocumentBuf>(name, opts),
             None => db.inner().collection::<RawDocumentBuf>(name),
         };
 

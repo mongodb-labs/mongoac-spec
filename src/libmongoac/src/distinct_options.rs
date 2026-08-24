@@ -45,7 +45,7 @@ pub extern "C" fn mongoac_distinct_options_set_hint(
     let v = safe_optional_bson_view!(v);
 
     opts.0.hint = match v {
-        Some(ref v) => Some(Hint::Keys(safe_error!(v.try_into(), error))),
+        Some(ref v) => Some(Hint::Keys(safe_error!(v.try_into(), error))), // Deep-copy!
         None => None,
     };
 }
@@ -61,7 +61,7 @@ pub extern "C" fn mongoac_distinct_options_set_comment(
     let v = safe_optional_bson_view!(v);
 
     opts.0.comment = match v {
-        Some(ref v) => Some(Bson::Document(safe_error!(v.try_into(), error))),
+        Some(ref v) => Some(Bson::Document(safe_error!(v.try_into(), error))), // Deep-copy!
         None => None,
     };
 }

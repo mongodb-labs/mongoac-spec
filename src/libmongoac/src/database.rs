@@ -218,7 +218,7 @@ pub extern "C" fn mongoac_database_run_command_async(
 
     Box::into_raw(Box::new(database.run_command_async(
         session,
-        safe_error!((&command).try_into(), error),
+        safe_error!((&command).try_into(), error), // Deep-copy!
         options.map(Into::into),
     )))
 }
@@ -240,7 +240,7 @@ pub extern "C" fn mongoac_database_run_command(
     safe_error!(
         database.run_command(
             session,
-            safe_error!((&command).try_into(), error),
+            safe_error!((&command).try_into(), error), // Deep-copy!
             options.map(Into::into)
         ),
         error
@@ -264,7 +264,7 @@ pub extern "C" fn mongoac_database_run_cursor_command_async(
 
     Box::into_raw(Box::new(database.run_cursor_command_async(
         session,
-        safe_error!((&command).try_into(), error),
+        safe_error!((&command).try_into(), error), // Deep-copy!
         options.map(Into::into),
     )))
 }
@@ -286,7 +286,7 @@ pub extern "C" fn mongoac_database_run_cursor_command(
     Box::into_raw(Box::new(safe_error!(
         database.run_cursor_command(
             session,
-            safe_error!((&command).try_into(), error),
+            safe_error!((&command).try_into(), error), // Deep-copy!
             options.map(Into::into)
         ),
         error
@@ -294,6 +294,7 @@ pub extern "C" fn mongoac_database_run_cursor_command(
 }
 
 impl DatabaseT {
+    #[must_use]
     pub fn new(client: &ClientT, name: &str, options: Option<DatabaseOptions>) -> Self {
         let db = match options {
             Some(o) => client.inner().database_with_options(name, o),

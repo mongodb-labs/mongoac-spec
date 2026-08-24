@@ -88,7 +88,7 @@ pub extern "C" fn mongoac_future_get_optional_bson(
     let doc = safe_error!(future.get_optional_bson(), error);
 
     match doc {
-        Some(doc) => doc.into(),
+        Some(doc) => doc.into(), // Deep-copy!
         None => BsonT::default(),
     }
 }
