@@ -12,6 +12,7 @@
 #include <mongoac/database.h>
 #include <mongoac/error.h>
 #include <mongoac/find_options.h>
+#include <mongoac/future-fwd.h>
 #include <mongoac/future.h>
 #include <mongoac/runtime.h>
 #include <test_util/bson.hh>
@@ -349,15 +350,19 @@ TEST_CASE("find_one", "[mongoac][collection]")
          mongoac_runtime_block_on_all(runtime, futures.data(), futures.size(), error);
       }
 
-      auto const r1 = REQUIRE_MAKE_OWNING_BSON(mongoac_future_get_optional_bson(f1, error));
-      auto const r2 = REQUIRE_MAKE_OWNING_BSON(mongoac_future_get_optional_bson(f2, error));
+      auto const r1 = mongoac_future_get_optional_bson(f1, error);
+      auto const r2 = mongoac_future_get_optional_bson(f2, error);
+
+      REQUIRE(r1.ptr != nullptr);
+      REQUIRE(r2.ptr == nullptr);
+
+      bson_t doc = {};
+      REQUIRE(bson_init_static(&doc, r1.ptr, r1.len));
 
       bson_iter_t iter = {};
-      REQUIRE(bson_iter_init_find(&iter, r1, "x"));
+      REQUIRE(bson_iter_init_find(&iter, &doc, "x"));
       REQUIRE(bson_iter_type(&iter) == BSON_TYPE_INT32);
       CHECK(bson_iter_int32(&iter) == 1);
-
-      CHECK_FALSE(r2);
    }
 
    SECTION("sync")

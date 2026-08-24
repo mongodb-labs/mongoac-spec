@@ -1,4 +1,4 @@
-use crate::bson::{BsonT, BsonViewT};
+use crate::bson::BsonViewT;
 use crate::client_session::ClientSessionT;
 use crate::cursor::CursorT;
 use crate::error::{ErrorCodeT, ErrorT};
@@ -81,15 +81,15 @@ pub extern "C" fn mongoac_future_get_uint64(future: *const FutureT, error: *mut 
 pub extern "C" fn mongoac_future_get_optional_bson(
     future: *const FutureT,
     error: *mut ErrorT,
-) -> BsonT {
+) -> BsonViewT {
     let error = safe_optional_error_as_mut!(error);
     let future = safe_as_ref_with_error!(future, error);
 
     let doc = safe_error!(future.get_optional_bson(), error);
 
     match doc {
-        Some(doc) => doc.into(), // Deep-copy!
-        None => BsonT::default(),
+        Some(doc) => doc.into(),
+        None => BsonViewT::default(),
     }
 }
 
