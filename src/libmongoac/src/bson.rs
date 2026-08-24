@@ -116,17 +116,6 @@ impl From<&RawDocumentBuf> for BsonViewT {
     }
 }
 
-impl<'a> TryFrom<&'a BsonT> for &'a RawDocument {
-    type Error = ErrorT;
-
-    fn try_from(bson: &'a BsonT) -> Result<Self, Self::Error> {
-        RawDocument::from_bytes(unsafe {
-            std::slice::from_raw_parts(bson.ptr.cast::<u8>(), bson.len)
-        })
-        .map_err(Into::into)
-    }
-}
-
 impl From<RawDocumentBuf> for BsonT {
     fn from(doc: RawDocumentBuf) -> Self {
         let bytes = doc.into_bytes();
@@ -141,19 +130,7 @@ impl From<RawDocumentBuf> for BsonT {
 
 impl From<&RawDocumentBuf> for BsonT {
     fn from(doc: &RawDocumentBuf) -> Self {
-        let bytes = doc.as_bytes().to_vec();
-        let len = bytes.len();
-
-        BsonT {
-            ptr: Box::into_raw(bytes.into_boxed_slice()).cast::<u8>(),
-            len,
-        }
-    }
-}
-
-impl From<&RawDocument> for BsonT {
-    fn from(doc: &RawDocument) -> Self {
-        let bytes = doc.as_bytes().to_vec();
+        let bytes = doc.as_bytes().to_vec(); // Deep-copy!
         let len = bytes.len();
 
         BsonT {
