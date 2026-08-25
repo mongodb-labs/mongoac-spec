@@ -366,7 +366,7 @@ impl ClientT {
         let client = self.inner.clone();
         let session = session.map(|s| s.clone());
 
-        spawn!(&self, Bson, async move {
+        spawn!(self, Bson, async move {
             let res = op_with_session!(client.list_databases().with_options(options), session)?;
             specs_to_bson_array(&res)
         })
@@ -391,7 +391,7 @@ impl ClientT {
         let client = self.inner.clone();
         let session = session.map(|s| s.clone());
 
-        spawn!(&self, Bson, async move {
+        spawn!(self, Bson, async move {
             let res =
                 op_with_session!(client.list_database_names().with_options(options), session)?;
             strings_to_bson(&res)
@@ -415,7 +415,7 @@ impl ClientT {
     fn start_session_async(&self, options: Option<SessionOptions>) -> FutureT {
         let client = self.inner.clone();
 
-        spawn!(&self, ClientSession, async move {
+        spawn!(self, ClientSession, async move {
             client
                 .start_session()
                 .with_options(options)
@@ -439,7 +439,7 @@ impl ClientT {
     fn shutdown_async(&self) -> FutureT {
         let client = self.inner.clone();
 
-        spawn!(&self, Void, async move {
+        spawn!(self, Void, async move {
             client.shutdown().await;
             Ok(())
         })

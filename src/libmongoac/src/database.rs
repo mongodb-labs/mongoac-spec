@@ -375,7 +375,7 @@ impl DatabaseT {
         let session = session.map(|s| s.clone());
         let runtime = self.runtime.clone();
 
-        spawn!(&self, Cursor, async move {
+        spawn!(self, Cursor, async move {
             cursor_op_with_session!(
                 db.list_collections().with_options(options),
                 session,
@@ -406,7 +406,7 @@ impl DatabaseT {
         let db = self.inner.clone();
         let session = session.map(|s| s.clone());
 
-        spawn!(&self, Bson, async move {
+        spawn!(self, Bson, async move {
             let res = op_with_session!(db.list_collection_names().with_options(options), session)?;
             strings_to_bson(&res)
         })
