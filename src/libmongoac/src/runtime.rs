@@ -39,8 +39,8 @@ pub extern "C" fn mongoac_runtime_clone(runtime: *const RuntimeT) -> *mut Runtim
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn mongoac_runtime_is_equal(lhs: *const RuntimeT, rhs: *const RuntimeT) -> bool {
-    Arc::ptr_eq(&safe_as_ref!(lhs).runtime, &safe_as_ref!(rhs).runtime)
+pub extern "C" fn mongoac_runtime_address(runtime: *const RuntimeT) -> usize {
+    safe_as_ref!(runtime) as *const RuntimeT as usize
 }
 
 // Make progress on all tasks scheduled on this runtime.
