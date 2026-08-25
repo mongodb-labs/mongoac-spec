@@ -40,7 +40,7 @@ pub extern "C" fn mongoac_runtime_clone(runtime: *const RuntimeT) -> *mut Runtim
 
 #[unsafe(no_mangle)]
 pub extern "C" fn mongoac_runtime_address(runtime: *const RuntimeT) -> usize {
-    safe_as_ref!(runtime) as *const RuntimeT as usize
+    Arc::as_ptr(&safe_as_ref!(runtime).runtime) as usize
 }
 
 // Make progress on all tasks scheduled on this runtime.
