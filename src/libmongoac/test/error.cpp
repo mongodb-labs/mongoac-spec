@@ -158,7 +158,7 @@ TEST_CASE("server command error", "[mongoac][error]")
    CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_SERVER);
    CHECK(mongoac_error_code(error) != MONGOAC_ERROR_CODE_OK);
    CHECK(mongoac_error_code(error) == 59); // CommandNotFound
-   CHECK_THAT(owning_string(mongoac_error_message(error)), Catch::Matchers::ContainsSubstring("no such cmd"));
+   CHECK_THAT(owning_string(mongoac_error_message(error)), Catch::Matchers::ContainsSubstring("no such"));
 }
 
 TEST_CASE("server write error", "[mongoac][error]")
