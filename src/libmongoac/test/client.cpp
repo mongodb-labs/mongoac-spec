@@ -63,9 +63,10 @@ TEST_CASE("new", "[mongoac][client]")
 }
 TEST_CASE("client_new_with_options", "[mongoac][client_options]")
 {
+   auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
+
    SECTION("null")
    {
-      auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
       auto const client = make_owning_ptr(mongoac_client_new_with_options(nullptr, error), &mongoac_client_destroy);
       CHECK(client != nullptr);
       CHECK(mongoac_error_code(error) == MONGOAC_ERROR_CODE_OK);
@@ -77,7 +78,8 @@ TEST_CASE("client_new_with_options", "[mongoac][client_options]")
       auto const opts = make_owning_ptr(mongoac_client_options_new(), &mongoac_client_options_destroy);
       REQUIRE(opts != nullptr);
 
-      auto const client = make_owning_ptr(mongoac_client_new_with_options(opts, nullptr), &mongoac_client_destroy);
+      auto const client =
+         REQUIRE_MAKE_OWNING_PTR(mongoac_client_new_with_options(opts, error), &mongoac_client_destroy);
       CHECK(client != nullptr);
       CHECK(mongoac_client_count_command_events(client) == 0);
    }
@@ -88,7 +90,8 @@ TEST_CASE("client_new_with_options", "[mongoac][client_options]")
       REQUIRE(opts != nullptr);
       mongoac_client_options_set_capture_command_events(opts, true);
 
-      auto const client = make_owning_ptr(mongoac_client_new_with_options(opts, nullptr), &mongoac_client_destroy);
+      auto const client =
+         REQUIRE_MAKE_OWNING_PTR(mongoac_client_new_with_options(opts, error), &mongoac_client_destroy);
       CHECK(client != nullptr);
       CHECK(mongoac_client_count_command_events(client) == 0);
    }
@@ -102,8 +105,25 @@ TEST_CASE("client_new_with_options", "[mongoac][client_options]")
       mongoac_server_api_set_strict(api, true);
       mongoac_client_options_set_server_api(opts, api, nullptr);
 
-      auto const client = make_owning_ptr(mongoac_client_new_with_options(opts, nullptr), &mongoac_client_destroy);
+      auto const client =
+         REQUIRE_MAKE_OWNING_PTR(mongoac_client_new_with_options(opts, error), &mongoac_client_destroy);
       CHECK(client != nullptr);
+   }
+
+   SECTION("invalid max_pool_size")
+   {
+      auto const opts = make_owning_ptr(mongoac_client_options_new(), &mongoac_client_options_destroy);
+      REQUIRE(opts != nullptr);
+
+      mongoac_client_options_add_host_and_port(opts, to_mongoac("localhost"), 27017);
+      mongoac_client_options_set_max_pool_size(opts, 0);
+
+      auto const client = mongoac_client_new_with_options(opts, error);
+
+      CHECK(client == nullptr);
+      CHECK(mongoac_error_category(error) == MONGOAC_ERROR_CATEGORY_RUST);
+      CHECK(mongoac_error_code(error) != MONGOAC_ERROR_CODE_OK);
+      CHECK_THAT(owning_string(mongoac_error_message(error)), Catch::Matchers::ContainsSubstring("maxPoolSize"));
    }
 }
 
