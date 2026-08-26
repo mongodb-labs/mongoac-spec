@@ -123,7 +123,6 @@ pub extern "C" fn mongoac_runtime_block_on_with_timeout(
 // Use this function when the current thread can make progress on all scheduled tasks until *any* of the given futures
 // is ready.
 #[unsafe(no_mangle)]
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn mongoac_runtime_block_on_any(
     runtime: *const RuntimeT,
     futures: *const *mut FutureT,
@@ -133,13 +132,18 @@ pub extern "C" fn mongoac_runtime_block_on_any(
     let error = safe_optional_error_as_mut!(error);
     let runtime = safe_as_ref!(runtime);
 
-    let Some(mut futs) = safe_error!(futures_as_muts_for_any(futures, count, runtime), error)
-    else {
+    let Some(slice) = futures_as_slice(futures, count) else {
         return Default::default();
     };
 
+    if let Some(ptr) = any_ready(slice, runtime) {
+        return ptr;
+    }
+
+    let mut futs = safe_error!(futures_as_muts(slice, runtime), error);
+
     match runtime.block_on_any(&mut futs) {
-        Some(i) => unsafe { futures.add(i) },
+        Some(i) => &raw const slice[i],
         None => Default::default(),
     }
 }
@@ -148,7 +152,6 @@ pub extern "C" fn mongoac_runtime_block_on_any(
 //
 // Use this function when a (soft) upper bound is required on the time spent potentially blocked on `block_on_any()`.
 #[unsafe(no_mangle)]
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn mongoac_runtime_block_on_any_with_timeout(
     runtime: *const RuntimeT,
     futures: *const *mut FutureT,
@@ -159,16 +162,21 @@ pub extern "C" fn mongoac_runtime_block_on_any_with_timeout(
     let error = safe_optional_error_as_mut!(error);
     let runtime = safe_as_ref!(runtime);
 
-    let Some(mut futs) = safe_error!(futures_as_muts_for_any(futures, count, runtime), error)
-    else {
+    let Some(slice) = futures_as_slice(futures, count) else {
         return Default::default();
     };
+
+    if let Some(ptr) = any_ready(slice, runtime) {
+        return ptr;
+    }
+
+    let mut futs = safe_error!(futures_as_muts(slice, runtime), error);
 
     match safe_error!(
         runtime.block_on_any_with_timeout(&mut futs, Duration::from_millis(timeout_ms)),
         error
     ) {
-        Some(i) => unsafe { futures.add(i) },
+        Some(i) => &raw const slice[i],
         None => Default::default(),
     }
 }
@@ -187,10 +195,15 @@ pub extern "C" fn mongoac_runtime_block_on_all(
     let error = safe_optional_error_as_mut!(error);
     let runtime = safe_as_ref!(runtime);
 
-    let Some(mut futs) = safe_error!(futures_as_muts_for_all(futures, count, runtime), error)
-    else {
+    let Some(slice) = futures_as_slice(futures, count) else {
         return;
     };
+
+    if all_ready(slice, runtime) {
+        return;
+    }
+
+    let mut futs = safe_error!(futures_as_muts_for_all(slice, runtime), error);
 
     runtime.block_on_all(&mut futs);
 }
@@ -209,10 +222,15 @@ pub extern "C" fn mongoac_runtime_block_on_all_with_timeout(
     let error = safe_optional_error_as_mut!(error);
     let runtime = safe_as_ref!(runtime);
 
-    let Some(mut futs) = safe_error!(futures_as_muts_for_all(futures, count, runtime), error)
-    else {
+    let Some(slice) = futures_as_slice(futures, count) else {
         return;
     };
+
+    if all_ready(slice, runtime) {
+        return;
+    }
+
+    let mut futs = safe_error!(futures_as_muts_for_all(slice, runtime), error);
 
     safe_error!(
         runtime.block_on_all_with_timeout(&mut futs, Duration::from_millis(timeout_ms)),
@@ -292,11 +310,6 @@ impl RuntimeT {
         &self,
         futures: &'a mut [(usize, &'a mut FutureT)],
     ) -> Option<usize> {
-        // Check for completion before executing `block_on()`.
-        if let Some(i) = any_ready(futures) {
-            return Some(i);
-        }
-
         self.runtime
             .block_on(futures_unordered_for_any(futures).next())
     }
@@ -308,11 +321,6 @@ impl RuntimeT {
     ) -> Result<Option<usize>, ErrorT> {
         let deadline = tokio::time::Instant::now() + timeout;
 
-        // Check for completion before executing `block_on()`.
-        if let Some(i) = any_ready(futures) {
-            return Ok(Some(i));
-        }
-
         self.runtime.block_on(async {
             Ok(
                 tokio::time::timeout_at(deadline, futures_unordered_for_any(futures).next())
@@ -322,11 +330,6 @@ impl RuntimeT {
     }
 
     pub(crate) fn block_on_all<'a>(&self, futures: &'a mut [&'a mut FutureT]) {
-        // Check for completion before executing `block_on()`.
-        if all_ready(futures) {
-            return;
-        }
-
         self.runtime.block_on(async {
             let mut fut_set = futures_unordered_for_all(futures);
             while fut_set.next().await.is_some() {}
@@ -339,11 +342,6 @@ impl RuntimeT {
         timeout: Duration,
     ) -> Result<(), ErrorT> {
         let deadline = tokio::time::Instant::now() + timeout;
-
-        // Check for completion before executing `block_on()`.
-        if all_ready(futures) {
-            return Ok(());
-        }
 
         self.runtime.block_on(async {
             let mut fut_set = futures_unordered_for_all(futures);
@@ -387,49 +385,39 @@ fn futures_unordered_for_all<'a>(
     futures.iter_mut().map(|f| FutureExt::new(f)).collect()
 }
 
-fn any_ready(futures: &[(usize, &mut FutureT)]) -> Option<usize> {
-    futures.iter().find(|(_, f)| f.is_ready()).map(|(i, _)| *i)
-}
-
-fn all_ready(futures: &[&mut FutureT]) -> bool {
-    futures.iter().all(|f| f.is_ready())
-}
-
-fn futures_as_muts_for_any<'a>(
-    futures: *const *mut FutureT,
-    count: usize,
-    runtime: &RuntimeT,
-) -> Result<Option<Vec<(usize, &'a mut FutureT)>>, ErrorT> {
+fn futures_as_slice<'a>(futures: *const *mut FutureT, count: usize) -> Option<&'a [*mut FutureT]> {
     if futures.is_null() || count == 0 {
-        return Ok(None); // No work to do.
+        return None; // No work to do.
     }
 
     // SAFETY: `futures` and `count` validity is an uncheckable precondition.
-    let refs = futures_as_muts(
-        unsafe { std::slice::from_raw_parts(futures, count) },
-        runtime,
-    )?;
+    Some(unsafe { std::slice::from_raw_parts(futures, count) })
+}
 
-    Ok(Some(refs))
+fn any_ready(slice: &[*mut FutureT], runtime: &RuntimeT) -> Option<*const *mut FutureT> {
+    for (i, ptr) in slice.iter().enumerate() {
+        // SAFETY: `as_ref()` is a null check; not-null pointer validity is an uncheckable precondition.
+        if unsafe { (*ptr).as_ref() }.is_some_and(|f| f.is_ready() && f.get_runtime() == runtime) {
+            return Some(&raw const slice[i]);
+        }
+    }
+
+    None
+}
+
+// Returns whether every future in `slice` is ready and associated with `runtime`.
+fn all_ready(slice: &[*mut FutureT], runtime: &RuntimeT) -> bool {
+    slice.iter().all(|ptr| {
+        // SAFETY: `as_ref()` is a null check; not-null pointer validity is an uncheckable precondition.
+        unsafe { (*ptr).as_ref() }.is_some_and(|f| f.is_ready() && f.get_runtime() == runtime)
+    })
 }
 
 fn futures_as_muts_for_all<'a>(
-    futures: *const *mut FutureT,
-    count: usize,
+    slice: &[*mut FutureT],
     runtime: &RuntimeT,
-) -> Result<Option<Vec<&'a mut FutureT>>, ErrorT> {
-    if futures.is_null() || count == 0 {
-        return Ok(None); // No work to do.
-    }
-
-    // SAFETY: `futures` and `count` validity is an uncheckable precondition.
-    let refs: Vec<&'a mut FutureT> = futures_as_muts(
-        unsafe { std::slice::from_raw_parts(futures, count) },
-        runtime,
-    )
-    .map(|v| v.into_iter().map(|(_, f)| f).collect())?;
-
-    Ok(Some(refs))
+) -> Result<Vec<&'a mut FutureT>, ErrorT> {
+    futures_as_muts(slice, runtime).map(|v| v.into_iter().map(|(_, f)| f).collect())
 }
 
 fn futures_as_muts<'a>(
