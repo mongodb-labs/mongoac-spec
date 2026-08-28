@@ -3,11 +3,17 @@
 include(FetchContent)
 
 function(fetch_catch2)
+    set (CATCH_CONFIG_CPP11_TO_STRING ON CACHE BOOL "" FORCE)
+    set (CATCH_CONFIG_CPP17_OPTIONAL ON CACHE BOOL "" FORCE)
+    set (CATCH_CONFIG_CPP17_STRING_VIEW ON CACHE BOOL "" FORCE)
+    set (CATCH_INSTALL_DOCS OFF CACHE BOOL "" FORCE)
+    set (CATCH_INSTALL_EXTRAS OFF CACHE BOOL "" FORCE)
+
     FetchContent_Declare(
         EP_Catch2
 
         GIT_REPOSITORY https://github.com/catchorg/Catch2
-        GIT_TAG v3.15.3
+        GIT_TAG v3.16.0
         GIT_SHALLOW TRUE
         GIT_REMOTE_UPDATE_STRATEGY CHECKOUT
         LOG_DOWNLOAD ON
@@ -31,13 +37,6 @@ function(fetch_catch2)
 
         # Avoid building unnecessary targets. Use FetchContent_Declare(EXCLUDE_FROM_ALL) in CMake 3.28 and newer.
         set_property(DIRECTORY "${ep_catch2_SOURCE_DIR}" PROPERTY EXCLUDE_FROM_ALL ON)
-
-        # Catch2 config vars.
-        set_property(CACHE CATCH_CONFIG_CPP11_TO_STRING PROPERTY VALUE ON)
-        set_property(CACHE CATCH_CONFIG_CPP17_OPTIONAL PROPERTY VALUE ON)
-        set_property(CACHE CATCH_CONFIG_CPP17_STRING_VIEW PROPERTY VALUE ON)
-        set_property(CACHE CATCH_INSTALL_DOCS PROPERTY VALUE OFF)
-        set_property(CACHE CATCH_INSTALL_EXTRAS PROPERTY VALUE OFF)
 
         message (STATUS "Downloading Catch2... done.")
     endif()

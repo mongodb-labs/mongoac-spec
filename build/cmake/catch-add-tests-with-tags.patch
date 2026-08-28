@@ -1,8 +1,8 @@
 diff --git a/extras/CatchAddTests.cmake b/extras/CatchAddTests.cmake
-index 59a39c7..9327714 100644
+index f484019..70cc03f 100644
 --- a/extras/CatchAddTests.cmake
 +++ b/extras/CatchAddTests.cmake
-@@ -360,6 +360,28 @@ function(catch_discover_tests_impl)
+@@ -449,6 +449,28 @@ function(catch_discover_tests_impl)
      endif()
      string(JSON plain_name GET "${single_test}" "name")
  
@@ -31,46 +31,21 @@ index 59a39c7..9327714 100644
      # Escape characters in test case names that would be parsed by Catch2
      # Note that the \ escaping must happen FIRST! Do not change the order.
      set(escaped_name "${plain_name}")
-@@ -374,7 +396,7 @@ function(catch_discover_tests_impl)
- 
-     # ...and add to script
-     prepare_command(add_test
--      "${prefix}${plain_name}${suffix}"
-+      "${prefix}${ctest_name}${suffix}"
-       ${_TEST_EXECUTOR}
-       "${_TEST_EXECUTABLE}"
-       "${escaped_name}"
-@@ -384,7 +406,7 @@ function(catch_discover_tests_impl)
-     )
-     string(APPEND script "${_Command}")
-     prepare_command(set_tests_properties
--      "${prefix}${plain_name}${suffix}"
-+      "${prefix}${ctest_name}${suffix}"
-       PROPERTIES
-       WORKING_DIRECTORY "${_TEST_WORKING_DIR}"
-       ${properties}
-@@ -410,7 +432,7 @@ function(catch_discover_tests_impl)
-         endforeach()
- 
-         prepare_command(set_tests_properties
--          "${prefix}${plain_name}${suffix}"
-+          "${prefix}${ctest_name}${suffix}"
-           PROPERTIES
-           LABELS "${tag_list}"
-         )
-@@ -420,13 +442,13 @@ function(catch_discover_tests_impl)
- 
-     if(environment_modifications)
-       prepare_command(set_tests_properties
--        "${prefix}${plain_name}${suffix}"
-+        "${prefix}${ctest_name}${suffix}"
-         PROPERTIES
-         ENVIRONMENT_MODIFICATION "${environment_modifications}")
-       string(APPEND script "${_Command}")
+@@ -461,7 +483,7 @@ function(catch_discover_tests_impl)
+       set(output_dir_arg "--out ${output_dir}/${output_prefix}${escaped_name_clean}${output_suffix}")
      endif()
  
--    list(APPEND tests "${prefix}${plain_name}${suffix}")
-+    list(APPEND tests "${prefix}${ctest_name}${suffix}")
-   endforeach()
- 
-   # Create a list of all discovered tests, which users may use to e.g. set
+-    set(full_name "${prefix}${plain_name}${suffix}")
++    set(full_name "${prefix}${ctest_name}${suffix}")
+     prepare_command_fragment(_full_name_fragment "${full_name}")
+     prepare_command_fragment(_escaped_name_fragment "${escaped_name}")
+     prepare_command_fragment(_outdir_fragment "${output_dir_arg}")
+@@ -504,7 +526,7 @@ function(catch_discover_tests_impl)
+     # The test name has to be escaped using the same rules as prepare_command
+     # uses for the arguments, so that it keeps being single element in list
+     # even with weird characters and semicolons.
+-    set(full_list_name "${prefix}${plain_name}${suffix}")
++    set(full_list_name "${prefix}${ctest_name}${suffix}")
+     string(REPLACE ";" "\\;" full_list_name "${full_list_name}")
+     string(REPLACE "[" "${_OpenBracketListingEscape}" full_list_name "${full_list_name}")
+     string(REPLACE "]" "${_CloseBracketListingEscape}" full_list_name "${full_list_name}")
