@@ -488,7 +488,7 @@ TEST_CASE("worker thread", "[examples][libuv]")
    //   \-> (insert `{v: 0}`: _id2) --> (update _id2 to `{v: 3}`) -/    \-> (find "v" for _id2) -/
    //
    // Each successive operation is scheduled only after the completion of its dependent operation via completion
-   // callback and uses the result(s) of the previous operation (e.g. `_id`) as input for the next operation.
+   // functions, using the result(s) of the previous operation (e.g. `_id`) as input for the next operation.
    //
    // This example further demonstrates how each task may create and forward its own state on-demand. A real-world
    // implementation may use higher-level abstractions to express and manage task composition in a more expressive
@@ -525,7 +525,8 @@ TEST_CASE("worker thread", "[examples][libuv]")
          static void
          on_insert(mongoac_loop_ctx &ctx, mongoac_loop_ctx::work_type &work) noexcept
          {
-            auto &for_insert = *static_cast<operation_states::for_insert *>(work.data.get());
+            auto &[coll, result, pending, ids, v] = *static_cast<operation_states::for_insert *>(work.data.get());
+
             auto const reply_view = mongoac_future_get_bson(work.future, ctx.error);
             if (mongoac_error_code(ctx.error) != MONGOAC_ERROR_CODE_OK) {
                FAIL_CHECK("insert failed: " << owning_string(mongoac_error_message(ctx.error)).view());
@@ -545,25 +546,25 @@ TEST_CASE("worker thread", "[examples][libuv]")
             }
             auto const id = bson_iter_oid(&iter);
 
-            ctx.queue(
-               make_owning_ptr(
-                  mongoac_collection_update_one_async(
-                     for_insert.coll,
-                     nullptr,
-                     make_bson_view(make_owning_bson(BCON_NEW("_id", BCON_OID(id))).get()),
-                     make_bson_view(make_owning_bson(BCON_NEW("$set", "{", "v", BCON_INT32(for_insert.v), "}")).get()),
-                     nullptr,
-                     ctx.error),
-                  &mongoac_future_destroy),
-               std::shared_ptr<operation_states::for_update>(new operation_states::for_update{
-                  for_insert.coll,
-                  for_insert.result,
-                  std::move(for_insert.pending),
-                  std::move(for_insert.ids),
-                  *id,
-                  static_cast<std::size_t>(for_insert.v) - 1u,
-               }),
-               on_update);
+            // Schedule the insert op.
+            ctx.queue(make_owning_ptr(
+                         mongoac_collection_update_one_async(
+                            coll,
+                            nullptr,
+                            make_bson_view(make_owning_bson(BCON_NEW("_id", BCON_OID(id))).get()),
+                            make_bson_view(make_owning_bson(BCON_NEW("$set", "{", "v", BCON_INT32(v), "}")).get()),
+                            nullptr,
+                            ctx.error),
+                         &mongoac_future_destroy),
+                      std::shared_ptr<operation_states::for_update>(new operation_states::for_update{
+                         coll,
+                         result,
+                         std::move(pending),
+                         std::move(ids),
+                         *id,
+                         static_cast<std::size_t>(v) - 1u,
+                      }),
+                      on_update);
          }
 
          struct for_update {
@@ -606,10 +607,10 @@ TEST_CASE("worker thread", "[examples][libuv]")
                }
             }
 
-            *pending -= 1;
             (*ids)[idx] = id;
+            *pending -= 1;
 
-            // All update ops completed: queue find ops.
+            // All update ops completed: schedule the find ops.
             if (*pending == 0) {
                // Note: C++20 is required to default-ref-capture structured bindings; use explicit ref-captures instead.
                auto const queue_find = [&, &coll = coll, &result = result](bson_oid_t id) {
