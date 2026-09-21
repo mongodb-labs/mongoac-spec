@@ -32,6 +32,16 @@ mongo_bool_setting(
 )
 if (ENABLE_MONGOAC_EXAMPLES)
   include (FetchLibuv)
+  file (GLOB_RECURSE mongoac_examples_sources CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/examples/*.cpp")
+  file (GLOB_RECURSE mongoac_examples_headers CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/examples/*.hh")
+  target_sources (test-libmongoac
+    PRIVATE
+      ${mongoac_examples_sources}
+    PRIVATE
+      FILE_SET HEADERS
+        BASE_DIRS "${PROJECT_SOURCE_DIR}/examples"
+        FILES ${mongoac_examples_headers}
+  )
   target_link_libraries (test-libmongoac PRIVATE libuv::libuv)
 endif ()
 
