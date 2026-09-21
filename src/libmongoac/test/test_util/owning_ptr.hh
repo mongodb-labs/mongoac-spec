@@ -10,7 +10,7 @@ namespace mongoac
 namespace test_util
 {
 
-template <typename T, typename D> class owning_ptr
+template <typename T, typename D = void(T *)> class owning_ptr
 {
  private:
    T *_ptr;
