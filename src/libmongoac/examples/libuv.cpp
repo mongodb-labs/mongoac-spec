@@ -88,9 +88,9 @@ struct mongoac_loop_ctx {
       on_ready_cb on_ready = nullptr;
    };
 
-   // A single mutex for simplicity. Coordinates scheduling tasks on the mongoac worker thread (spawn) vs. on the
+   // A single mutex for simplicity. Coordinates scheduling tasks on the mongoac worker thread (progress) vs. on the
    // main thread (completion). Real-world implementations may use more efficient patterns to reduce contention, such
-   // as lock-free queues.
+   // as lock-free queues, or avoid synchronization by executing completion handlers on the worker thread(s) instead.
    std::mutex _mtx;
    std::condition_variable _cv;              // Wake up the mongoac worker thread.
    std::vector<work_type> _pending;          // Pending tasks processed by the mongoac worker thread.
@@ -99,12 +99,12 @@ struct mongoac_loop_ctx {
    std::atomic<bool> _is_completing = false; // Tasks are queued or being completed on the main thread.
    std::atomic<bool> _worker_failed = false; // Signal unexpected mongoac worker thread runtime failure.
 
-   uv_loop_t *_loop = nullptr; // The main loop.
-   uv_work_t _work = {};       // The mongoac worker thread.
+   uv_loop_t *_loop = nullptr; // The main thread's event loop.
+   uv_work_t _work = {};       // The mongoac worker thread's event loop.
    uv_timer_t _timer = {};     // For test timeouts.
-   uv_async_t _waker = {};     // Wake up the main loop when a task is ready.
+   uv_async_t _waker = {};     // Wake up the main loop when a task is ready for completion.
 
-   // For testing purposes: support graceful test timeouts.
+   // For testing purposes: support test timeouts.
    std::atomic<bool> _stop_requested = false;
 
    // Dedicated ErrorT for the main thread.
@@ -174,16 +174,17 @@ struct mongoac_loop_ctx {
       _timer.data = this;
    }
 
-   // Add a task to the pending queue.
+   // Add a (mongoac) task to the pending queue. Supporting arbitrary tasks are out-of-scope for this example.
    void
-   queue(owning_ptr<mongoac_future_t> future, std::shared_ptr<void> data, on_ready_cb on_ready)
+   queue(owning_ptr<mongoac_future_t> future, std::shared_ptr<void> data, on_ready_cb on_ready) noexcept
    {
       auto const lock = std::lock_guard(_mtx);
       _pending.push_back({std::move(future), std::move(data), on_ready});
    }
 
+   // Run all scheduled tasks to completion (or timeout).
    void
-   run(std::optional<std::chrono::milliseconds> timeout = {})
+   run(std::optional<std::chrono::milliseconds> timeout = {}) noexcept
    {
       // Reset main loop state to allow repeated calls to `this->run()`.
       this->reset(timeout);
@@ -202,9 +203,7 @@ struct mongoac_loop_ctx {
       // tasks. All progress is on the (mongoac) worker thread.
       uv_run(_loop, UV_RUN_DEFAULT);
 
-      // The worker thread has finished (uv_run returned after `after_work`),
-      // so its failure state may safely be read here. Report a worker-side
-      // failure loudly instead of surfacing as a misleading timeout.
+      // Validate the mongoac worker thread itself did not encounter an error.
       CHECK_FALSE(_worker_failed.load(std::memory_order_relaxed));
 
       // For test purposes only: a stop request is raised by the watchdog on timeout.
@@ -213,7 +212,7 @@ struct mongoac_loop_ctx {
 
    // The mongoac worker thread's event loop.
    static void
-   loop(uv_work_t *work)
+   loop(uv_work_t *work) noexcept
    {
       auto &ctx = *static_cast<mongoac_loop_ctx *>(work->data);
 
@@ -223,6 +222,7 @@ struct mongoac_loop_ctx {
       // Local non-owning copy of pending futures compared and synced with `ctx._pending`.
       std::vector<mongoac_future_t *> pending;
 
+      // Continue until interruption (or explicit `return;`).
       while (!ctx.stop_requested()) {
          {
             auto lock = std::unique_lock(ctx._mtx);
@@ -235,7 +235,7 @@ struct mongoac_loop_ctx {
                return;
             }
 
-            // New pending tasks were scheduled since last sync.
+            // New pending tasks may have been scheduled.
             if (ctx._pending.size() != pending.size()) {
                pending.clear();
                pending.reserve(ctx._pending.size());
@@ -279,7 +279,7 @@ struct mongoac_loop_ctx {
             // Allow new pending tasks to be included in the next iteration.
             continue;
          default:
-            // This example does not support an error channel: abort the loop on failure.
+            // These examples do not support an error channel: abort the loop on failure.
             // Note: this assertion requires CATCH_CONFIG_THREAD_SAFE_ASSERTIONS.
             FAIL_CHECK("mongoac worker failed: " << owning_string(mongoac_error_message(error)).view());
             ctx._worker_failed.store(true, std::memory_order_relaxed);
@@ -301,32 +301,32 @@ struct mongoac_loop_ctx {
    }
 
    [[nodiscard]] bool
-   stop_requested() const
+   stop_requested() const noexcept
    {
       return _stop_requested.load(std::memory_order_relaxed);
    }
 
    void
-   request_stop(bool v)
+   request_stop(bool v) noexcept
    {
       _stop_requested.store(v, std::memory_order_relaxed);
    }
 
    [[nodiscard]] bool
-   is_completing() const
+   is_completing() const noexcept
    {
       return _is_completing.load(std::memory_order_relaxed);
    }
 
    void
-   set_completing(bool v)
+   set_completing(bool v) noexcept
    {
       _is_completing.store(v, std::memory_order_relaxed);
    }
 
    // Precondition: `_mtx` is locked.
    [[nodiscard]] bool
-   tasks_remain() const
+   tasks_remain() const noexcept
    {
       // Either there are:
       // - pending tasks making progress,
@@ -336,7 +336,7 @@ struct mongoac_loop_ctx {
    }
 
    void
-   reset(std::optional<std::chrono::milliseconds> timeout)
+   reset(std::optional<std::chrono::milliseconds> timeout) noexcept
    {
       CHECK(uv_timer_stop(&_timer) == 0);
 
@@ -361,7 +361,7 @@ struct mongoac_loop_ctx {
 
 // Return true only when `{"ok": 1.0}`.
 static bool
-ping_ok(mongoac_bson_view_t reply)
+ping_ok(mongoac_bson_view_t reply) noexcept
 {
    // No reply.
    if (!reply.ptr) {
@@ -386,7 +386,7 @@ TEST_CASE("worker thread", "[examples][libuv]")
    uv_loop_type loop_owner;
    uv_loop_t &loop = loop_owner._loop;
 
-   // The mongoac worker thread state (spawned by `.run()`).
+   // The mongoac worker thread state (the thread itself is spawned by `run()`).
    auto ctx = mongoac_loop_ctx(&loop);
 
    auto const error = make_owning_ptr(mongoac_error_new(), &mongoac_error_destroy);
@@ -421,15 +421,14 @@ TEST_CASE("worker thread", "[examples][libuv]")
 
          auto &result = *static_cast<result_type *>(work.data.get());
 
-         // In this example, completion callbacks are always executed on the main thread, not on the worker thread.
+         // In this example, the completion callback is always executed synchronously on the main thread.
          CHECK(result.main_thread == std::this_thread::get_id());
 
-         // Therefore, synchronization not required.
+         // Therefore, thread-safety is not required.
          result.invoked += 1;
       };
 
-      // Return via non-owning reference to local `result`. Both `void*` in C or C++20 Coroutines would make this less
-      // awkward, but `std::shared_ptr<T>` helps to avoid the complexity of manual ref-counting in later examples.
+      // Return via non-owning reference to local `result`.
       ctx.queue(make_owning_ptr(mongoac_client_shutdown_async(ctx.client, ctx.error), &mongoac_future_destroy),
                 std::shared_ptr<result_type>(&result, noop_deleter),
                 on_shutdown);
@@ -439,6 +438,7 @@ TEST_CASE("worker thread", "[examples][libuv]")
       CHECK(result.invoked == 1);
    }
 
+   // Correctness check for equivalent benchmark.
    SECTION("100 sequential pings (sync)")
    {
       int count = 0;
@@ -452,10 +452,13 @@ TEST_CASE("worker thread", "[examples][libuv]")
       CHECK(count == 100);
    }
 
+   // Correctness check for equivalent benchmark.
    SECTION("100 concurrent pings (async)")
    {
       int count = 0;
 
+      // These examples use captureless lambdas (as function pointers) + `noexcept` to express C compatibility without
+      // requiring namespace-scoped functions that would reduce readability due to scoping and ordering.
       static constexpr auto on_ping = +[](mongoac_loop_ctx &ctx, mongoac_loop_ctx::work_type &work) noexcept {
          // Completion callback is only invoked when the future is ready.
          CHECK(mongoac_future_is_ready(work.future));
@@ -588,6 +591,8 @@ TEST_CASE("worker thread", "[examples][libuv]")
                FAIL_CHECK("update failed: invalid BSON reply");
                return;
             }
+
+            // Validation.
             {
                bson_iter_t iter = {};
                auto const matched =
@@ -641,6 +646,8 @@ TEST_CASE("worker thread", "[examples][libuv]")
                FAIL_CHECK("find failed: " << owning_string(mongoac_error_message(ctx.error)).view());
                return;
             }
+
+            // Validation.
             if (!reply_view.ptr) {
                FAIL_CHECK("find failed: document not found");
                return;
@@ -661,6 +668,8 @@ TEST_CASE("worker thread", "[examples][libuv]")
       };
 
       {
+         // This kind of manual setup would be unnecessary with C++20 Coroutines + `std::execution`, where the coroutine
+         // stack may be conveniently passed along via `std::coroutine_handle<>`.
          auto const pending = std::make_shared<int>(3);
          auto const oids = std::make_shared<std::array<bson_oid_t, 3>>();
 
@@ -720,7 +729,6 @@ TEST_CASE("worker thread", "[examples][libuv]")
          *static_cast<int *>(work.data.get()) += ping_ok(reply) ? 1 : 0;
       };
 
-
       for (auto n : {64, 128, 256, 512}) {
          DYNAMIC_SECTION("n=" << n)
          {
@@ -747,7 +755,7 @@ TEST_CASE("worker thread", "[examples][libuv]")
                             on_ping);
                }
 
-               ctx.run(); // No timeout for benchmarks; validate correctness first.
+               ctx.run(); // No timeout for benchmarks; validate correctness with `--skip-benchmarks` first.
 
                return count;
             };
