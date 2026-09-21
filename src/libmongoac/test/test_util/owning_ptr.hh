@@ -13,8 +13,8 @@ namespace test_util
 template <typename T, typename D = void(T *)> class owning_ptr
 {
  private:
-   T *_ptr;
-   D *_destroy;
+   T *_ptr = nullptr;
+   D *_destroy = nullptr;
 
  public:
    ~owning_ptr()
@@ -41,6 +41,8 @@ template <typename T, typename D = void(T *)> class owning_ptr
    owning_ptr(owning_ptr const &other) = delete;
    owning_ptr &
    operator=(owning_ptr const &other) = delete;
+
+   owning_ptr() = default;
 
    explicit owning_ptr(T *ptr, D *destroy) : _ptr{ptr}, _destroy{destroy}
    {
